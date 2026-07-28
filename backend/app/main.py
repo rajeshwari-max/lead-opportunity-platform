@@ -59,5 +59,10 @@ app.include_router(router, prefix=settings.api_prefix)
 # image) at "/". Registered after the API router so /api/* always wins over
 # the catch-all. html=True makes "/" resolve to static/index.html.
 _static_dir = Path(__file__).resolve().parent.parent / "static"
+import logging as _logging
+_boot_log = _logging.getLogger("scraper")
+_boot_log.warning("STATIC CHECK: dir=%s exists=%s is_dir=%s contents=%s",
+                   _static_dir, _static_dir.exists(), _static_dir.is_dir(),
+                   list(_static_dir.iterdir()) if _static_dir.is_dir() else "n/a")
 if _static_dir.is_dir():
     app.mount("/", StaticFiles(directory=str(_static_dir), html=True), name="dashboard")
