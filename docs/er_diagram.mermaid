@@ -1,0 +1,38 @@
+erDiagram
+    OPPORTUNITIES {
+        int id PK
+        string unique_id UK "sha256(title|org|deadline|url)"
+        text title
+        string organization
+        string country
+        string region
+        string funding_type
+        string sector
+        enum category "Grant|RFP|Tender|Proposal|Fellowship|Award|Challenge|Other"
+        date deadline
+        string website
+        text opportunity_url
+        text summary
+        string location
+        text eligibility
+        string funding_amount
+        enum status "Active|Expired"
+        string source_website
+        datetime date_scraped
+    }
+    SCRAPE_RUNS {
+        int id PK
+        string source_website
+        datetime started_at
+        datetime finished_at
+        int pages_scraped
+        int found
+        int saved
+        int skipped_expired
+        int errors
+        string status
+    }
+    OPPORTUNITIES_FTS {
+        rowid rowid FK "content=opportunities (FTS5 mirror via triggers)"
+    }
+    OPPORTUNITIES ||..|| OPPORTUNITIES_FTS : "full-text index"

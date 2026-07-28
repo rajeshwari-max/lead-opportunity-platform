@@ -1,0 +1,35 @@
+flowchart LR
+    subgraph Sources
+        NGO[NGOBOX]
+        DEV[DevNetJobsIndia]
+        FUT[Future: UNDP, UNICEF,\nWorld Bank, USAID…]
+    end
+
+    subgraph Backend [FastAPI Backend]
+        subgraph Scrapers [Scraper Plugins]
+            BS[BaseScraper\nretry · rate-limit · pagination]
+            S1[NGOBoxScraper]
+            S2[DevNetScraper]
+            REG[Plugin Registry]
+        end
+        SM[ScraperManager\nstart/pause/resume/stop\nprogress · live logs · ETA]
+        subgraph Pipeline
+            DP[Deadline Engine\nnormalize → drop expired]
+            CL[Classification Engine\nkeyword map, ML-ready]
+            DD[Deduplication\nSHA-256 fingerprint]
+        end
+        DB[(SQLite + FTS5)]
+        FS[Filter Service\nSQL filters + full-text search]
+        SCH[Scheduler\ndaily/weekly/monthly/cron]
+        API[REST API]
+    end
+
+    UI[React Dashboard\nTailwind · TanStack Table · Recharts]
+
+    NGO & DEV --> S1 & S2
+    S1 & S2 -.inherit.- BS
+    S1 & S2 --> REG --> SM
+    SM --> DP --> CL --> DD --> DB
+    SCH --> SM
+    DB --> FS --> API --> UI
+    UI -->|POST /scrape| API --> SM

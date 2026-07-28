@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 220 20% 97%;
+  --foreground: 224 30% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 224 30% 12%;
+  --muted: 220 14% 92%;
+  --muted-foreground: 224 10% 42%;
+  --border: 220 13% 88%;
+  --primary: 243 75% 59%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 173 80% 40%;
+}
+
+.dark {
+  --background: 228 22% 7%;
+  --foreground: 220 15% 92%;
+  --card: 228 20% 10%;
+  --card-foreground: 220 15% 92%;
+  --muted: 228 15% 16%;
+  --muted-foreground: 224 10% 62%;
+  --border: 228 14% 18%;
+  --primary: 243 85% 66%;
+  --primary-foreground: 0 0% 100%;
+  --accent: 173 70% 45%;
+}
+
+body {
+  @apply bg-background text-foreground antialiased;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { @apply bg-muted rounded-full; }

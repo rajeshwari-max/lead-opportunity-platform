@@ -1,0 +1,15 @@
+import { cn } from "@/lib/utils";
+import type { InputHTMLAttributes } from "react";
+
+export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      className={cn(
+        "h-9 w-full rounded-lg border border-border bg-transparent px-3 text-sm",
+        "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50",
+        className
+      )}
+      {...props}
+    />
+  );
+}

@@ -1,0 +1,24 @@
+services:
+  backend:
+    build: ./backend
+    volumes:
+      # Bind mount (not a named volume) so the existing local database and
+      # the already-authenticated DevelopmentAid browser profile travel with
+      # the project when it's copied to the server, instead of starting empty.
+      - ./backend/data:/app/data
+      - ./backend/logs:/app/logs
+    env_file:
+      - ./backend/.env
+    environment:
+      - LOP_DATABASE_URL=sqlite:////app/data/opportunities.db
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    restart: unless-stopped

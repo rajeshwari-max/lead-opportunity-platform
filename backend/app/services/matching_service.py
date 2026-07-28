@@ -1,0 +1,69 @@
+"""Matching Engine — finds active opportunities relevant to a team member.
+
+A member matches an opportunity when:
+  * any of their keywords appears in title/summary/vertical/eligibility (case-insensitive), AND
+  * the opportunity's category is in their category list (empty list = all categories), AND
+  * the opportunity belongs to one of their verticals (empty list = all verticals), AND
+  * it hasn't already been sent to them (SentLog), unless include_sent=True.
+"""
+from __future__ import annotations
+
+from datetime import date
+
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session
+
+from app.database.models import Category, Opportunity, SentLog, Status, TeamMember
+
+
+def _csv(value: str) -> list[str]:
+    return [v.strip() for v in (value or "").split(",") if v.strip()]
+
+
+class MatchingService:
+    def __init__(self, db: Session) -> None:
+        self.db = db
+
+    def matches_for(
+        self, member: TeamMember, include_sent: bool = False, limit: int = 100
+    ) -> list[Opportunity]:
+        stmt = select(Opportunity).where(
+            Opportunity.status == Status.ACTIVE,
+            or_(Opportunity.deadline >= date.today(), Opportunity.deadline.is_(None)),
+        )
+
+        keywords = _csv(member.keywords)
+        if keywords:
+            clauses = []
+            for kw in keywords:
+                like = f"%{kw.lower()}%"
+                clauses.append(func.lower(Opportunity.title).like(like))
+                clauses.append(func.lower(Opportunity.summary).like(like))
+                clauses.append(func.lower(Opportunity.vertical).like(like))
+                clauses.append(func.lower(Opportunity.eligibility).like(like))
+            stmt = stmt.where(or_(*clauses))
+
+        categories = _csv(member.categories)
+        if categories:
+            valid = [Category(c) for c in categories if c in Category._value2member_map_]
+            if valid:
+                stmt = stmt.where(Opportunity.category.in_(valid))
+
+        # Vertical routing: only email opportunities in the member's selected
+        # verticals (empty = all verticals, preserving pre-vertical behaviour).
+        verticals = _csv(getattr(member, "verticals", "") or "")
+        if verticals:
+            stmt = stmt.where(
+                or_(*[Opportunity.verticals.like(f"%{s}%") for s in verticals])
+            )
+
+        if not include_sent:
+            sent = select(SentLog.opportunity_id).where(SentLog.member_id == member.id)
+            stmt = stmt.where(Opportunity.id.not_in(sent))
+
+        stmt = stmt.order_by(Opportunity.deadline.asc()).limit(limit)
+        return list(self.db.execute(stmt).scalars().all())
+
+    def mark_sent(self, member: TeamMember, opportunities: list[Opportunity]) -> None:
+        for opp in opportunities:
+            self.db.add(SentLog(member_id=member.id, opportunity_id=opp.id))

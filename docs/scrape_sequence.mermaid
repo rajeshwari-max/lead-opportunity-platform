@@ -1,0 +1,21 @@
+sequenceDiagram
+    participant U as User (Dashboard)
+    participant A as FastAPI
+    participant M as ScraperManager
+    participant S as Scraper plugin
+    participant P as Pipeline
+    participant D as SQLite
+
+    U->>A: POST /scrape {sources}
+    A->>M: start()
+    M->>S: crawl() (one async task per source)
+    loop until pagination exhausted
+        S->>S: fetch page (retry ×3, rate-limited)
+        S->>M: batch of RawOpportunity
+        M->>P: normalize deadline → drop expired → classify → dedupe
+        P->>D: insert unique active records
+        M-->>A: progress, live logs, ETA
+        A-->>U: GET /progress (polled every 1.5s)
+    end
+    M-->>A: state=idle
+    U->>A: GET /opportunities?filters (instant, SQL only)
