@@ -13,7 +13,7 @@ interface ExpertRow {
   updated_at: string | null;
 }
 
-export function ExpertsCard() {
+export function ExpertsCard({ readOnly = false }: { readOnly?: boolean }) {
   const [rows, setRows] = useState<ExpertRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -83,7 +83,7 @@ export function ExpertsCard() {
         </Button>
       </CardHeader>
       <CardContent className="space-y-2">
-        {!connected && (
+        {!connected && !readOnly && (
           <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5">
             <p className="text-xs text-amber-500">
               Not connected to DevelopmentAid. Click below — a Chrome window opens,

@@ -9,7 +9,7 @@ import { VERTICALS, type TeamMember } from "@/lib/types";
 
 const emptyForm = { name: "", email: "", keywords: "", categories: "", verticals: "", auto_send: true, active: true };
 
-export function TeamPanel() {
+export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [matchCounts, setMatchCounts] = useState<Record<number, number>>({});
   const [emailConfigured, setEmailConfigured] = useState(true);
@@ -128,7 +128,7 @@ export function TeamPanel() {
         </Button>
       </CardHeader>
       <CardContent className="space-y-3">
-        {!emailConfigured && (
+        {!emailConfigured && !readOnly && (
           <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-400">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>

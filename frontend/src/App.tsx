@@ -72,18 +72,9 @@ export default function App() {
             <OpportunitiesTable data={data} loading={loading} filters={filters} onChange={setFilters} />
           </div>
           <div className="flex w-full flex-col gap-6 lg:w-80 lg:shrink-0">
-            {readOnly ? (
-              <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
-                This is a live read-only view. Scraper controls, team routing, and the
-                expert pool are managed from the primary server and aren't shown here.
-              </div>
-            ) : (
-              <>
-                <ScraperPanel sources={sources} progress={progress} />
-                <TeamPanel />
-                <ExpertsCard />
-              </>
-            )}
+            <ScraperPanel sources={sources} progress={progress} />
+            <TeamPanel readOnly={readOnly} />
+            <ExpertsCard readOnly={readOnly} />
           </div>
         </div>
       </main>
