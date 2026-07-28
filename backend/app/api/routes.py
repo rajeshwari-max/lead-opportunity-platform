@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.database.db import get_db
 from app.schemas.opportunity import (
     OpportunityFilters,
@@ -28,6 +29,17 @@ from app.services.scheduler import scheduler
 from app.services.scraper_manager import manager
 
 router = APIRouter()
+
+
+def require_writable() -> None:
+    """Blocks scraper/schedule control on the read-only cloud mirror (LOP_READ_ONLY=true)
+    — it has no DevelopmentAid login session and no persistent disk, so it must
+    only ever display a snapshot pushed from the primary machine."""
+    if settings.read_only:
+        raise HTTPException(
+            status_code=403,
+            detail="This is a read-only mirror. Scraper and schedule controls only work on the primary server.",
+        )
 
 
 def filters_dep(
@@ -108,7 +120,7 @@ def export_xlsx(
 
 
 # ---------------------------------------------------------------------- scraping
-@router.post("/scrape", status_code=202)
+@router.post("/scrape", status_code=202, dependencies=[Depends(require_writable)])
 async def start_scrape(req: ScrapeRequest) -> dict[str, str]:
     try:
         await manager.start(req.sources or None, req.verticals or None)
@@ -119,19 +131,19 @@ async def start_scrape(req: ScrapeRequest) -> dict[str, str]:
     return {"status": "started"}
 
 
-@router.post("/scrape/pause")
+@router.post("/scrape/pause", dependencies=[Depends(require_writable)])
 def pause_scrape() -> dict[str, str]:
     manager.pause()
     return {"status": manager.state}
 
 
-@router.post("/scrape/resume")
+@router.post("/scrape/resume", dependencies=[Depends(require_writable)])
 def resume_scrape() -> dict[str, str]:
     manager.resume()
     return {"status": manager.state}
 
 
-@router.post("/stop")
+@router.post("/stop", dependencies=[Depends(require_writable)])
 async def stop_scrape() -> dict[str, str]:
     await manager.stop()
     return {"status": "stopping"}
@@ -158,7 +170,7 @@ def get_schedule() -> ScheduleStatusOut:
     return scheduler.status()
 
 
-@router.put("/schedule", response_model=ScheduleStatusOut)
+@router.put("/schedule", response_model=ScheduleStatusOut, dependencies=[Depends(require_writable)])
 def set_schedule(req: ScheduleRequest) -> ScheduleStatusOut:
     try:
         scheduler.configure(req)

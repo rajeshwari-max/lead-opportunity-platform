@@ -57,6 +57,12 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
+    # When true (set via LOP_READ_ONLY=true), scrape/schedule endpoints are
+    # disabled. Used for the free cloud mirror: it has no DevelopmentAid login
+    # session and no persistent disk, so it only ever displays a data snapshot
+    # pushed from the primary machine — it must never attempt to scrape itself.
+    read_only: bool = False
+
     model_config = SettingsConfigDict(env_prefix="LOP_", env_file=".env", extra="ignore")
 
 

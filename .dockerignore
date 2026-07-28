@@ -1,0 +1,12 @@
+.git
+**/node_modules
+**/__pycache__
+*.pyc
+backend/data
+backend/logs
+backend/.env
+frontend/dist
+*.db-wal
+*.db-shm
+.fuse_hidden*
+Lead_Scanning_Platform_Note*.docx

@@ -1,11 +1,18 @@
 """FastAPI application entrypoint.
 
 Run:  uvicorn app.main:app --reload --port 8000
+
+In production (Docker), the built frontend lands in ./static next to this
+package and is served directly by this app — one process, one port, one URL.
+In local dev, ./static doesn't exist (frontend runs separately via `npm run
+dev` + the Vite proxy), so the mount below is skipped automatically.
 """
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 import app.scrapers  # noqa: F401  (imports register all scraper plugins)
 from app.api.routes import router
@@ -47,3 +54,10 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix=settings.api_prefix)
+
+# Serve the built dashboard (frontend/dist, copied to ./static in the Docker
+# image) at "/". Registered after the API router so /api/* always wins over
+# the catch-all. html=True makes "/" resolve to static/index.html.
+_static_dir = Path(__file__).resolve().parent.parent / "static"
+if _static_dir.is_dir():
+    app.mount("/", StaticFiles(directory=str(_static_dir), html=True), name="dashboard")

@@ -1,6 +1,8 @@
 services:
-  backend:
-    build: ./backend
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
     volumes:
       # Bind mount (not a named volume) so the existing local database and
       # the already-authenticated DevelopmentAid browser profile travel with
@@ -12,13 +14,5 @@ services:
     environment:
       - LOP_DATABASE_URL=sqlite:////app/data/opportunities.db
     ports:
-      - "8000:8000"
-    restart: unless-stopped
-
-  frontend:
-    build: ./frontend
-    depends_on:
-      - backend
-    ports:
-      - "80:80"
+      - "80:8000"
     restart: unless-stopped
