@@ -28,6 +28,7 @@ async function get<T>(path: string): Promise<T> {
 export const api = {
   opportunities: (f: FilterState) => get<Paginated>(`/opportunities?${filterParams(f)}`),
   facets: () => get<Facets>("/filters"),
+  config: () => get<{ read_only: boolean }>("/config"),
   /** Stats honour the active filters — cards/charts/deadlines follow the selection. */
   stats: (f?: FilterState) => get<Stats>(`/stats${f ? `?${filterParams(f)}` : ""}`),
   sources: () => get<SourceInfo[]>("/sources"),

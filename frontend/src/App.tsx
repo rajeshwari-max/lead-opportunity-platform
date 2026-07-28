@@ -8,6 +8,7 @@ import { ScraperPanel } from "@/components/ScraperPanel";
 import { StatCards } from "@/components/StatCards";
 import { TeamPanel } from "@/components/TeamPanel";
 import { useDashboardData, useOpportunities, useScrapeProgress } from "@/hooks/useApi";
+import { api } from "@/lib/api";
 import { emptyFilters, type FilterState } from "@/lib/types";
 
 const FILTERS_KEY = "lop-filters";
@@ -26,6 +27,18 @@ function loadFilters(): FilterState {
 export default function App() {
   const [filters, setFilters] = useState<FilterState>(loadFilters);
   const [refreshKey, setRefreshKey] = useState(0);
+  // On the read-only cloud mirror (no scraper login session), the admin panels
+  // (scraper controls, team routing, expert pool connect) don't function —
+  // hide them instead of showing viewers "not configured" / "connect account"
+  // warnings that look like something is broken.
+  const [readOnly, setReadOnly] = useState(false);
+
+  useEffect(() => {
+    api
+      .config()
+      .then((c) => setReadOnly(c.read_only))
+      .catch(() => setReadOnly(false));
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(FILTERS_KEY, JSON.stringify(filters));
@@ -59,9 +72,18 @@ export default function App() {
             <OpportunitiesTable data={data} loading={loading} filters={filters} onChange={setFilters} />
           </div>
           <div className="flex w-full flex-col gap-6 lg:w-80 lg:shrink-0">
-            <ScraperPanel sources={sources} progress={progress} />
-            <TeamPanel />
-            <ExpertsCard />
+            {readOnly ? (
+              <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+                This is a live read-only view. Scraper controls, team routing, and the
+                expert pool are managed from the primary server and aren't shown here.
+              </div>
+            ) : (
+              <>
+                <ScraperPanel sources={sources} progress={progress} />
+                <TeamPanel />
+                <ExpertsCard />
+              </>
+            )}
           </div>
         </div>
       </main>

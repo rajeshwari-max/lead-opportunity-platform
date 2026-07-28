@@ -31,6 +31,15 @@ from app.services.scraper_manager import manager
 router = APIRouter()
 
 
+@router.get("/config")
+def get_config() -> dict[str, bool]:
+    """Lets the frontend hide admin-only panels (scraper controls, team routing,
+    expert pool connect) on the read-only cloud mirror — those features don't
+    work there and showing their "not configured" warnings to outside viewers
+    looks broken rather than intentional."""
+    return {"read_only": settings.read_only}
+
+
 def require_writable() -> None:
     """Blocks scraper/schedule control on the read-only cloud mirror (LOP_READ_ONLY=true)
     — it has no DevelopmentAid login session and no persistent disk, so it must
