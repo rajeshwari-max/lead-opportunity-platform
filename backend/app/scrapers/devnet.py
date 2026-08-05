@@ -16,6 +16,8 @@ from app.database.models import Category
 from app.schemas.opportunity import RawOpportunity
 from app.scrapers.base_scraper import BaseScraper, PageRequest
 from app.scrapers.registry import register
+from app.services.amounts import extract_amount
+from app.services.organization import extract_organization
 
 _JOB_ID = re.compile(r"joblogos/(\d+)\.\w{3,4}", re.IGNORECASE)
 _JOB_ID_HREF = re.compile(r"job_id=(\d+)", re.IGNORECASE)
@@ -30,6 +32,9 @@ _HIDDEN_FIELDS = ("__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION")
 class DevNetScraper(BaseScraper):
     name = "devnet"
     display_name = "DevNetJobsIndia"
+    # This scraper already had a parse_detail() implementation, but the crawl
+    # engine never called it — the hook was dead code. It runs now.
+    enrich_details = True
     website = "https://www.devnetjobsindia.org"
     start_url = "https://www.devnetjobsindia.org/rfp_assignments.aspx"
 
@@ -128,6 +133,12 @@ class DevNetScraper(BaseScraper):
         body = max(paragraphs, key=len, default="")
         if len(body) > 120 and not item.summary:
             item.summary = body[:1000]
+        # The detail page is also where the budget/organisation usually appear.
+        page_text = soup.get_text(" ", strip=True)
+        if not item.funding_amount:
+            item.funding_amount = extract_amount(page_text)
+        if not item.organization:
+            item.organization = extract_organization(page_text, item.title)
         return item
 
     # ---------------------------------------------------------------- helpers

@@ -23,6 +23,15 @@ _DEADLINE = re.compile(
     r"deadline\s*:?\s*([0-3]?\d[-/ ]\w{3,9}[-/ ]\d{2,4})", re.IGNORECASE
 )
 _COUNTRY_IN_TITLE = re.compile(r"\(([^)]+)\)\s*$")
+# The trailing parenthetical is a country about as often as it is the grant size
+# — "Program in the US ($10,000)". Anything that looks like money, a year or a
+# round number is rejected so it can't end up in the Country filter.
+_NOT_A_COUNTRY = re.compile(
+    r"[$€£₹¥%]|\b(usd|eur|gbp|inr|chf|aud|cad|nzd|zar)\b|\d{3,}|"
+    r"^\d{4}(\s*[-–/]\s*\d{2,4})?$|^up\s+to\b|"
+    r"\b(round|cohort|window|cycle|phase|edition|batch|deadline|apply|open)\b",
+    re.IGNORECASE,
+)
 _PAGE_PARAM = re.compile(r"[?&]page=(\d+)")
 
 _VERTICAL_MAP = {
@@ -48,6 +57,16 @@ _VERTICAL_MAP = {
 class FundsForNGOsScraper(BaseScraper):
     name = "fundsforngos"
     display_name = "FundsForNGOs"
+    # Listing text names the funder/amount only sometimes; the WordPress post
+    # behind each link is plain HTML and usually states both. Only rows still
+    # missing one are fetched.
+    enrich_details = True
+    # 0 = walk to the end of the archive instead of stopping after 3 pages with
+    # nothing new. This source is a clean JSON API (?page=N, 50 posts a page) and
+    # terminates by itself on an empty page, but the default heuristic meant a
+    # re-run quit inside the already-seen prefix and never reached deeper posts —
+    # it had never gone past page 36 in 15 runs.
+    stale_page_streak_override = 0
     website = "https://www2.fundsforngos.org"
     # per_page=50 keeps each API response ~2.5MB instead of ~5MB — the larger
     # payload intermittently hit the 30s timeout / rate limiter on repeat runs.
@@ -78,7 +97,7 @@ class FundsForNGOsScraper(BaseScraper):
 
             country = ""
             m = _COUNTRY_IN_TITLE.search(title)
-            if m and len(m.group(1)) < 40:
+            if m and len(m.group(1)) < 40 and not _NOT_A_COUNTRY.search(m.group(1)):
                 country = m.group(1).strip()
 
             vertical = ""

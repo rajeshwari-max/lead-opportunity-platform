@@ -1,4 +1,4 @@
-import type { Facets, FilterState, Opportunity, Paginated, Progress, ScheduleStatus, SourceInfo, Stats, TeamMember } from "./types";
+import type { DigestRunResult, EmailSettings, Facets, FilterState, Opportunity, Paginated, Progress, ScheduleStatus, SourceInfo, Stats, TeamMember } from "./types";
 
 const BASE = "/api";
 
@@ -12,6 +12,11 @@ export function filterParams(f: FilterState): URLSearchParams {
   if (f.search) p.set("search", f.search);
   if (f.deadline_before) p.set("deadline_before", f.deadline_before);
   if (f.deadline_after) p.set("deadline_after", f.deadline_after);
+  if (f.archived) p.set("archived", "true");
+  if (f.new_today) p.set("new_today", "true");
+  if (f.approved) p.set("approved", "true");
+  if (f.work_type) p.set("work_type", f.work_type);
+  if (f.study_type) p.set("study_type", f.study_type);
   p.set("page", String(f.page));
   p.set("page_size", String(f.page_size));
   p.set("sort_by", f.sort_by);
@@ -39,6 +44,16 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sources, verticals }),
     }),
+  /** Human sign-off on a row. 403 on the read-only mirror, by design. */
+  approve: async (id: number, approved: boolean): Promise<Opportunity> => {
+    const res = await fetch(`${BASE}/opportunities/${id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ approved }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json() as Promise<Opportunity>;
+  },
   pause: () => fetch(`${BASE}/scrape/pause`, { method: "POST" }),
   resume: () => fetch(`${BASE}/scrape/resume`, { method: "POST" }),
   stop: () => fetch(`${BASE}/stop`, { method: "POST" }),
@@ -69,6 +84,25 @@ export const api = {
     }),
   deleteMember: (id: number) => fetch(`${BASE}/team/${id}`, { method: "DELETE" }),
   memberMatches: (id: number) => get<Opportunity[]>(`/team/${id}/matches`),
-  sendToMember: (id: number) => fetch(`${BASE}/team/${id}/send`, { method: "POST" }),
+  /** resend=true reissues everything currently matching, including items
+   *  already sent — the normal send skips those and would find nothing. */
+  sendToMember: (id: number, resend = false) =>
+    fetch(`${BASE}/team/${id}/send${resend ? "?resend=true" : ""}`, { method: "POST" }),
   emailStatus: () => get<{ configured: boolean }>("/email/status"),
+  emailSettings: () => get<EmailSettings>("/email/settings"),
+  updateEmailSettings: async (body: Partial<EmailSettings>): Promise<EmailSettings> => {
+    const res = await fetch(`${BASE}/email/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json() as Promise<EmailSettings>;
+  },
+  /** Fire the daily digest + reminders now, to prove the automation works. */
+  runDigestNow: async (): Promise<DigestRunResult> => {
+    const res = await fetch(`${BASE}/email/run-now`, { method: "POST" });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json() as Promise<DigestRunResult>;
+  },
 };

@@ -29,11 +29,18 @@ const fmtWhen = (iso: string | null | undefined): string =>
 
 export function ScraperPanel({ sources, progress }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
+  // The source list is now ~80 sites, so it needs filtering to stay usable.
+  const [siteQuery, setSiteQuery] = useState("");
   const [scrapeVerticals, setScrapeVerticals] = useState<string[]>([]);
   const [schedule, setSchedule] = useState<ScheduleStatus | null>(null);
   const [cron, setCron] = useState("0 2 * * *");
   const active = progress != null && progress.state !== "idle";
   const allSelected = sources.length > 0 && selected.length === sources.length;
+  const sourceStates = Object.values(progress?.sources ?? {});
+  const totalCount = sourceStates.length;
+  const doneCount = sourceStates.filter(
+    (s) => s.status === "completed" || s.status === "failed" || s.status === "stopped",
+  ).length;
 
   // Default: all websites ticked once the source list loads
   useEffect(() => {
@@ -63,6 +70,11 @@ export function ScraperPanel({ sources, progress }: Props) {
   const toggle = (name: string, checked: boolean) =>
     setSelected((prev) => (checked ? [...prev, name] : prev.filter((n) => n !== name)));
 
+  const q = siteQuery.trim().toLowerCase();
+  const visibleSources = q
+    ? sources.filter((s) => s.display_name.toLowerCase().includes(q))
+    : sources;
+
   const toggleVertical = (s: string, checked: boolean) =>
     setScrapeVerticals((prev) => (checked ? [...prev, s] : prev.filter((x) => x !== s)));
 
@@ -82,21 +94,43 @@ export function ScraperPanel({ sources, progress }: Props) {
           <Terminal className="h-4 w-4" /> Scraper Control
         </CardTitle>
         <span className={`flex items-center gap-1.5 text-xs font-medium ${active ? "text-emerald-500" : "text-muted-foreground"}`}>
-          <CircleDot className="h-3 w-3" />
-          {progress?.state ?? "idle"}
+          <CircleDot className={`h-3 w-3 ${active ? "animate-pulse" : ""}`} />
+          {/* Show how far along it is, not just "running" — with dozens of
+              sources a bare status word gives no sense of progress. */}
+          {active
+            ? `${progress!.state} · ${doneCount}/${totalCount}`
+            : progress?.state ?? "idle"}
         </span>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Website selection */}
+        {/* Website selection — searchable and height-capped: the list grew from
+            6 to ~80 sources, which is far too long to render in full. */}
         <div>
-          <p className="mb-1 text-xs font-semibold text-muted-foreground">Websites</p>
+          <p className="mb-1 flex items-center justify-between text-xs font-semibold text-muted-foreground">
+            <span>Websites</span>
+            <span className="font-normal">{selected.length}/{sources.length} selected</span>
+          </p>
+          <input
+            type="search"
+            value={siteQuery}
+            onChange={(e) => setSiteQuery(e.target.value)}
+            placeholder="Search websites…"
+            className="mb-1.5 w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs outline-none focus:border-primary"
+          />
           <Checkbox label="Select All" checked={allSelected}
                     onChange={(c) => setSelected(c ? sources.map((s) => s.name) : [])} />
-          {sources.map((s) => (
-            <Checkbox key={s.name} label={s.display_name}
-                      checked={selected.includes(s.name)}
-                      onChange={(c) => toggle(s.name, c)} />
-          ))}
+          <div className="max-h-44 space-y-0.5 overflow-y-auto pr-1">
+            {visibleSources.map((s) => (
+              <Checkbox key={s.name} label={s.display_name}
+                        checked={selected.includes(s.name)}
+                        onChange={(c) => toggle(s.name, c)} />
+            ))}
+            {visibleSources.length === 0 && (
+              <p className="px-1 py-2 text-xs text-muted-foreground">
+                No website matches “{siteQuery}”.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Vertical-aware scraping: only keep opportunities in the ticked verticals */}
@@ -105,7 +139,10 @@ export function ScraperPanel({ sources, progress }: Props) {
             <Layers className="h-3.5 w-3.5" /> Verticals
             <span className="font-normal">(none = all)</span>
           </p>
-          <div className="max-h-36 space-y-0.5 overflow-y-auto pr-1">
+          {/* No height cap: the list is a fixed six items, and max-h-36 was
+              cutting the last one ("Innovative Finance") off behind a scroll
+              that read as the option simply not existing. */}
+          <div className="space-y-0.5">
             {VERTICALS.map((s) => (
               <Checkbox key={s} label={s}
                         checked={scrapeVerticals.includes(s)}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, Loader2, Mail, Pencil, Plus, Send, Trash2, Users } from "lucide-react";
+import { AlertTriangle, Loader2, Mail, Pencil, Plus, RotateCcw, Send, Trash2, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -84,15 +84,24 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
     load();
   };
 
-  const sendNow = async (m: TeamMember) => {
+  const sendNow = async (m: TeamMember, resend = false) => {
+    // Resending mails everything currently matching, not just what's new, so
+    // it is worth confirming — the recipient sees a full digest again.
+    if (resend && !window.confirm(
+      `Resend the full current digest to ${m.name} (${m.email})?\n\n` +
+      "This includes opportunities already sent before, so they receive the " +
+      "complete up-to-date list rather than only what's new."
+    )) return;
+
     setSending(m.id);
     try {
-      const res = await api.sendToMember(m.id);
+      const res = await api.sendToMember(m.id, resend);
       const body = await res.json();
       if (res.ok) {
+        const verb = body.resent ? "Resent" : "Sent";
         notify("ok", body.sent > 0
-          ? `Sent ${body.sent} opportunit${body.sent === 1 ? "y" : "ies"} to ${m.name}`
-          : `${m.name} has no new matches — nothing sent`);
+          ? `${verb} ${body.sent} opportunit${body.sent === 1 ? "y" : "ies"} to ${m.name}`
+          : body.detail ?? `${m.name} has no new matches — nothing sent`);
         load();
       } else {
         notify("err", body.detail ?? "Send failed");
@@ -202,35 +211,72 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
           </p>
         )}
         {members.map((m) => (
-          <div key={m.id} className="flex items-center gap-2 rounded-lg border border-border p-2.5">
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{m.name}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                <Mail className="mr-1 inline h-3 w-3" />
-                {m.email}
-                {m.keywords && <span className="ml-2 text-primary">· {m.keywords}</span>}
-                {m.categories && <span className="ml-1">· {m.categories}</span>}
-                {m.verticals && <span className="ml-1 text-accent">· {m.verticals}</span>}
-              </p>
+          // Two rows, not one. Four buttons and a count chip on a single line
+          // left the name with no width at all in this sidebar — every member
+          // rendered as an anonymous row of controls. Identity goes first and
+          // gets the full width; the controls sit underneath and wrap.
+          <div key={m.id} className="space-y-2 rounded-lg border border-border p-2.5">
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium" title={m.name}>{m.name}</p>
+                <p className="truncate text-xs text-muted-foreground" title={m.email}>
+                  <Mail className="mr-1 inline h-3 w-3" />
+                  {m.email}
+                </p>
+                {(m.keywords || m.categories || m.verticals) && (
+                  <p className="truncate text-xs text-muted-foreground">
+                    {m.keywords && <span className="text-primary">{m.keywords}</span>}
+                    {m.categories && <span className="ml-1">· {m.categories}</span>}
+                    {m.verticals && <span className="ml-1 text-accent">· {m.verticals}</span>}
+                  </p>
+                )}
+              </div>
+              {/* Whether the automatic daily email includes this person. Off
+                  means they only ever receive a manual Send. */}
+              <button
+                onClick={() => api.updateMember(m.id, { ...m, auto_send: !m.auto_send }).then(load)}
+                title={m.auto_send
+                  ? "Included in the automatic daily email — click to make manual-only"
+                  : "Manual sends only — click to include in the automatic daily email"}
+                className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                  m.auto_send ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}`}
+              >
+                {m.auto_send ? "Auto" : "Manual"}
+              </button>
+              {matchCounts[m.id] != null && (
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                  matchCounts[m.id] > 0 ? "bg-emerald-500/15 text-emerald-400" : "bg-muted text-muted-foreground"}`}>
+                  {matchCounts[m.id]} new
+                </span>
+              )}
             </div>
-            {matchCounts[m.id] != null && (
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                matchCounts[m.id] > 0 ? "bg-emerald-500/15 text-emerald-400" : "bg-muted text-muted-foreground"}`}>
-                {matchCounts[m.id]} new
-              </span>
-            )}
-            <Button size="sm" disabled={sending === m.id || !emailConfigured}
-                    title={emailConfigured ? `Email new matches to ${m.name}` : "Configure SMTP first"}
-                    onClick={() => sendNow(m)}>
-              {sending === m.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-              Send
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => startEdit(m)} title="Edit member">
-              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => remove(m)} title="Remove member">
-              <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
-            </Button>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button size="sm" disabled={sending === m.id || !emailConfigured}
+                      title={emailConfigured ? `Email new matches to ${m.name}` : "Configure SMTP first"}
+                      onClick={() => sendNow(m)}>
+                {sending === m.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                Send
+              </Button>
+              {/* Send only ever mails what's new. Once someone has received an
+                  opportunity it is skipped forever, so an improved email could
+                  never reach them without this. */}
+              <Button size="sm" variant="outline" disabled={sending === m.id || !emailConfigured}
+                      title={emailConfigured
+                        ? `Resend the full current digest to ${m.name}, including items already sent`
+                        : "Configure SMTP first"}
+                      onClick={() => sendNow(m, true)}>
+                <RotateCcw className="h-3.5 w-3.5" />
+                Resend
+              </Button>
+              <div className="ml-auto flex items-center gap-1">
+                <Button size="sm" variant="ghost" onClick={() => startEdit(m)} title="Edit member">
+                  <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => remove(m)} title="Remove member">
+                  <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
+                </Button>
+              </div>
+            </div>
           </div>
         ))}
 

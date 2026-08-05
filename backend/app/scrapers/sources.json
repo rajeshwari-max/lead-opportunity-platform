@@ -1,0 +1,428 @@
+[
+  {
+    "name": "donordatabase_org",
+    "display_name": "DonorDatabase.org",
+    "url": "https://www.donordatabase.org/index.php",
+    "website": "https://donordatabase.org"
+  },
+  {
+    "name": "devex",
+    "display_name": "Devex",
+    "url": "https://www.devex.com/funding/r",
+    "website": "https://devex.com"
+  },
+  {
+    "name": "triple_funds",
+    "display_name": "Triple Funds",
+    "url": "https://triple-funds.com/",
+    "website": "https://triple-funds.com"
+  },
+  {
+    "name": "indev_jobs",
+    "display_name": "Indev Jobs",
+    "url": "https://indevjobs.org/funding",
+    "website": "https://indevjobs.org"
+  },
+  {
+    "name": "charity_excellence_framework",
+    "display_name": "Charity Excellence Framework",
+    "url": "https://www.charityexcellence.co.uk/?s=grants",
+    "website": "https://charityexcellence.co.uk"
+  },
+  {
+    "name": "helmsley_charitable_trust",
+    "display_name": "Helmsley Charitable Trust",
+    "url": "https://helmsleytrust.org/",
+    "website": "https://helmsleytrust.org"
+  },
+  {
+    "name": "macarthur_foundation",
+    "display_name": "Macarthur Foundation",
+    "url": "https://www.macfound.org/grants/",
+    "website": "https://macfound.org"
+  },
+  {
+    "name": "woodcock_foundation",
+    "display_name": "Woodcock Foundation",
+    "url": "https://woodcockfdn.org/",
+    "website": "https://woodcockfdn.org"
+  },
+  {
+    "name": "pershing_square_foundation",
+    "display_name": "Pershing Square Foundation",
+    "url": "https://pershingsquarephilanthropies.org/initiatives/grants?grants",
+    "website": "https://pershingsquarephilanthropies.org"
+  },
+  {
+    "name": "ikea_foundation",
+    "display_name": "IKEA Foundation",
+    "url": "https://ikeafoundation.org/grants?partner=31472",
+    "website": "https://ikeafoundation.org"
+  },
+  {
+    "name": "hewlett_foundation",
+    "display_name": "Hewlett Foundation",
+    "url": "https://hewlett.org/grants/",
+    "website": "https://hewlett.org"
+  },
+  {
+    "name": "carnegie_foundation",
+    "display_name": "Carnegie Foundation",
+    "url": "https://carnegie.org/grants/",
+    "website": "https://carnegie.org"
+  },
+  {
+    "name": "stavros_niarchos_foundation_snf",
+    "display_name": "Stavros Niarchos Foundation (SNF)",
+    "url": "https://www.snf.org/en/search-results/?page=1&cat=grant&map=undefined",
+    "website": "https://snf.org"
+  },
+  {
+    "name": "alliance_for_health_policy_systems_resea",
+    "display_name": "Alliance for Health Policy & Systems Research",
+    "url": "https://ahpsr.who.int/funding-opportunities",
+    "website": "https://ahpsr.who.int"
+  },
+  {
+    "name": "goldman_sachs_foundation",
+    "display_name": "Goldman Sachs Foundation",
+    "url": "https://www.goldmansachs.com/search?query=grants",
+    "website": "https://goldmansachs.com"
+  },
+  {
+    "name": "ty_danjuma_foundation",
+    "display_name": "TY Danjuma Foundation",
+    "url": "https://tydanjumafoundation.org/grantmaking/discretionary-grants/",
+    "website": "https://tydanjumafoundation.org"
+  },
+  {
+    "name": "wellcome_trust",
+    "display_name": "Wellcome Trust",
+    "url": "https://wellcome.org/research-funding/schemes",
+    "website": "https://wellcome.org"
+  },
+  {
+    "name": "doen_foundation",
+    "display_name": "Doen Foundation",
+    "url": "https://www.doen.nl/en/?s=grants",
+    "website": "https://doen.nl"
+  },
+  {
+    "name": "clinton_health_access_initiative",
+    "display_name": "Clinton Health Access Initiative",
+    "url": "https://www.clintonhealthaccess.org/resource-center/?_sft_category=rfp&sort_order=date+desc",
+    "website": "https://clintonhealthaccess.org"
+  },
+  {
+    "name": "better_cotton",
+    "display_name": "Better Cotton",
+    "url": "https://bettercotton.org/requests-for-proposals/",
+    "website": "https://bettercotton.org"
+  },
+  {
+    "name": "merck_family_foundation",
+    "display_name": "Merck Family Foundation",
+    "url": "https://www.merck-family-foundation.com/en/proposal/",
+    "website": "https://merck-family-foundation.com"
+  },
+  {
+    "name": "clean_cooking_alliance",
+    "display_name": "Clean Cooking Alliance",
+    "url": "https://cleancooking.org/funding-opportunities",
+    "website": "https://cleancooking.org"
+  },
+  {
+    "name": "clean_air_fund",
+    "display_name": "Clean Air Fund",
+    "url": "https://www.cleanairfund.org/what-we-do/our-grants/",
+    "website": "https://cleanairfund.org"
+  },
+  {
+    "name": "mcknight_foundation",
+    "display_name": "McKnight Foundation",
+    "url": "https://www.mcknight.org/grants/search-our-grants/",
+    "website": "https://mcknight.org"
+  },
+  {
+    "name": "rockefeller_foundation",
+    "display_name": "Rockefeller Foundation",
+    "url": "https://www.rockefellerfoundation.org/our-grants/",
+    "website": "https://rockefellerfoundation.org"
+  },
+  {
+    "name": "ea_funds",
+    "display_name": "EA Funds",
+    "url": "https://funds.effectivealtruism.org/grants",
+    "website": "https://funds.effectivealtruism.org"
+  },
+  {
+    "name": "tawingo_fund",
+    "display_name": "Tawingo Fund",
+    "url": "https://www.tawingofund.org/grantees",
+    "website": "https://tawingofund.org"
+  },
+  {
+    "name": "grantmakers_community_project",
+    "display_name": "Grantmakers Community Project",
+    "url": "https://www.grantmakers.io/",
+    "website": "https://grantmakers.io"
+  },
+  {
+    "name": "fidelity_charitable",
+    "display_name": "Fidelity Charitable",
+    "url": "https://www.fidelitycharitable.org/",
+    "website": "https://fidelitycharitable.org"
+  },
+  {
+    "name": "cjrf",
+    "display_name": "CJRF",
+    "url": "https://cjrfund.org/our-grants/",
+    "website": "https://cjrfund.org"
+  },
+  {
+    "name": "women_strong_international",
+    "display_name": "Women Strong International",
+    "url": "https://www.womenstrong.org/work/grantmaking/",
+    "website": "https://womenstrong.org"
+  },
+  {
+    "name": "silicon_valley_community_foundation",
+    "display_name": "Silicon Valley Community Foundation",
+    "url": "https://www.svcf.org/search/results?q=grants",
+    "website": "https://svcf.org"
+  },
+  {
+    "name": "national_institutes_of_health",
+    "display_name": "National Institutes of Health",
+    "url": "https://grants.nih.gov/funding",
+    "website": "https://grants.nih.gov"
+  },
+  {
+    "name": "fogarty_international_center",
+    "display_name": "Fogarty International Center",
+    "url": "https://www.fic.nih.gov/Grants/Pages/default.aspx",
+    "website": "https://fic.nih.gov"
+  },
+  {
+    "name": "pfizer_foundation",
+    "display_name": "Pfizer Foundation",
+    "url": "https://www.pfizer.com/about/programs-policies/grants/competitive-grants",
+    "website": "https://pfizer.com"
+  },
+  {
+    "name": "the_agency_fund",
+    "display_name": "The Agency Fund",
+    "url": "https://www.agency.fund/past-calls",
+    "website": "https://agency.fund"
+  },
+  {
+    "name": "audacious_project",
+    "display_name": "Audacious Project",
+    "url": "https://www.audaciousproject.org/grantees",
+    "website": "https://audaciousproject.org"
+  },
+  {
+    "name": "veddis_foundation",
+    "display_name": "Veddis Foundation",
+    "url": "https://veddis.org/catalytic-grants/",
+    "website": "https://veddis.org"
+  },
+  {
+    "name": "european_union",
+    "display_name": "European Union",
+    "url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/calls-for-proposals",
+    "website": "https://ec.europa.eu"
+  },
+  {
+    "name": "sdg_impact_finance_initiative",
+    "display_name": "SDG Impact Finance Initiative",
+    "url": "https://www.sdgimpactfinance.org/",
+    "website": "https://sdgimpactfinance.org"
+  },
+  {
+    "name": "fcdo",
+    "display_name": "FCDO",
+    "url": "https://www.gov.uk/international-development-funding?fund_state%5B%5D=open&location%5B%5D=india&eligible_entities%5B%5D=non-governmental-organisations&eligible_entities%5B%5D=organisations-lmic",
+    "website": "https://gov.uk"
+  },
+  {
+    "name": "together_women_rise",
+    "display_name": "Together Women Rise",
+    "url": "https://togetherwomenrise.org/featured-grant-guidelines/",
+    "website": "https://togetherwomenrise.org"
+  },
+  {
+    "name": "gadfly_project",
+    "display_name": "Gadfly Project",
+    "url": "http://www.thegadflyproject.org/grants.html",
+    "website": "https://thegadflyproject.org"
+  },
+  {
+    "name": "afd",
+    "display_name": "AFD",
+    "url": "https://www.afd.fr/fr/appels-a-projets/liste?",
+    "website": "https://afd.fr"
+  },
+  {
+    "name": "we4f",
+    "display_name": "WE4F",
+    "url": "https://we4f.org/opportunities",
+    "website": "https://we4f.org"
+  },
+  {
+    "name": "icnl",
+    "display_name": "ICNL",
+    "url": "https://www.icnl.org/work-with-us/grants-fellowships",
+    "website": "https://icnl.org"
+  },
+  {
+    "name": "environmental_research_education_foundat",
+    "display_name": "Environmental Research & Education Foundation",
+    "url": "https://erefdn.org/research-grants/",
+    "website": "https://erefdn.org"
+  },
+  {
+    "name": "global_partnership_for_social_accountabi",
+    "display_name": "Global Partnership for Social Accountability",
+    "url": "https://thegpsa.org/grant-making/grant-selection-process/",
+    "website": "https://thegpsa.org"
+  },
+  {
+    "name": "global_agriculture_and_food_safety_progr",
+    "display_name": "Global Agriculture and Food Safety Program",
+    "url": "https://www.gafspfund.org/call-proposals",
+    "website": "https://gafspfund.org"
+  },
+  {
+    "name": "jpiamr",
+    "display_name": "JPIAMR",
+    "url": "https://jpiamr.eu/?s=grants",
+    "website": "https://jpiamr.eu"
+  },
+  {
+    "name": "national_institute_of_health_and_care_re",
+    "display_name": "National Institute of Health and Care Research",
+    "url": "https://www.nihr.ac.uk/funding-opportunities",
+    "website": "https://nihr.ac.uk"
+  },
+  {
+    "name": "innovations_for_poverty_action",
+    "display_name": "Innovations for Poverty Action",
+    "url": "https://poverty-action.org/open-funding-opportunities",
+    "website": "https://poverty-action.org"
+  },
+  {
+    "name": "j_pal",
+    "display_name": "J-PAL",
+    "url": "https://www.povertyactionlab.org/",
+    "website": "https://povertyactionlab.org"
+  },
+  {
+    "name": "foundation_for_food_agriculture_research",
+    "display_name": "Foundation for Food & Agriculture Research",
+    "url": "https://foundationfar.org/grants-funding/",
+    "website": "https://foundationfar.org"
+  },
+  {
+    "name": "climatechangeai",
+    "display_name": "ClimateChangeAI",
+    "url": "https://www.climatechange.ai/calls",
+    "website": "https://climatechange.ai"
+  },
+  {
+    "name": "bmgf_grand_challenges",
+    "display_name": "BMGF Grand Challenges",
+    "url": "https://gcgh.grandchallenges.org/grant-opportunities",
+    "website": "https://gcgh.grandchallenges.org"
+  },
+  {
+    "name": "cepi",
+    "display_name": "CEPI",
+    "url": "https://cepi.net/search?term=grants",
+    "website": "https://cepi.net"
+  },
+  {
+    "name": "gupta_family_foundation",
+    "display_name": "Gupta Family Foundation",
+    "url": "https://www.guptafamilyfoundation.org/grant-application-2025/",
+    "website": "https://guptafamilyfoundation.org"
+  },
+  {
+    "name": "hlfppt",
+    "display_name": "HLFPPT",
+    "url": "https://hlfppt.org/rfp-tenders/",
+    "website": "https://hlfppt.org"
+  },
+  {
+    "name": "citigroup",
+    "display_name": "Citigroup",
+    "url": "https://www.citigroup.com/global/foundation/apply-for-funding",
+    "website": "https://citigroup.com"
+  },
+  {
+    "name": "temasekfoundation",
+    "display_name": "Temasekfoundation",
+    "url": "https://www.temasekfoundation.org.sg/grant-calls",
+    "website": "https://temasekfoundation.org.sg"
+  },
+  {
+    "name": "bosch_stiftung",
+    "display_name": "Bosch Stiftung",
+    "url": "https://www.bosch-stiftung.de/en/news/open-calls",
+    "website": "https://bosch-stiftung.de"
+  },
+  {
+    "name": "ospreys",
+    "display_name": "Ospreys",
+    "url": "https://www.ospreys.com/research-grants",
+    "website": "https://ospreys.com"
+  },
+  {
+    "name": "gatesfoundation",
+    "display_name": "Gatesfoundation",
+    "url": "https://www.gatesfoundation.org/about/committed-grants",
+    "website": "https://gatesfoundation.org"
+  },
+  {
+    "name": "idrc",
+    "display_name": "Idrc",
+    "url": "https://www.idrc.ca/en/funding",
+    "website": "https://idrc.ca"
+  },
+  {
+    "name": "globaltenders",
+    "display_name": "Globaltenders",
+    "url": "https://www.globaltenders.com/global-tenders-search",
+    "website": "https://globaltenders.com"
+  },
+  {
+    "name": "kbs_frb",
+    "display_name": "King Baudouin Foundation",
+    "url": "https://kbs-frb.be/en/search?type_id=call",
+    "website": "https://kbs-frb.be"
+  },
+  {
+    "name": "laudesfoundation",
+    "display_name": "Laudesfoundation",
+    "url": "https://www.laudesfoundation.org/how-we-work/grants-database/",
+    "website": "https://laudesfoundation.org"
+  },
+  {
+    "name": "gulbenkian",
+    "display_name": "Gulbenkian",
+    "url": "https://www.gulbenkian.pt/en/grants/",
+    "website": "https://gulbenkian.pt"
+  },
+  {
+    "name": "nippon_foundation",
+    "display_name": "Nippon Foundation",
+    "url": "https://www.nippon-foundation.or.jp/en/grant",
+    "website": "https://nippon-foundation.or.jp"
+  },
+  {
+    "name": "openphilanthropy",
+    "display_name": "Coefficient Giving (Open Philanthropy)",
+    "url": "https://coefficientgiving.org/apply-for-funding/",
+    "website": "https://coefficientgiving.org"
+  }
+]

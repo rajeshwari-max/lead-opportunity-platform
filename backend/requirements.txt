@@ -11,3 +11,6 @@ apscheduler>=3.10
 openpyxl>=3.1
 # Optional: only needed for JS-rendered sources (BaseScraper.requires_js)
 playwright>=1.45
+# Production process manager (EC2/Supervisor). Not used by `uvicorn --reload`
+# in local development, but harmless to have installed there.
+gunicorn>=22.0

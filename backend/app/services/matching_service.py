@@ -8,7 +8,7 @@ A member matches an opportunity when:
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -25,8 +25,14 @@ class MatchingService:
         self.db = db
 
     def matches_for(
-        self, member: TeamMember, include_sent: bool = False, limit: int = 100
+        self, member: TeamMember, include_sent: bool = False, limit: int | None = None
     ) -> list[Opportunity]:
+        """Every unsent match for this member. `limit=None` means no cap.
+
+        This used to default to 100, which silently truncated both the count
+        shown against each member and the digest actually emailed — a member
+        with 900 matches saw "100 new" and received 100.
+        """
         stmt = select(Opportunity).where(
             Opportunity.status == Status.ACTIVE,
             or_(Opportunity.deadline >= date.today(), Opportunity.deadline.is_(None)),
@@ -61,9 +67,35 @@ class MatchingService:
             sent = select(SentLog.opportunity_id).where(SentLog.member_id == member.id)
             stmt = stmt.where(Opportunity.id.not_in(sent))
 
-        stmt = stmt.order_by(Opportunity.deadline.asc()).limit(limit)
+        stmt = stmt.order_by(Opportunity.deadline.asc())
+        if limit is not None:
+            stmt = stmt.limit(limit)
         return list(self.db.execute(stmt).scalars().all())
 
     def mark_sent(self, member: TeamMember, opportunities: list[Opportunity]) -> None:
+        """Record what went out, refreshing the timestamp on anything resent.
+
+        SentLog has a unique constraint on (member_id, opportunity_id), so a
+        plain insert raises IntegrityError the moment a resend includes an
+        opportunity the member already had — which is every resend. Existing
+        rows get their sent_at bumped instead, keeping "when did they last see
+        this" accurate.
+        """
+        if not opportunities:
+            return
+        ids = [o.id for o in opportunities]
+        already = {
+            row.opportunity_id: row
+            for row in self.db.execute(
+                select(SentLog).where(
+                    SentLog.member_id == member.id, SentLog.opportunity_id.in_(ids)
+                )
+            ).scalars()
+        }
+        now = datetime.now(timezone.utc)
         for opp in opportunities:
-            self.db.add(SentLog(member_id=member.id, opportunity_id=opp.id))
+            existing = already.get(opp.id)
+            if existing is not None:
+                existing.sent_at = now
+            else:
+                self.db.add(SentLog(member_id=member.id, opportunity_id=opp.id, sent_at=now))

@@ -22,8 +22,14 @@ from app.scrapers.registry import get_scrapers
 from app.services.classification import Classifier, KeywordClassifier
 from app.services.deadline_parser import DeadlineParser
 from app.services.deduplication import make_unique_id
+from app.services.amounts import clean_amount, extract_amount
+from app.services.geography import normalize_geo
+from app.services.links import is_usable_link
+from app.services.organization import extract_organization, tidy_organization
 from app.services.verticals import VERTICALS as ALL_VERTICALS
 from app.services.verticals import classify_verticals, verticals_to_str
+from app.services.study_type import classify_study_type
+from app.services.work_type import classify_work_type
 
 log = logging.getLogger("scraper")
 
@@ -104,8 +110,21 @@ class ScraperManager:
 
     # ------------------------------------------------------------- execution
     async def _run(self, scrapers: list[BaseScraper]) -> None:
+        # Cap how many sources run at once. With ~80 configured sources, starting
+        # them all together opened hundreds of simultaneous requests and browser
+        # threads, which starved the event loop — /progress stopped responding and
+        # the dashboard sat on "idle" while the scrape was plainly running.
+        gate = asyncio.Semaphore(max(1, settings.max_concurrent_sources))
+
+        async def _guarded(scraper: BaseScraper) -> None:
+            async with gate:
+                if self._stop.is_set():
+                    self.progress[scraper.name]["status"] = "stopped"
+                    return
+                await self._run_source(scraper)
+
         try:
-            await asyncio.gather(*(self._run_source(s) for s in scrapers))
+            await asyncio.gather(*(_guarded(s) for s in scrapers))
         finally:
             self.state = "idle"
             self._log("Scrape job completed")
@@ -146,6 +165,15 @@ class ScraperManager:
                 self._log(f"[{scraper.display_name}] page {payload['page']} failed — skipped")
 
         stale_streak = 0
+        # None = use the global default; 0 = never stop early (walk to the end
+        # of pagination). `or` would have treated 0 as "unset", so test for None.
+        override = scraper.stale_page_streak_override
+        stale_limit = settings.stale_page_streak if override is None else override
+        if stale_limit == 0:
+            self._log(
+                f"[{scraper.display_name}] full-archive mode — walking every page "
+                f"(already-seen pages don't stop the crawl; this takes a while)"
+            )
         try:
             async for batch in scraper.crawl(source_stop, self._pause, on_progress):
                 prog["found"] += len(batch)
@@ -154,14 +182,15 @@ class ScraperManager:
                 prog["skipped_expired"] += expired
                 prog["duplicates"] += dupes
                 if expired:
-                    self._log(f"[{scraper.display_name}] skipped {expired} expired listing(s)")
+                    verb = "archived" if settings.keep_expired else "skipped"
+                    self._log(f"[{scraper.display_name}] {verb} {expired} closed listing(s)")
                 if saved:
                     self._log(f"[{scraper.display_name}] saved {saved} record(s)")
 
                 # Listings are newest-first: N pages in a row with nothing new
                 # means everything deeper is older (expired or already saved).
                 stale_streak = stale_streak + 1 if (saved == 0 and batch) else 0
-                if stale_streak >= settings.stale_page_streak:
+                if stale_limit and stale_streak >= stale_limit:
                     self._log(
                         f"[{scraper.display_name}] {stale_streak} consecutive pages with "
                         f"nothing new — stopping this source (only older content ahead)"
@@ -175,9 +204,17 @@ class ScraperManager:
         finally:
             mirror.cancel()
             self._close_run(run_id, prog)
+            # When closed listings are archived they are *included* in `saved`,
+            # so reporting them as a separate addend made the totals look wrong
+            # ("3536 found = 3024 saved + 3277 expired + 512 dupes").
+            closed_note = (
+                f" (of which {prog['skipped_expired']} already closed)"
+                if settings.keep_expired else
+                f" + {prog['skipped_expired']} expired skipped"
+            )
             self._log(
                 f"[{scraper.display_name}] {prog['status']} — {prog['found']} found = "
-                f"{prog['saved']} new saved + {prog['skipped_expired']} expired skipped + "
+                f"{prog['saved']} new saved{closed_note} + "
                 f"{prog['duplicates']} already in database"
             )
 
@@ -195,13 +232,19 @@ class ScraperManager:
                 ongoing = deadline is None and (
                     self.deadline_parser.is_ongoing(raw.deadline_raw) or raw.assume_active
                 )
-                if not ongoing and not self.deadline_parser.is_active(deadline, today):
+                is_expired = not ongoing and not self.deadline_parser.is_active(deadline, today)
+                if is_expired:
                     expired += 1
                     if len(expired_samples) < 3:
                         expired_samples.append(
                             f"{raw.title[:48]!r} (deadline: {deadline or raw.deadline_raw or 'none'})"
                         )
-                    continue
+                    # Keep them unless configured otherwise. Dropping closed calls
+                    # threw away thousands of records per run and made "found" vastly
+                    # exceed "saved"; they're stored with status=Expired instead, so
+                    # the dashboard's Active view is unchanged but nothing is lost.
+                    if not settings.keep_expired:
+                        continue
 
                 category = self.classifier.classify(raw.title, raw.summary, raw.category_hint)
                 vertical_body = " ".join(filter(None, [raw.summary, raw.vertical, raw.eligibility]))
@@ -209,6 +252,19 @@ class ScraperManager:
                 if self.vertical_filter and not (set(vertical_tags) & self.vertical_filter):
                     self._count_off_vertical(raw.source_website)
                     continue
+                clean_country, clean_region = normalize_geo(raw.country, raw.region)
+                # Sources that publish a funder field win; for the ones that
+                # don't (FundsForNGOs names it only in prose) recover it from
+                # the text rather than leaving the column blank.
+                organization = tidy_organization(raw.organization)
+                if not organization:
+                    organization = extract_organization(raw.summary, raw.title)
+                # Same pattern for the amount: use the source's figure when it
+                # gave one (stripped of page furniture), else read it out of the
+                # listing text, which is where most sources state it.
+                amount = clean_amount(raw.funding_amount)
+                if not amount:
+                    amount = extract_amount(raw.summary, raw.title)
                 uid = make_unique_id(raw.title, raw.organization, deadline, raw.opportunity_url)
 
                 exists = db.execute(
@@ -222,21 +278,34 @@ class ScraperManager:
                 db.add(Opportunity(
                     unique_id=uid,
                     title=raw.title.strip(),
-                    organization=raw.organization.strip(),
-                    country=raw.country,
-                    region=raw.region,
+                    organization=organization,
+                    # Keeps the two columns cleanly separated: region names and
+                    # title artifacts never land in country, aliases collapse,
+                    # and region is inferred from a known country.
+                    country=clean_country,
+                    region=clean_region,
                     funding_type=raw.funding_type,
                     vertical=raw.vertical,
                     verticals=verticals_to_str(vertical_tags),
+                    # Routing axis: research assignments and delivery work go to
+                    # different teams even when both are filed as "RFP".
+                    work_type=classify_work_type(raw.title, vertical_body),
+                    study_type=classify_study_type(raw.title, vertical_body),
                     category=category,
                     deadline=deadline,
                     website=raw.website,
-                    opportunity_url=raw.opportunity_url,
+                    # Store a link only if it actually points at this call. A
+                    # bare slug, a mailto:, or a bare domain sends the reader to
+                    # a homepage and costs more trust than an absent link does.
+                    opportunity_url=(
+                        raw.opportunity_url
+                        if is_usable_link(raw.opportunity_url, raw.website) else ""
+                    ),
                     summary=raw.summary,
                     location=raw.location,
                     eligibility=raw.eligibility,
-                    funding_amount=raw.funding_amount,
-                    status=Status.ACTIVE,
+                    funding_amount=amount,
+                    status=Status.EXPIRED if is_expired else Status.ACTIVE,
                     source_website=raw.source_website,
                 ))
                 saved += 1

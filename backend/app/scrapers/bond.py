@@ -35,6 +35,7 @@ _LOAD_MORE_SELECTOR = ".facetwp-load-more, .fwp-load-more, button.facetwp-load-m
 class BondScraper(BaseScraper):
     name = "bond"
     display_name = "Bond UK"
+    enrich_details = True   # funder pages are plain HTML and state the grant size
     website = "https://www.bond.org.uk"
     start_url = "https://www.bond.org.uk/funding-opportunities/"
     prefer_js = True   # browser-render + Load More expansion when Playwright exists

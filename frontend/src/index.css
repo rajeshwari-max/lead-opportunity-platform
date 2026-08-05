@@ -2,36 +2,69 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Palette: a warm off-white ground with a violet primary and teal accent.
+   The previous flat grey made every surface read at the same depth; card,
+   background and muted are now separated so panels sit above the page. */
 :root {
-  --background: 220 20% 97%;
-  --foreground: 224 30% 12%;
+  --background: 225 30% 96%;
+  --foreground: 225 35% 11%;
   --card: 0 0% 100%;
-  --card-foreground: 224 30% 12%;
-  --muted: 220 14% 92%;
-  --muted-foreground: 224 10% 42%;
-  --border: 220 13% 88%;
-  --primary: 243 75% 59%;
+  --card-foreground: 225 35% 11%;
+  --muted: 224 20% 93%;
+  --muted-foreground: 225 12% 45%;
+  --border: 224 20% 87%;
+  --primary: 245 72% 58%;
   --primary-foreground: 0 0% 100%;
-  --accent: 173 80% 40%;
+  --accent: 172 78% 38%;
+  --ring: 245 72% 58%;
 }
 
 .dark {
-  --background: 228 22% 7%;
-  --foreground: 220 15% 92%;
-  --card: 228 20% 10%;
-  --card-foreground: 220 15% 92%;
-  --muted: 228 15% 16%;
-  --muted-foreground: 224 10% 62%;
-  --border: 228 14% 18%;
-  --primary: 243 85% 66%;
+  --background: 229 26% 8%;
+  --foreground: 220 18% 93%;
+  --card: 229 22% 11%;
+  --card-foreground: 220 18% 93%;
+  --muted: 229 18% 17%;
+  --muted-foreground: 222 12% 64%;
+  --border: 229 16% 20%;
+  --primary: 246 88% 70%;
   --primary-foreground: 0 0% 100%;
-  --accent: 173 70% 45%;
+  --accent: 172 68% 46%;
+  --ring: 246 88% 70%;
 }
 
 body {
   @apply bg-background text-foreground antialiased;
   font-family: Inter, system-ui, -apple-system, sans-serif;
+  /* Faint tinted wash so the page isn't a flat slab behind the cards. */
+  background-image:
+    radial-gradient(60rem 60rem at 12% -10%, hsl(var(--primary) / 0.06), transparent 60%),
+    radial-gradient(50rem 50rem at 100% 0%, hsl(var(--accent) / 0.05), transparent 55%);
+  background-attachment: fixed;
 }
 
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { @apply bg-muted rounded-full; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.28);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.45); }
+
+/* Consistent keyboard focus everywhere, instead of the browser default. */
+:where(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid hsl(var(--ring) / 0.65);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+@layer utilities {
+  /* Rows and panels fade in rather than snapping in on data refresh. */
+  .animate-rise {
+    animation: rise 0.25s ease-out both;
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: none; }
+  }
+}

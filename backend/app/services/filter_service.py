@@ -64,11 +64,35 @@ class FilterService:
         return list(self.db.execute(stmt).scalars().all())
 
     def _base_statement(self, f: OpportunityFilters) -> Select:
-        stmt = select(Opportunity).where(
-            Opportunity.status == Status.ACTIVE,
-            # active = deadline still open, or explicitly ongoing (NULL deadline)
-            or_(Opportunity.deadline >= date.today(), Opportunity.deadline.is_(None)),
-        )
+        if getattr(f, "approved", False):
+            # The approved set is a curated hand-off to the retrieval layer, not
+            # a view of what's currently biddable, so it deliberately ignores the
+            # live/archived split. Filtering it to open deadlines would make the
+            # list silently empty itself as those deadlines passed — the one
+            # place where a row disappearing is most alarming. Every other
+            # filter below still applies, so it composes with country, vertical
+            # and search as usual.
+            stmt = select(Opportunity).where(Opportunity.approved.is_(True))
+        elif getattr(f, "archived", False):
+            # Explicit opt-in to the historical archive. It holds tens of
+            # thousands of closed calls, so it stays out of the default view and
+            # out of the stat cards unless asked for.
+            stmt = select(Opportunity).where(Opportunity.status == Status.EXPIRED)
+        else:
+            stmt = select(Opportunity).where(
+                Opportunity.status == Status.ACTIVE,
+                # active = deadline still open, or explicitly ongoing (NULL deadline)
+                or_(Opportunity.deadline >= date.today(), Opportunity.deadline.is_(None)),
+            )
+        if getattr(f, "new_today", False):
+            # Matches the "New Today" stat card. Clicking it used to only change
+            # the sort order, so the table looked identical and the card seemed
+            # broken; it now narrows to exactly what the card counted.
+            stmt = stmt.where(func.date(Opportunity.date_scraped) == date.today())
+        if getattr(f, "work_type", ""):
+            stmt = stmt.where(Opportunity.work_type == f.work_type)
+        if getattr(f, "study_type", ""):
+            stmt = stmt.where(Opportunity.study_type == f.study_type)
         if f.categories:
             stmt = stmt.where(Opportunity.category.in_([Category(c) for c in f.categories]))
         if f.verticals:

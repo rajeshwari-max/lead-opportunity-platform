@@ -43,6 +43,9 @@ export function ExpertsCard({ readOnly = false }: { readOnly?: boolean }) {
       if (res.ok) {
         setConnected(true);
       } else {
+        // A 400 here means the window was closed before the login completed —
+        // report it instead of optimistically flipping to "connected".
+        setConnected(false);
         setError((await res.json()).detail ?? "Could not open login window");
       }
     } catch {
@@ -86,8 +89,9 @@ export function ExpertsCard({ readOnly = false }: { readOnly?: boolean }) {
         {!connected && !readOnly && (
           <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5">
             <p className="text-xs text-amber-500">
-              Not connected to DevelopmentAid. Click below — a Chrome window opens,
-              log in there yourself, then close it. Your session is saved for scraping.
+              Not connected to DevelopmentAid. Click below — a Chrome window opens.
+              Sign in fully (email, password and the reCAPTCHA), wait until you can
+              see you're logged in, and only then close the window.
             </p>
             <Button size="sm" variant="outline" disabled={connecting} onClick={connect}>
               {connecting
@@ -95,6 +99,18 @@ export function ExpertsCard({ readOnly = false }: { readOnly?: boolean }) {
                 : <><KeyRound className="h-3.5 w-3.5" /> Connect account</>}
             </Button>
           </div>
+        )}
+        {/* Sessions expire, so reconnecting must always be reachable — when the
+            saved marker wrongly said "connected" this control was hidden, which
+            left no way to fix the very problem that needed fixing. */}
+        {connected && !readOnly && (
+          <Button size="sm" variant="outline" className="w-full" disabled={connecting}
+                  onClick={connect}
+                  title="Sign in to DevelopmentAid again if scrapes only return one page">
+            {connecting
+              ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Waiting for you to log in…</>
+              : <><KeyRound className="h-3.5 w-3.5" /> Reconnect account</>}
+          </Button>
         )}
         {rows.length === 0 && !error && (
           <p className="text-sm text-muted-foreground">

@@ -46,6 +46,8 @@ class OpportunityOut(BaseModel):
     funding_type: str
     vertical: str
     verticals: str = ""  # canonical comma-separated vertical tags
+    work_type: str = ""   # Research | Implementation | "" (unclear)
+    study_type: str = ""  # Baseline | Endline | Data Collection | …
     category: Category
     deadline: date | None
     website: str
@@ -57,6 +59,16 @@ class OpportunityOut(BaseModel):
     status: Status
     source_website: str
     date_scraped: datetime
+    approved: bool = False
+    approved_at: datetime | None = None
+    approved_by: str = ""
+
+
+class ApprovalRequest(BaseModel):
+    """Body of POST /opportunities/{id}/approve."""
+
+    approved: bool = True
+    by: str = ""            # who acted; blank means the dashboard user
 
 
 class PaginatedOpportunities(BaseModel):
@@ -79,6 +91,16 @@ class OpportunityFilters(BaseModel):
     deadline_before: date | None = None
     deadline_after: date | None = None
     search: str = ""
+    # Show the closed/expired archive instead of live opportunities. Off by
+    # default so the dashboard stays focused on what can still be bid on.
+    archived: bool = False
+    # Only opportunities first scraped today — what the "New Today" card counts.
+    new_today: bool = False
+    # Restrict to the approved set (what feeds the retrieval layer downstream).
+    approved: bool = False
+    # Routing axes: Research vs Implementation, and which kind of study.
+    work_type: str = ""
+    study_type: str = ""
     page: int = 1
     page_size: int = 25
     sort_by: str = "deadline"
@@ -137,3 +159,4 @@ class SendResult(BaseModel):
     member: str
     sent: int
     detail: str | None = None
+    resent: bool = False

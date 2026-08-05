@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.database.db import get_db
 from app.schemas.opportunity import (
+    ApprovalRequest,
     OpportunityFilters,
     OpportunityOut,
     PaginatedOpportunities,
@@ -22,7 +23,7 @@ from app.schemas.opportunity import (
 )
 from app.scrapers.registry import SCRAPER_REGISTRY
 from app.database.models import TeamMember
-from app.services import dispatch_service, email_service, export_service
+from app.services import approval_service, dispatch_service, email_service, export_service
 from app.services.matching_service import MatchingService
 from app.services.filter_service import FilterService
 from app.services.scheduler import scheduler
@@ -61,12 +62,19 @@ def filters_dep(
     deadline_before: date | None = None,
     deadline_after: date | None = None,
     search: str = "",
+    archived: bool = False,
+    new_today: bool = False,
+    approved: bool = False,
+    work_type: str = "",
+    study_type: str = "",
     page: int = 1,
     page_size: int = 25,
     sort_by: str = "deadline",
     sort_dir: str = "asc",
 ) -> OpportunityFilters:
     return OpportunityFilters(
+        archived=archived, new_today=new_today, approved=approved,
+        work_type=work_type, study_type=study_type,
         categories=categories, verticals=verticals, countries=countries, regions=regions,
         sources=sources, organizations=organizations, deadline_before=deadline_before,
         deadline_after=deadline_after, search=search, page=page, page_size=page_size,
@@ -80,6 +88,109 @@ def list_opportunities(
     f: OpportunityFilters = Depends(filters_dep), db: Session = Depends(get_db)
 ) -> PaginatedOpportunities:
     return FilterService(db).query(f)
+
+
+@router.post(
+    "/opportunities/{opportunity_id}/approve",
+    response_model=OpportunityOut,
+    dependencies=[Depends(require_writable)],
+)
+def approve_opportunity(
+    opportunity_id: int, body: ApprovalRequest, db: Session = Depends(get_db)
+) -> OpportunityOut:
+    """Dashboard sign-off. Writable instances only — on the public mirror the
+    button is hidden and this returns 403, so a stranger with the link can't
+    change what the team has approved."""
+    opp = approval_service.set_approved(db, opportunity_id, body.approved, body.by)
+    if opp is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    return OpportunityOut.model_validate(opp)
+
+
+@router.get("/approve/{token}", response_class=Response)
+def approve_via_link(token: str, db: Session = Depends(get_db)) -> Response:
+    """One-click approval from a digest email.
+
+    Deliberately exempt from require_writable: the HMAC signature proves the
+    link came from a digest this installation generated, which is a stronger
+    claim than "is not the read-only mirror". Returns a small HTML page because
+    the recipient is a person clicking in their mail client, not a script.
+    """
+    try:
+        payload = approval_service.read_token(token)
+    except approval_service.InvalidToken as exc:
+        return Response(_approval_page("Link not valid", str(exc), ok=False), status_code=400,
+                        media_type="text/html")
+
+    opp = approval_service.set_approved(db, int(payload["id"]), True, payload.get("by", ""))
+    if opp is None:
+        return Response(_approval_page("Not found", "That opportunity no longer exists.", ok=False),
+                        status_code=404, media_type="text/html")
+    return Response(
+        _approval_page(
+            "Approved", opp.title, ok=True, url=opp.opportunity_url,
+            # Approving from an email is a single click with no confirmation
+            # step, so a mis-click is easy and the landing page is the only
+            # chance to take it back. The same token undoes it — possession
+            # already granted approval, and undoing is strictly less powerful.
+            action_url=f"{settings.api_prefix}/approve/{token}/undo",
+            action_label="Undo — I clicked this by mistake",
+        ),
+        media_type="text/html",
+    )
+
+
+@router.get("/approve/{token}/undo", response_class=Response)
+def undo_approval_via_link(token: str, db: Session = Depends(get_db)) -> Response:
+    """Reverse an approval made from an email, from the confirmation page."""
+    try:
+        payload = approval_service.read_token(token)
+    except approval_service.InvalidToken as exc:
+        return Response(_approval_page("Link not valid", str(exc), ok=False), status_code=400,
+                        media_type="text/html")
+
+    opp = approval_service.set_approved(db, int(payload["id"]), False, payload.get("by", ""))
+    if opp is None:
+        return Response(_approval_page("Not found", "That opportunity no longer exists.", ok=False),
+                        status_code=404, media_type="text/html")
+    return Response(
+        _approval_page(
+            "Approval undone", opp.title, ok=True, url=opp.opportunity_url,
+            # Symmetrical: undoing by mistake is just as possible as approving
+            # by mistake, so the way back is offered here too.
+            action_url=f"{settings.api_prefix}/approve/{token}",
+            action_label="Approve it after all",
+        ),
+        media_type="text/html",
+    )
+
+
+def _approval_page(
+    heading: str, detail: str, ok: bool, url: str = "",
+    action_url: str = "", action_label: str = "",
+) -> str:
+    colour = "#059669" if ok else "#dc2626"
+    link = (
+        f'<p><a href="{url}" style="color:#2563eb;">Open the opportunity</a></p>' if url else ""
+    )
+    if action_url:
+        link += (
+            f'<p style="margin-top:18px;"><a href="{action_url}" '
+            'style="display:inline-block;padding:9px 16px;border:1px solid #cbd5e1;'
+            'border-radius:8px;color:#334155;text-decoration:none;font-size:14px;">'
+            f'{action_label}</a></p>'
+        )
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{heading}</title></head>
+<body style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f8fafc;
+margin:0;padding:48px 16px;">
+<div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;
+border-radius:12px;padding:32px;">
+<h1 style="margin:0 0 12px;font-size:20px;color:{colour};">{heading}</h1>
+<p style="margin:0 0 16px;color:#334155;line-height:1.5;">{detail}</p>{link}
+<p style="margin:16px 0 0;color:#94a3b8;font-size:13px;">You can close this tab.</p>
+</div></body></html>"""
 
 
 @router.get("/filters")
@@ -244,12 +355,17 @@ def preview_matches(member_id: int, db: Session = Depends(get_db)) -> list[Oppor
 
 
 @router.post("/team/{member_id}/send", response_model=SendResult)
-async def send_now(member_id: int) -> SendResult:
-    """Email this member their new matching opportunities."""
+async def send_now(member_id: int, resend: bool = False) -> SendResult:
+    """Email this member their matching opportunities.
+
+    `?resend=true` reissues everything currently matching, including items
+    already sent — the normal path skips those and would find nothing, so this
+    is how an improved email reaches someone who already got the old one.
+    """
     import asyncio
 
     try:
-        result = await asyncio.to_thread(dispatch_service.send_to_member, member_id)
+        result = await asyncio.to_thread(dispatch_service.send_to_member, member_id, resend)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except email_service.EmailNotConfiguredError as exc:
@@ -257,6 +373,52 @@ async def send_now(member_id: int) -> SendResult:
     except Exception as exc:  # SMTP/auth failures surface clearly in the UI
         raise HTTPException(status_code=502, detail=f"Email send failed: {exc}") from exc
     return SendResult(**result)
+
+
+@router.get("/email/settings")
+def get_email_settings() -> dict:
+    """Automatic-email settings plus when the next run will actually happen."""
+    from app.services.email_settings import load
+
+    cfg = load()
+    nxt = scheduler.next_digest_run()
+    return {**cfg.model_dump(), "next_run": nxt.isoformat() if nxt else None}
+
+
+@router.put("/email/settings", dependencies=[Depends(require_writable)])
+def update_email_settings(body: dict) -> dict:
+    """Save and apply immediately — no restart, no editing .env."""
+    from app.services.email_settings import EmailSettings, load, save
+
+    current = load()
+    try:
+        merged = EmailSettings(**{**current.model_dump(), **body})
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid settings: {exc}") from exc
+
+    cfg = save(merged)
+    # Rebuild the cron job now, so a changed send time takes effect today.
+    scheduler.apply_email_settings()
+    nxt = scheduler.next_digest_run()
+    return {**cfg.model_dump(), "next_run": nxt.isoformat() if nxt else None}
+
+
+@router.post("/email/run-now", dependencies=[Depends(require_writable)])
+async def run_digest_now() -> dict:
+    """Fire the daily digest + reminders immediately — used to prove the
+    automation works without waiting until tomorrow morning."""
+    import asyncio
+
+    from app.services.reminder_service import send_due_reminders
+
+    results = await asyncio.to_thread(dispatch_service.send_to_all_active)
+    reminders = await asyncio.to_thread(send_due_reminders)
+    return {
+        "members_emailed": sum(1 for r in results if r.get("sent", 0) > 0),
+        "opportunities_sent": sum(r.get("sent", 0) for r in results),
+        "reminders_sent": reminders,
+        "detail": [r for r in results],
+    }
 
 
 @router.get("/email/status")
@@ -294,13 +456,24 @@ def devaid_status() -> dict[str, bool]:
 @router.post("/devaid/connect")
 async def devaid_connect() -> dict[str, str]:
     """Open a visible browser window for the user to log into DevelopmentAid.
-    Returns once they close the window; the session is saved for scrapers."""
+
+    Returns once they close the window. The session is only reported as saved
+    when it's verified as genuinely signed in — closing the window early used
+    to report success and leave every scrape running as a guest.
+    """
     import asyncio
 
     from app.scrapers.devaid_auth import connect_interactive_sync
 
     try:
-        await asyncio.to_thread(connect_interactive_sync)
+        ok = await asyncio.to_thread(connect_interactive_sync)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not open login window: {exc}") from exc
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail="Login was not completed — the site still shows 'Sign in'. "
+                   "Click Connect account again and finish signing in (including "
+                   "the reCAPTCHA) before closing the window.",
+        )
     return {"status": "saved"}

@@ -6,3 +6,7 @@ backend/.venv/
 frontend/node_modules/
 frontend/dist/
 .env
+
+# Word lock files (created while a .docx is open) — never belong in the repo
+~$*.docx
+~$*.xlsx

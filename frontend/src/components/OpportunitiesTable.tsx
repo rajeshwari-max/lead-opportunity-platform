@@ -4,11 +4,22 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowUpDown, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
+import { useState } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  ExternalLink,
+  Undo2,
+} from "lucide-react";
 import { Badge, VerticalBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api";
 import { daysLeft, formatDate } from "@/lib/utils";
 import type { FilterState, Opportunity, Paginated } from "@/lib/types";
 
@@ -19,27 +30,110 @@ interface Props {
   loading: boolean;
   filters: FilterState;
   onChange: (f: FilterState) => void;
+  /** The public mirror can be read but not changed — approving is disabled there. */
+  readOnly?: boolean;
 }
 
-export function OpportunitiesTable({ data, loading, filters, onChange }: Props) {
+export function OpportunitiesTable({ data, loading, filters, onChange, readOnly = false }: Props) {
+  // Approvals are tracked locally so the button responds on click rather than
+  // after a refetch of the whole page. Keyed by id and merged over the server
+  // value, so it survives re-renders but never masks a fresh fetch of a row
+  // someone else approved.
+  const [pendingApproval, setPendingApproval] = useState<Record<number, boolean>>({});
+  const [failedApproval, setFailedApproval] = useState<number | null>(null);
+
+  const toggleApproval = async (o: Opportunity) => {
+    const next = !(pendingApproval[o.id] ?? o.approved);
+    setPendingApproval((m) => ({ ...m, [o.id]: next }));
+    setFailedApproval(null);
+    try {
+      await api.approve(o.id, next);
+    } catch {
+      // Put the row back where it was; a button that stays "Approved" after a
+      // failed write is worse than no button at all.
+      setPendingApproval((m) => {
+        const { [o.id]: _dropped, ...rest } = m;
+        return rest;
+      });
+      setFailedApproval(o.id);
+    }
+  };
+
   const columns = [
     col.accessor("title", {
       header: "Title",
-      cell: (info) => (
-        <a href={info.row.original.opportunity_url} target="_blank" rel="noreferrer"
-           className="group flex max-w-md items-start gap-1 font-medium hover:text-primary">
-          <span className="line-clamp-2">{info.getValue()}</span>
-          <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
-        </a>
-      ),
+      // title={} gives the full text on hover — titles are routinely longer
+      // than two lines and were previously unreadable once clamped.
+      cell: (info) => {
+        const { opportunity_url, website } = info.row.original;
+        // Some sources never publish a per-call URL, and some older rows had a
+        // link that resolved to a homepage. Rather than dress either up as a
+        // working link, say so and offer the source site as a clearly separate
+        // fallback — a link that goes somewhere wrong costs more trust than a
+        // missing one.
+        if (!opportunity_url) {
+          return (
+            <div className="max-w-[17rem]">
+              <span className="line-clamp-2 font-medium" title={info.getValue()}>
+                {info.getValue()}
+              </span>
+              {website && (
+                <a href={website} target="_blank" rel="noreferrer"
+                   className="text-xs text-muted-foreground underline-offset-2 hover:text-primary hover:underline">
+                  no direct link — open source site
+                </a>
+              )}
+            </div>
+          );
+        }
+        return (
+          <a href={opportunity_url} target="_blank" rel="noreferrer"
+             title={info.getValue()}
+             className="group flex max-w-[17rem] items-start gap-1 font-medium underline-offset-2 hover:text-primary hover:underline">
+            <span className="line-clamp-2">{info.getValue()}</span>
+            <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+          </a>
+        );
+      },
     }),
     col.accessor("organization", {
       header: "Organization",
-      cell: (info) => <span className="line-clamp-2 max-w-48 text-muted-foreground">{info.getValue() || "—"}</span>,
+      cell: (info) => (
+        <span title={info.getValue() || undefined}
+              className="line-clamp-2 max-w-32 text-muted-foreground">
+          {info.getValue() || "—"}
+        </span>
+      ),
     }),
+    // One column, stacked: Research/Implementation sits on top of Grant/RFP.
+    // A separate Work Type column cost horizontal space the table didn't have
+    // and pushed the Approve button off-screen. The routing decision still
+    // reads first because it is physically above the category.
     col.accessor("category", {
-      header: "Category",
-      cell: (info) => <Badge category={info.getValue()}>{info.getValue()}</Badge>,
+      header: "Type",
+      cell: (info) => {
+        const { work_type: wt, study_type: study } = info.row.original;
+        const tone =
+          wt === "Research" ? "bg-violet-500/15 text-violet-400 ring-violet-500/30"
+          : "bg-sky-500/15 text-sky-400 ring-sky-500/30";
+        return (
+          <div className="space-y-1 whitespace-nowrap">
+            {wt && (
+              <div>
+                <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${tone}`}>
+                  {wt}
+                </span>
+              </div>
+            )}
+            <div>
+              <Badge category={info.getValue()}>{info.getValue()}</Badge>
+            </div>
+            {/* Only ever present on research work, so it belongs here rather
+                than in a column of its own that would be empty most rows. */}
+            {study && <div className="text-[11px] text-muted-foreground">{study}</div>}
+          </div>
+        );
+      },
     }),
     col.accessor("verticals", {
       header: "Vertical",
@@ -47,7 +141,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange }: Props) 
         const tags = (info.getValue() || "").split(",").map((s) => s.trim()).filter(Boolean);
         if (tags.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
         return (
-          <div className="flex max-w-44 flex-wrap gap-1">
+          <div className="flex max-w-36 flex-wrap gap-1">
             {tags.map((t) => (
               <VerticalBadge key={t} vertical={t} />
             ))}
@@ -61,29 +155,113 @@ export function OpportunitiesTable({ data, loading, filters, onChange }: Props) 
         if (!info.getValue())
           return <span className="text-emerald-400">Ongoing</span>;
         const left = daysLeft(info.getValue());
+        // Graded urgency rather than a single red-at-5-days rule: a fortnight's
+        // notice on a proposal is already tight, and that deserves a signal.
+        const tone =
+          left == null ? "text-muted-foreground"
+          : left < 0 ? "text-muted-foreground"
+          : left <= 3 ? "text-red-500 font-semibold"
+          : left <= 7 ? "text-orange-500 font-medium"
+          : left <= 14 ? "text-amber-500"
+          : "text-muted-foreground";
         return (
           <div className="whitespace-nowrap">
             <div>{formatDate(info.getValue())}</div>
             {left != null && (
-              <div className={`text-xs ${left <= 5 ? "text-red-400" : "text-muted-foreground"}`}>
-                {left}d left
+              <div className={`text-xs ${tone}`}>
+                {left < 0 ? "closed" : left === 0 ? "closes today" : `${left}d left`}
               </div>
             )}
           </div>
         );
       },
     }),
-    col.accessor("location", {
-      header: "Location",
-      cell: (info) => (
-        <span className="line-clamp-2 max-w-40 text-muted-foreground">
-          {info.getValue() || info.row.original.country || "—"}
-        </span>
-      ),
+    // Shows the normalised country, not the raw `location` string. Those two
+    // disagree constantly — the listing publishes "UK", "USA" or a 30-country
+    // list, while the Country filter offers "United Kingdom". Rendering the raw
+    // string made the column look wrong and unmatchable against the filter, so
+    // the canonical country leads and the full published text is on hover.
+    col.accessor("country", {
+      header: "Country",
+      cell: (info) => {
+        const country = info.getValue();
+        const { location, region } = info.row.original;
+        if (!country && !location) return <span className="text-muted-foreground">—</span>;
+        const multi = country && location && /[,;]/.test(location);
+        // whitespace-nowrap: "United States" over "North America" was wrapping
+        // into five stacked words in a narrow column, which read as broken
+        // rather than as two fields. The table already scrolls horizontally.
+        return (
+          <div className="max-w-36 whitespace-nowrap" title={location || country || undefined}>
+            <div className="truncate">
+              {country || location}
+              {multi && <span className="ml-1 text-xs text-muted-foreground">+ others</span>}
+            </div>
+            {region && <div className="truncate text-xs text-muted-foreground">{region}</div>}
+          </div>
+        );
+      },
     }),
     col.accessor("funding_amount", {
       header: "Amount",
       cell: (info) => <span className="whitespace-nowrap">{info.getValue() || "—"}</span>,
+    }),
+    col.display({
+      id: "approve",
+      header: "Approve",
+      cell: (info) => {
+        const o = info.row.original;
+        const approved = pendingApproval[o.id] ?? o.approved;
+        if (readOnly) {
+          return approved ? (
+            <span className="inline-flex items-center gap-1 whitespace-nowrap text-xs font-medium text-emerald-500">
+              <Check className="h-3.5 w-3.5" /> Approved
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">—</span>
+          );
+        }
+        return (
+          <div className="whitespace-nowrap">
+            <Button
+              size="sm"
+              variant={approved ? "default" : "outline"}
+              onClick={() => toggleApproval(o)}
+              title={
+                approved
+                  ? `Approved${o.approved_by ? ` by ${o.approved_by}` : ""}${
+                      o.approved_at ? ` on ${formatDate(o.approved_at)}` : ""
+                    }`
+                  : "Approve this opportunity"
+              }
+              className={approved ? "h-7 bg-emerald-600 px-2 text-xs hover:bg-emerald-700" : "h-7 px-2 text-xs"}
+            >
+              {approved ? (
+                <>
+                  <Check className="mr-1 h-3.5 w-3.5" /> Approved
+                </>
+              ) : (
+                "Approve"
+              )}
+            </Button>
+            {/* Undo was previously only discoverable by guessing that the green
+                button toggles. A mis-click needs a way out that is visible
+                without hovering. */}
+            {approved && (
+              <button
+                type="button"
+                onClick={() => toggleApproval(o)}
+                className="mt-1 flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              >
+                <Undo2 className="h-3 w-3" /> Undo
+              </button>
+            )}
+            {failedApproval === o.id && (
+              <div className="mt-1 text-xs text-red-500">Couldn't save</div>
+            )}
+          </div>
+        );
+      },
     }),
     col.accessor("source_website", {
       header: "Source",
@@ -110,29 +288,77 @@ export function OpportunitiesTable({ data, loading, filters, onChange }: Props) 
 
   return (
     <Card>
-      <CardHeader className="flex-row items-center justify-between">
-        <CardTitle>
-          Latest Opportunities{" "}
-          <span className="font-normal text-muted-foreground">
-            {data ? `(${data.total} active)` : ""}
+      <CardHeader className="flex-row items-center justify-between gap-3">
+        <CardTitle className="flex items-baseline gap-2">
+          Latest Opportunities
+          <span className="text-sm font-normal text-muted-foreground">
+            {data ? `${data.total.toLocaleString()} active` : ""}
           </span>
+          {loading && (
+            <span className="text-xs font-normal text-muted-foreground">updating…</span>
+          )}
         </CardTitle>
-        {loading && <span className="text-xs text-muted-foreground">Loading…</span>}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* Routing filter — the split that decides research team vs brand team. */}
+          {["Research", "Implementation"].map((wt) => (
+            <Button
+              key={wt}
+              size="sm"
+              variant={filters.work_type === wt ? "default" : "outline"}
+              onClick={() =>
+                onChange({ ...filters, work_type: filters.work_type === wt ? "" : wt, page: 1 })
+              }
+              className={
+                filters.work_type === wt
+                  ? `h-8 text-xs ${wt === "Research" ? "bg-violet-600 hover:bg-violet-700" : "bg-sky-600 hover:bg-sky-700"}`
+                  : "h-8 text-xs"
+              }
+            >
+              {wt}
+            </Button>
+          ))}
+          {/* Approving is only useful if the approved set can be read back — this
+              is how you review what the team has signed off. */}
+          <Button
+            size="sm"
+            variant={filters.approved ? "default" : "outline"}
+            onClick={() => onChange({ ...filters, approved: !filters.approved, page: 1 })}
+            className={filters.approved ? "h-8 bg-emerald-600 text-xs hover:bg-emerald-700" : "h-8 text-xs"}
+          >
+            <Check className="mr-1 h-3.5 w-3.5" />
+            {filters.approved ? "Showing approved" : "Approved only"}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="overflow-x-auto p-0">
         <table className="w-full text-sm">
-          <thead>
+          {/* Sticky header: the table runs to 100 rows a page, and the column
+              labels used to scroll out of sight. */}
+          <thead className="sticky top-0 z-10">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id} className="border-b border-border text-left">
-                {hg.headers.map((h) => (
-                  <th key={h.id} className="px-4 py-3 font-medium text-muted-foreground">
-                    <button className="inline-flex items-center gap-1 hover:text-foreground"
-                            onClick={() => sortBy(h.column.id)}>
-                      {flexRender(h.column.columnDef.header, h.getContext())}
-                      <ArrowUpDown className="h-3 w-3" />
-                    </button>
-                  </th>
-                ))}
+                {hg.headers.map((h) => {
+                  // Show WHICH column is sorted and in which direction. Every
+                  // header previously rendered the same neutral icon, so the
+                  // current sort was invisible.
+                  const isSorted = filters.sort_by === h.column.id;
+                  const Icon = !isSorted
+                    ? ArrowUpDown
+                    : filters.sort_dir === "asc" ? ArrowUp : ArrowDown;
+                  return (
+                    <th key={h.id}
+                        className="bg-card px-4 py-3 font-medium text-muted-foreground">
+                      <button
+                        className={`inline-flex items-center gap-1 transition-colors hover:text-foreground ${
+                          isSorted ? "text-foreground" : ""}`}
+                        title={`Sort by ${String(h.column.columnDef.header)}`}
+                        onClick={() => sortBy(h.column.id)}>
+                        {flexRender(h.column.columnDef.header, h.getContext())}
+                        <Icon className={`h-3 w-3 ${isSorted ? "text-primary" : "opacity-50"}`} />
+                      </button>
+                    </th>
+                  );
+                })}
               </tr>
             ))}
           </thead>
@@ -151,9 +377,21 @@ export function OpportunitiesTable({ data, loading, filters, onChange }: Props) 
               </>
             )}
             {table.getRowModel().rows.map((row) => (
-              <tr key={row.id} className="border-b border-border/50 transition-colors hover:bg-muted/40">
-                {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="px-4 py-3 align-top">
+              <tr
+                key={row.id}
+                // A left accent bar on hover makes it obvious which row the
+                // cursor is on across eight columns of dense text.
+                className="group border-b border-border/50 transition-colors hover:bg-primary/[0.04]"
+              >
+                {row.getVisibleCells().map((cell, ci) => (
+                  <td
+                    key={cell.id}
+                    className={`px-4 py-3 align-top ${
+                      ci === 0
+                        ? "relative before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-primary before:opacity-0 before:transition-opacity group-hover:before:opacity-100"
+                        : ""
+                    }`}
+                  >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
                 ))}
@@ -206,8 +444,21 @@ export function OpportunitiesTable({ data, loading, filters, onChange }: Props) 
         </table>
       </CardContent>
       <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
+        {/* "Showing 26–50 of 9,416" is far more useful than a bare page number
+            when the result set runs to thousands of rows. */}
         <span className="text-muted-foreground">
-          Page {data?.page ?? 1} of {data?.pages ?? 1}
+          {data && data.total > 0 ? (
+            <>
+              Showing{" "}
+              <span className="font-medium text-foreground">
+                {((data.page - 1) * filters.page_size + 1).toLocaleString()}–
+                {Math.min(data.page * filters.page_size, data.total).toLocaleString()}
+              </span>{" "}
+              of {data.total.toLocaleString()}
+            </>
+          ) : (
+            `Page ${data?.page ?? 1} of ${data?.pages ?? 1}`
+          )}
         </span>
         <div className="flex items-center gap-2">
           <select

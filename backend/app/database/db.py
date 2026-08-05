@@ -23,6 +23,25 @@ def _sqlite_pragmas(dbapi_conn, _record) -> None:  # pragma: no cover
     except Exception:
         pass  # WAL unsupported on some network filesystems — fall back silently
     cur.execute("PRAGMA foreign_keys=ON")
+    # Large scrapes commit once per listing page — DevelopmentAid alone can be
+    # ~1,600 commits in a run — while the dashboard keeps polling. These make
+    # that workload safe and fast:
+    #   busy_timeout  wait for a lock instead of failing with "database is
+    #                 locked" when a read and a commit collide (the single most
+    #                 likely failure mode during a long scrape)
+    #   synchronous=NORMAL  skip an fsync per commit; with WAL this is still
+    #                 crash-safe (only a power loss can lose the last commits)
+    #   cache_size    ~64 MB page cache, so dedup lookups stay in memory
+    for pragma in (
+        "PRAGMA busy_timeout=30000",
+        "PRAGMA synchronous=NORMAL",
+        "PRAGMA cache_size=-64000",
+        "PRAGMA temp_store=MEMORY",
+    ):
+        try:
+            cur.execute(pragma)
+        except Exception:
+            pass
     cur.close()
 
 
@@ -51,6 +70,10 @@ _FTS_STATEMENTS: list[str] = [
 
 def init_db() -> None:
     """Create tables and the FTS5 full-text search index."""
+    # Models defined outside database/models.py must be imported before
+    # create_all, or their tables are silently never created.
+    from app.services import reminder_service  # noqa: F401  (registers ReminderLog)
+
     Base.metadata.create_all(engine)
     with engine.begin() as conn:
         _run_migrations(conn)
@@ -116,6 +139,38 @@ def _run_migrations(conn) -> None:
         elif "verticals" not in cols:
             conn.exec_driver_sql(
                 "ALTER TABLE opportunities ADD COLUMN verticals VARCHAR(256) NOT NULL DEFAULT ''"
+            )
+        # Research vs Implementation routing. Additive: existing rows get an
+        # empty value and are filled in by the startup backfill.
+        if "work_type" not in columns("opportunities"):
+            conn.exec_driver_sql(
+                "ALTER TABLE opportunities ADD COLUMN work_type VARCHAR(32) NOT NULL DEFAULT ''"
+            )
+        if "study_type" not in columns("opportunities"):
+            conn.exec_driver_sql(
+                "ALTER TABLE opportunities ADD COLUMN study_type VARCHAR(32) NOT NULL DEFAULT ''"
+            )
+            conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_opportunities_study_type "
+                "ON opportunities(study_type)"
+            )
+        # Approval flag. Additive with a false default, so every existing row
+        # starts unapproved — approval is an explicit human act and must never
+        # be granted retroactively by a migration.
+        cols = columns("opportunities")
+        if "approved" not in cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE opportunities ADD COLUMN approved BOOLEAN NOT NULL DEFAULT 0"
+            )
+            conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_opportunities_approved "
+                "ON opportunities(approved)"
+            )
+        if "approved_at" not in cols:
+            conn.exec_driver_sql("ALTER TABLE opportunities ADD COLUMN approved_at DATETIME")
+        if "approved_by" not in cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE opportunities ADD COLUMN approved_by VARCHAR(320) NOT NULL DEFAULT ''"
             )
 
     if "team_members" in _tables(conn):

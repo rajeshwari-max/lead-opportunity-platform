@@ -16,14 +16,41 @@ from pathlib import Path
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.core.config import BASE_DIR
+from app.core.config import BASE_DIR, settings
 from app.schemas.opportunity import ScheduleRequest, ScheduleStatusOut
 from app.services.scraper_manager import manager
 
 log = logging.getLogger("scraper")
 
 _JOB_ID = "scheduled-scrape"
+_DIGEST_JOB_ID = "daily-digest"
 _STATE_FILE: Path = BASE_DIR / "data" / "schedule.json"
+
+
+async def _daily_digest_and_reminders() -> None:
+    """Send each member their new matches, then any deadline reminders due.
+
+    Runs on its own clock rather than after every scrape: a scrape can finish
+    several times a day, and nobody wants that many emails. Reminders go out in
+    the same pass so a member gets at most one new-matches email and one
+    reminder email per day.
+    """
+    from app.services import dispatch_service
+    from app.services.reminder_service import send_due_reminders
+
+    try:
+        results = await asyncio.to_thread(dispatch_service.send_to_all_active)
+        total = sum(r.get("sent", 0) for r in results)
+        log.info("Daily digest: %s new opportunity(ies) across %s member(s)",
+                 total, len(results))
+    except Exception:
+        log.exception("Daily digest failed")
+    try:
+        n = await asyncio.to_thread(send_due_reminders)
+        if n:
+            log.info("Daily reminders: %s deadline reminder(s) sent", n)
+    except Exception:
+        log.exception("Deadline reminders failed")
 
 
 class ScrapeScheduler:
@@ -40,6 +67,9 @@ class ScrapeScheduler:
     def start(self) -> None:
         if not self._scheduler.running:
             self._scheduler.start()
+        # Digest + reminders run on their own daily schedule, independent of how
+        # often scraping happens.
+        self.apply_email_settings()
         # Re-apply the persisted schedule so automatic runs resume after restart.
         if self.current.mode != "manual":
             try:
@@ -64,6 +94,36 @@ class ScrapeScheduler:
                     self.current.mode, self.current.hour, self.current.minute,
                 )
                 asyncio.create_task(self._scrape_all())
+
+    def apply_email_settings(self) -> None:
+        """(Re)install the daily digest job from the dashboard's settings.
+
+        Called at startup and again whenever the settings are saved, so a new
+        send time takes effect immediately rather than at the next restart.
+        """
+        from app.services.email_settings import load
+
+        cfg = load()
+        if not cfg.digest_enabled:
+            try:
+                self._scheduler.remove_job(_DIGEST_JOB_ID)
+                log.info("Scheduler: automatic daily email disabled")
+            except Exception:
+                pass                     # not scheduled — nothing to remove
+            return
+
+        self._scheduler.add_job(
+            _daily_digest_and_reminders,
+            CronTrigger(hour=cfg.digest_hour, minute=cfg.digest_minute),
+            id=_DIGEST_JOB_ID, replace_existing=True,
+        )
+        log.info("Scheduler: daily digest + reminders at %02d:%02d (reminders at %s days)",
+                 cfg.digest_hour, cfg.digest_minute,
+                 ", ".join(str(d) for d in cfg.reminder_days))
+
+    def next_digest_run(self) -> datetime | None:
+        job = self._scheduler.get_job(_DIGEST_JOB_ID)
+        return getattr(job, "next_run_time", None) if job else None
 
     def _missed_run_today(self) -> bool:
         """Best-effort check — good enough to decide 'catch up or not', not
@@ -94,8 +154,19 @@ class ScrapeScheduler:
 
     # ----------------------------------------------------------- configuration
     def configure(self, req: ScheduleRequest, persist: bool = True) -> None:
-        """Replace the active schedule. mode=manual removes any schedule."""
-        self._scheduler.remove_all_jobs()
+        """Replace the active schedule. mode=manual removes any schedule.
+
+        Only the scrape job is removed. remove_all_jobs() was used here and it
+        also deleted the daily digest job, which start() had just installed —
+        so restoring a saved scrape schedule at boot silently destroyed the
+        automatic email, and no digest ever went out on any instance that had
+        a scrape schedule set. Nothing surfaced the loss: the schedule card
+        showed the scrape times correctly and the digest simply never fired.
+        """
+        try:
+            self._scheduler.remove_job(_JOB_ID)
+        except Exception:
+            pass                    # no scrape job yet — first configure()
         self.current = req
         if req.mode == "manual":
             log.info("Scheduler: manual mode (no automatic scrapes)")

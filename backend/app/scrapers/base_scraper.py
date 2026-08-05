@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -19,11 +20,21 @@ from bs4 import BeautifulSoup
 
 from app.core.config import settings
 from app.schemas.opportunity import RawOpportunity
+from app.services.amounts import extract_amount
+from app.services.organization import extract_organization
 
 log = logging.getLogger("scraper")
 perf = logging.getLogger("performance")
 
 ProgressCallback = Callable[[str, dict], Awaitable[None] | None]
+
+# Deadline as stated on an opportunity's own page.
+_DETAIL_DEADLINE = re.compile(
+    r"(?:deadline|closing date|closes?(?:\s+on)?|apply by|applications? (?:close|due)|"
+    r"submission deadline|due date|expires?(?:\s+on)?|last date)\s*[:\-–]?\s*"
+    r"(\d{1,2}\s+\w{3,9}\s+\d{4}|\w{3,9}\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2}|"
+    r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4})",
+    re.IGNORECASE)
 
 _PLAYWRIGHT_AVAILABLE: bool | None = None
 
@@ -87,6 +98,16 @@ class BaseScraper(ABC):
     prefer_js: bool = False            # browser-render IF Playwright is installed,
                                        # else fall back to plain HTTP (for sites that
                                        # serve stale/partial pages to non-browsers)
+    # Consecutive pages with nothing new before the manager abandons this source.
+    #   None = use settings.stale_page_streak
+    #   0    = never stop early — walk to the end of pagination (full archive)
+    # Raise or zero it for large archives where already-seen pages sit in front
+    # of pages that still hold listings the database has never seen.
+    stale_page_streak_override: int | None = None
+    # Visit a listing's own page to fill a missing amount/organisation. Costs one
+    # request per gap, so it's opt-in per source and only enabled where the
+    # detail page is plain HTML and actually carries the missing fields.
+    enrich_details: bool = False
 
     def __init__(self) -> None:
         self._semaphore = asyncio.Semaphore(settings.concurrency_per_source)
@@ -117,8 +138,83 @@ class BaseScraper(ABC):
         return None
 
     async def parse_detail(self, item: RawOpportunity, client: httpx.AsyncClient) -> RawOpportunity:
-        """Optionally enrich an item from its detail page. Default: no-op."""
+        """Enrich one item from its detail page.
+
+        Default implementation is generic: fetch the listing's own URL and try
+        to read a funding amount / organisation out of the page text. Subclasses
+        override this when the site needs specific handling.
+        """
+        text = await self._detail_text(item.opportunity_url, client)
+        if not text:
+            return item
+        # A deadline stated on the opportunity's own page is far more reliable
+        # than one guessed from a listing row, and funder pages very often show
+        # it only here. Without this, every rolling-looking listing is stored as
+        # permanently open and never expires.
+        if not item.deadline_raw:
+            m = _DETAIL_DEADLINE.search(text)
+            if m:
+                item.deadline_raw = m.group(1)[:64]
+                item.assume_active = False
+        if not item.funding_amount:
+            item.funding_amount = extract_amount(text)
+        if not item.organization:
+            item.organization = extract_organization(text, item.title)
+        if not item.summary and len(text) > 120:
+            item.summary = text[:1000]
         return item
+
+    async def _detail_text(self, url: str, client: httpx.AsyncClient) -> str:
+        """Readable text of a detail page, or '' if it can't be fetched."""
+        if not url or not url.startswith("http"):
+            return ""
+        try:
+            async with self._semaphore:
+                elapsed = time.monotonic() - self._last_request
+                if elapsed < settings.rate_limit_delay:
+                    await asyncio.sleep(settings.rate_limit_delay - elapsed)
+                self._last_request = time.monotonic()
+                resp = await client.get(url)
+                resp.raise_for_status()
+        except (httpx.HTTPError, ValueError):
+            return ""
+        soup = BeautifulSoup(resp.text, "lxml")
+        for tag in soup(["script", "style", "nav", "header", "footer"]):
+            tag.decompose()
+        return re.sub(r"\s+", " ", soup.get_text(" ", strip=True))[:20_000]
+
+    # ------------------------------------------------------- detail enrichment
+    def _needs_detail(self, item: RawOpportunity) -> bool:
+        """Only worth a request when something the dashboard shows is missing.
+
+        A missing deadline counts: it decides whether the opportunity is shown as
+        live or archived, so it matters more than the other two.
+        """
+        return not (item.funding_amount and item.organization and item.deadline_raw)
+
+    async def _enrich_batch(
+        self, items: list[RawOpportunity], client: httpx.AsyncClient, budget: list[int]
+    ) -> None:
+        """Fill gaps in-place by visiting detail pages, within a request budget.
+
+        Deliberately targeted rather than exhaustive: a full crawl can be tens
+        of thousands of listings, and fetching every one would take many hours
+        and hammer the source site. Only rows actually missing a field are
+        fetched, and `budget` caps how many per run.
+        """
+        if not self.enrich_details or budget[0] <= 0:
+            return
+        targets = [i for i in items if self._needs_detail(i)][: budget[0]]
+        if not targets:
+            return
+        budget[0] -= len(targets)
+        results = await asyncio.gather(
+            *(self.parse_detail(i, client) for i in targets), return_exceptions=True
+        )
+        for original, result in zip(targets, results):
+            if isinstance(result, Exception):
+                log.debug("[%s] detail enrichment failed for %s: %s",
+                          self.name, original.opportunity_url, result)
 
     # ------------------------------------------------------------------ engine
     async def crawl(
@@ -131,6 +227,7 @@ class BaseScraper(ABC):
         request: PageRequest | None = PageRequest(self.start_url)
         page_number = 0
         seen_urls: set[str] = set()
+        detail_budget = [settings.detail_fetch_limit]   # shared, decremented per page
 
         async with httpx.AsyncClient(
             headers={
@@ -192,6 +289,7 @@ class BaseScraper(ABC):
                     await progress("page_done", {"source": self.name, "page": page_number, "found": 0})
                     return
 
+                await self._enrich_batch(items, client, detail_budget)
                 yield items
                 await progress("page_done", {"source": self.name, "page": page_number, "found": len(items)})
                 request = self.next_page(html, str(request.url), page_number)

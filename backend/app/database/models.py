@@ -46,6 +46,11 @@ class Opportunity(Base):
     # e.g. "Health, Climate/Sustainability". `vertical` above keeps the raw
     # source-provided free text untouched.
     verticals: Mapped[str] = mapped_column(String(256), default="", index=True)
+    # Research vs Implementation — decides which team an RFP is routed to.
+    # Empty means genuinely unclear from the text; see services/work_type.py.
+    work_type: Mapped[str] = mapped_column(String(32), default="", index=True)
+    # Which kind of study, when it is one: Baseline / Endline / Data Collection…
+    study_type: Mapped[str] = mapped_column(String(32), default="", index=True)
     category: Mapped[Category] = mapped_column(
         Enum(Category, values_callable=lambda e: [m.value for m in e]),
         default=Category.OTHER,
@@ -67,6 +72,13 @@ class Opportunity(Base):
     date_scraped: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
+
+    # Human sign-off. This is the gate for everything downstream — only
+    # approved opportunities are meant to reach the retrieval/agentic layer —
+    # so who approved it and when are recorded, not just the flag.
+    approved: Mapped[bool] = mapped_column(default=False, index=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    approved_by: Mapped[str] = mapped_column(String(320), default="")
 
     __table_args__ = (
         UniqueConstraint("unique_id", name="uq_opportunity_unique_id"),

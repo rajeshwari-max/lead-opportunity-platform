@@ -9,6 +9,10 @@ export interface Opportunity {
   vertical: string;
   /** Canonical comma-separated vertical tags, e.g. "Health, Climate/Sustainability". */
   verticals: string;
+  /** Research | Implementation | "" — decides which team an RFP goes to. */
+  work_type: string;
+  /** Baseline | Endline | Data Collection | … when the call names one. */
+  study_type: string;
   category: string;
   deadline: string | null;
   website: string;
@@ -20,6 +24,10 @@ export interface Opportunity {
   status: string;
   source_website: string;
   date_scraped: string;
+  /** Human sign-off — the gate for everything downstream of the dashboard. */
+  approved: boolean;
+  approved_at: string | null;
+  approved_by: string;
 }
 
 export interface Paginated {
@@ -84,6 +92,14 @@ export interface FilterState {
   search: string;
   deadline_before: string;
   deadline_after: string;
+  /** Show the closed/expired archive instead of live opportunities. */
+  archived: boolean;
+  /** Only opportunities first scraped today — set by the "New Today" card. */
+  new_today: boolean;
+  /** Restrict to approved rows only. */
+  approved: boolean;
+  work_type: string;
+  study_type: string;
   page: number;
   page_size: number;
   sort_by: string;
@@ -99,6 +115,11 @@ export const emptyFilters: FilterState = {
   search: "",
   deadline_before: "",
   deadline_after: "",
+  archived: false,
+  new_today: false,
+  approved: false,
+  work_type: "",
+  study_type: "",
   page: 1,
   page_size: 25,
   sort_by: "deadline",
@@ -117,12 +138,17 @@ export interface TeamMember {
   created_at: string;
 }
 
-/** Canonical six-vertical system — mirrors backend services/verticals.py. */
+/** Canonical six-vertical system — these strings must match backend
+ *  services/verticals.py EXACTLY. The backend drops any vertical it doesn't
+ *  recognise, so a mismatch here silently turns a vertical-filtered scrape
+ *  into an unfiltered one (previously "E4C" and "Climate/Sustainability" were
+ *  short of the backend's "E4C(Evidence for Change)" and
+ *  "Climate/Sustainability(ESG)" and were being discarded). */
 export const VERTICALS = [
   "Livelihood",
   "Health",
-  "E4C",
-  "Climate/Sustainability",
+  "E4C(Evidence for Change)",
+  "Climate/Sustainability(ESG)",
   "Worker Wellbeing",
   "Innovative Finance",
 ] as const;
@@ -130,8 +156,8 @@ export const VERTICALS = [
 export const VERTICAL_DESCRIPTIONS: Record<string, string> = {
   Livelihood: "Agriculture and Rural Management",
   Health: "Health",
-  E4C: "Research and Community Engagement",
-  "Climate/Sustainability": "Climate / Sustainability",
+  "E4C(Evidence for Change)": "Research and Community Engagement",
+  "Climate/Sustainability(ESG)": "Climate / Sustainability",
   "Worker Wellbeing": "Worker Wellbeing (WWB)",
   "Innovative Finance": "Innovative Finance",
 };
@@ -151,4 +177,21 @@ export interface SendResult {
   member: string;
   sent: number;
   detail?: string | null;
+}
+
+export interface EmailSettings {
+  digest_enabled: boolean;
+  digest_hour: number;
+  digest_minute: number;
+  /** Days-before-deadline at which reminders are sent, descending. */
+  reminder_days: number[];
+  /** Email new matches the moment a scrape finishes. */
+  send_on_scrape: boolean;
+  next_run: string | null;
+}
+
+export interface DigestRunResult {
+  members_emailed: number;
+  opportunities_sent: number;
+  reminders_sent: number;
 }
