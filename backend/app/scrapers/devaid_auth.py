@@ -25,11 +25,30 @@ PROFILE_DIR = Path(__file__).resolve().parents[2] / "data" / "devaid_profile"
 
 _CONNECTED_MARKER = PROFILE_DIR / ".connected"
 
+# A portable copy of the signed-in session: cookies plus localStorage, the same
+# thing Playwright calls a "storage state".
+#
+# This exists because a headless server cannot show a login window, and that
+# window is not automatable — the login is CAPTCHA-protected and scripting it
+# is precisely what DevelopmentAid's terms forbid. So the human step stays
+# human: you log in yourself, in your own browser, on a machine that has a
+# screen. Only the resulting session is carried across, which is the same thing
+# copying the profile folder did, minus a few hundred megabytes of Chrome cache.
+SESSION_FILE = PROFILE_DIR.parent / "devaid_session.json"
+
+
+def has_session_file() -> bool:
+    return SESSION_FILE.exists() and SESSION_FILE.stat().st_size > 2
+
 
 def has_profile() -> bool:
-    """True only after the user completed the interactive login at least once
-    (scrapers create the profile folder on their own — that doesn't count)."""
-    return _CONNECTED_MARKER.exists()
+    """True when a signed-in session is available by either route.
+
+    Either the user completed the interactive login on this machine, or a
+    session exported from such a machine was uploaded here. (Scrapers create
+    the profile folder on their own — its mere existence doesn't count.)
+    """
+    return _CONNECTED_MARKER.exists() or has_session_file()
 
 
 def open_persistent(pw, headless: bool = True):
@@ -45,6 +64,14 @@ def open_persistent(pw, headless: bool = True):
         viewport={"width": 1400, "height": 900},
         args=["--disable-blink-features=AutomationControlled"],
     )
+
+    # An uploaded session takes priority over the local profile, but only when
+    # this machine has no interactive login of its own. That ordering matters:
+    # on your PC the profile is the live thing and stays authoritative, while
+    # on a server the uploaded session is the only thing there is.
+    if has_session_file() and not _CONNECTED_MARKER.exists():
+        return _context_from_session(pw, common)
+
     try:
         # Real Chrome, real UA — don't override user_agent (a mismatched UA
         # string is itself a bot signal).
@@ -56,6 +83,94 @@ def open_persistent(pw, headless: bool = True):
         return pw.chromium.launch_persistent_context(
             str(PROFILE_DIR), user_agent=settings.user_agent, **common
         )
+
+
+def _context_from_session(pw, common: dict):
+    """Browser context restored from an uploaded session file.
+
+    Not a persistent context: storage_state and launch_persistent_context are
+    mutually exclusive in Playwright, so this launches an ordinary browser and
+    injects the cookies and localStorage instead. Callers only ever use the
+    returned object as a context, so the difference doesn't leak out.
+    """
+    launch_args = {k: v for k, v in common.items() if k in ("headless", "args")}
+    context_args = {
+        "viewport": common.get("viewport"),
+        "storage_state": str(SESSION_FILE),
+        "user_agent": settings.user_agent,
+    }
+    try:
+        browser = pw.chromium.launch(channel="chrome", **launch_args)
+    except Exception:
+        log.warning("[devaid] real Chrome not available — using bundled Chromium")
+        browser = pw.chromium.launch(**launch_args)
+    log.info("[devaid] using uploaded session (%s)", SESSION_FILE.name)
+    return browser.new_context(**context_args)
+
+
+def export_session_state() -> dict:
+    """Capture the current signed-in session so it can be moved to a server.
+
+    Run on the machine where you logged in. Raises if this machine has no
+    session to export, rather than writing an empty file that would fail
+    silently once uploaded.
+    """
+    import json
+
+    from playwright.sync_api import sync_playwright
+
+    if not _CONNECTED_MARKER.exists() and not has_session_file():
+        raise RuntimeError(
+            "No DevelopmentAid session on this machine to export. Click "
+            "'Connect account' and finish signing in first."
+        )
+
+    with sync_playwright() as pw:
+        context = open_persistent(pw, headless=True)
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            # Load a real page first: cookies are set per-origin and a context
+            # that has never navigated exports an empty state.
+            page.goto("https://www.developmentaid.org/grants/search", timeout=60_000)
+            page.wait_for_timeout(2000)
+            signed_in = is_signed_in(page)
+            state = context.storage_state()
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+
+    if not signed_in:
+        raise RuntimeError(
+            "The saved session is no longer signed in, so exporting it would "
+            "just move an expired session. Click 'Connect account' and log in "
+            "again first."
+        )
+    if not state.get("cookies"):
+        raise RuntimeError("Session captured no cookies — nothing useful to export.")
+
+    log.info("[devaid] exported session: %s cookie(s)", len(state["cookies"]))
+    return json.loads(json.dumps(state))     # plain JSON-safe dict
+
+
+def import_session_state(state: dict) -> int:
+    """Install a session exported from another machine. Returns cookie count."""
+    import json
+
+    if not isinstance(state, dict) or not state.get("cookies"):
+        raise ValueError(
+            "That file doesn't look like a DevelopmentAid session — expected "
+            "JSON with a 'cookies' list, produced by Download session."
+        )
+    SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SESSION_FILE.write_text(json.dumps(state), encoding="utf-8")
+    try:
+        SESSION_FILE.chmod(0o600)            # it is a live credential
+    except OSError:
+        pass
+    log.info("[devaid] imported session: %s cookie(s)", len(state["cookies"]))
+    return len(state["cookies"])
 
 
 def is_signed_in(page) -> bool:
@@ -147,6 +262,24 @@ def verify_session() -> bool:
                 pass
 
 
+class NoDisplayError(RuntimeError):
+    """Raised when there is no screen to show the login window on."""
+
+
+def display_available() -> bool:
+    """Whether a visible browser window can actually be shown here.
+
+    Windows and macOS always have a desktop. Linux only does when an X or
+    Wayland display is attached, which a headless EC2 instance has not.
+    """
+    import os
+    import sys
+
+    if sys.platform in ("win32", "darwin"):
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def connect_interactive_sync() -> bool:
     """Open a VISIBLE browser for the user to log in.
 
@@ -158,6 +291,26 @@ def connect_interactive_sync() -> bool:
     the account was connected.
     """
     from playwright.sync_api import sync_playwright
+
+    # Checked before launching, so a headless server gets an explanation and a
+    # route forward instead of a Playwright stack trace about a missing
+    # XServer. This step cannot be made headless: its entire purpose is a human
+    # typing into the window, and no amount of configuration substitutes for a
+    # screen. (Automating the credential entry is not an option either — the
+    # login is CAPTCHA-protected and scripting it is what their terms forbid.)
+    if not display_available():
+        raise NoDisplayError(
+            "This server has no display, so the DevelopmentAid login window "
+            "cannot be shown. Three ways forward:\n"
+            "  1. Copy an already-authenticated profile from a machine where "
+            "you have logged in: scp -r backend/data/devaid_profile to this "
+            "host's backend/data/.\n"
+            "  2. Connect over SSH with X11 forwarding (ssh -Y) and an X "
+            "server on your desktop, then click Connect again.\n"
+            "  3. Leave DevelopmentAid running on your own machine and let "
+            "this server scrape the other sources.\n"
+            "Every other source works here without a display."
+        )
 
     with sync_playwright() as pw:
         context = open_persistent(pw, headless=False)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Loader2, RefreshCw, UserSearch } from "lucide-react";
+import { Download, KeyRound, Loader2, RefreshCw, Upload, UserSearch } from "lucide-react";
 import { VerticalBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +19,55 @@ export function ExpertsCard({ readOnly = false }: { readOnly?: boolean }) {
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [sessionMsg, setSessionMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  /** Save the signed-in session to a file so it can be moved to a server. */
+  const downloadSession = async () => {
+    setSessionMsg(null);
+    const res = await fetch("/api/devaid/session/export");
+    if (!res.ok) {
+      setSessionMsg({ ok: false, text: (await res.json()).detail ?? "Export failed" });
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "devaid_session.json";
+    a.click();
+    URL.revokeObjectURL(url);
+    setSessionMsg({ ok: true, text: "Downloaded. Upload this file on the server." });
+  };
+
+  /** Install a session exported elsewhere. The server verifies it really is
+   *  signed in before reporting success — an expired session is valid JSON. */
+  const uploadSession = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setSessionMsg(null);
+    try {
+      const body = await file.text();
+      const res = await fetch("/api/devaid/session/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSessionMsg({ ok: true, text: `Connected — ${data.cookies} cookies installed.` });
+        setConnected(true);
+      } else {
+        setSessionMsg({ ok: false, text: data.detail ?? "Upload failed" });
+      }
+    } catch {
+      setSessionMsg({ ok: false, text: "That file could not be read as JSON." });
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -111,6 +160,34 @@ export function ExpertsCard({ readOnly = false }: { readOnly?: boolean }) {
               ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Waiting for you to log in…</>
               : <><KeyRound className="h-3.5 w-3.5" /> Reconnect account</>}
           </Button>
+        )}
+        {/* Session transfer. On a server the Connect button above cannot work —
+            there is no screen to open a login window on — so the session is
+            carried across from a machine that has one. */}
+        {!readOnly && (
+          <div className="space-y-1.5 rounded-lg border border-border p-2.5">
+            <p className="text-xs font-medium">Move this session to another machine</p>
+            <p className="text-xs text-muted-foreground">
+              A server can't show a login window. Log in here, download the
+              session, then upload it on the server.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              <Button size="sm" variant="outline" onClick={downloadSession}>
+                <Download className="h-3.5 w-3.5" /> Download session
+              </Button>
+              <label className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-xs hover:bg-muted">
+                <Upload className="h-3.5 w-3.5" />
+                {uploading ? "Checking…" : "Upload session"}
+                <input type="file" accept="application/json,.json" className="hidden"
+                       disabled={uploading} onChange={uploadSession} />
+              </label>
+            </div>
+            {sessionMsg && (
+              <p className={`text-xs ${sessionMsg.ok ? "text-emerald-500" : "text-red-500"}`}>
+                {sessionMsg.text}
+              </p>
+            )}
+          </div>
         )}
         {rows.length === 0 && !error && (
           <p className="text-sm text-muted-foreground">

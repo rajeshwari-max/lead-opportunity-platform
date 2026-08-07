@@ -453,6 +453,60 @@ def devaid_status() -> dict[str, bool]:
     return {"connected": has_profile()}
 
 
+@router.get("/devaid/session/export")
+async def devaid_session_export() -> Response:
+    """Download this machine's signed-in session as a file.
+
+    Run on the machine where you logged in; upload the result to the server.
+    Only the session moves — no password ever leaves your browser, and the
+    login itself stays a manual human step.
+    """
+    import asyncio
+    import json
+
+    from app.scrapers.devaid_auth import export_session_state
+
+    try:
+        state = await asyncio.to_thread(export_session_state)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return Response(
+        content=json.dumps(state),
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="devaid_session.json"'},
+    )
+
+
+@router.post("/devaid/session/import", dependencies=[Depends(require_writable)])
+async def devaid_session_import(payload: dict) -> dict:
+    """Install a session exported from a machine that has a screen.
+
+    This is how DevelopmentAid works on a headless server: the login window
+    cannot open here, so the session is carried across instead.
+    """
+    import asyncio
+
+    from app.scrapers.devaid_auth import import_session_state, verify_session
+
+    try:
+        count = await asyncio.to_thread(import_session_state, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # Prove it actually works here rather than reporting success on a file that
+    # happens to be well-formed — an expired session is well-formed too.
+    ok = await asyncio.to_thread(verify_session)
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Session installed ({count} cookies) but it is not signed in "
+                   "on this server. It may have expired — log in again on your "
+                   "own machine, download a fresh session and upload that.",
+        )
+    return {"status": "connected", "cookies": count}
+
+
 @router.post("/devaid/connect")
 async def devaid_connect() -> dict[str, str]:
     """Open a visible browser window for the user to log into DevelopmentAid.
@@ -463,10 +517,15 @@ async def devaid_connect() -> dict[str, str]:
     """
     import asyncio
 
-    from app.scrapers.devaid_auth import connect_interactive_sync
+    from app.scrapers.devaid_auth import NoDisplayError, connect_interactive_sync
 
     try:
         ok = await asyncio.to_thread(connect_interactive_sync)
+    except NoDisplayError as exc:
+        # 409, not 502: nothing failed. This host simply cannot show a window,
+        # and the message says what to do instead. A 502 would read as an
+        # outage and send someone debugging a problem that doesn't exist.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not open login window: {exc}") from exc
     if not ok:
