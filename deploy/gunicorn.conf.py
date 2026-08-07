@@ -36,9 +36,19 @@ timeout = 300
 graceful_timeout = 60
 keepalive = 5
 
-# Supervisor also captures stdout/stderr; these give the API its own files.
-accesslog = "/home/ubuntu/Deployment/lead-scanning/logs/gunicorn-access.log"
-errorlog = "/home/ubuntu/Deployment/lead-scanning/logs/gunicorn-error.log"
+# Log paths are derived from this file's own location rather than hard-coded.
+# An absolute path here means the checkout directory must be named exactly
+# "lead-scanning" or Gunicorn cannot open its log file and Supervisor reports a
+# bare "spawn error" — which says nothing about the real cause. Deriving them
+# lets the repo sit under any directory name.
+from pathlib import Path as _Path
+
+_ROOT = _Path(__file__).resolve().parents[1]      # the repo root
+_LOGS = _ROOT / "logs"
+_LOGS.mkdir(parents=True, exist_ok=True)          # Gunicorn will not create it
+
+accesslog = str(_LOGS / "gunicorn-access.log")
+errorlog = str(_LOGS / "gunicorn-error.log")
 loglevel = "info"
 
 # Nginx sets X-Forwarded-*; trust it so request logs show the real client IP.

@@ -12,7 +12,10 @@
 
 set -euo pipefail
 
-APP_DIR="/home/ubuntu/Deployment/lead-scanning"
+# Derived from this script's own location, so the checkout can live under any
+# directory name. A hard-coded path here silently deployed the wrong tree if the
+# repo was cloned under its GitHub name rather than "lead-scanning".
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WEB_ROOT="/var/www/lead-scanning/dist"
 SERVICE="lead-scanning-api"
 TARGET="${1:-all}"

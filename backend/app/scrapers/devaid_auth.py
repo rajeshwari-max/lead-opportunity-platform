@@ -245,6 +245,26 @@ def verify_session() -> bool:
                 or detail.get("pagination", 0) > 0
             )
             clearly_guest = bool(detail.get("signIn")) and not member_signals
+
+            # "Saw nothing at all" is not the same as "signed in". With no
+            # cards, no member signals and no Sign in link, the page simply
+            # never rendered — and treating that as success wrote the connected
+            # marker on zero evidence, so the dashboard reported a working
+            # account while every scrape came back empty.
+            nothing_rendered = (
+                not member_signals
+                and not detail.get("signIn")
+                and detail.get("cards", 0) == 0
+            )
+            if nothing_rendered:
+                log.error(
+                    "[devaid] verify: the search page rendered nothing (no cards, no "
+                    "sign-in link, no account menu). The session cannot be confirmed "
+                    "— treating it as NOT connected rather than reporting a working "
+                    "account that returns no results."
+                )
+                return False
+
             signed_in = not clearly_guest
             log.info("[devaid] verify: signed_in=%s (member_signals=%s) details=%s",
                      signed_in, member_signals, detail)
