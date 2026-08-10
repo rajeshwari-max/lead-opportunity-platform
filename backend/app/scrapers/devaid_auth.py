@@ -72,17 +72,67 @@ def open_persistent(pw, headless: bool = True):
     if has_session_file() and not _CONNECTED_MARKER.exists():
         return _context_from_session(pw, common)
 
+    def _launch():
+        try:
+            # Real Chrome, real UA — don't override user_agent (a mismatched UA
+            # string is itself a bot signal).
+            return pw.chromium.launch_persistent_context(
+                str(PROFILE_DIR), channel="chrome", **common
+            )
+        except Exception as exc:
+            if "already in use" in str(exc).lower():
+                raise                    # handled below, not a missing-Chrome case
+            log.warning("[devaid] real Chrome not available — using bundled Chromium")
+            return pw.chromium.launch_persistent_context(
+                str(PROFILE_DIR), user_agent=settings.user_agent, **common
+            )
+
     try:
-        # Real Chrome, real UA — don't override user_agent (a mismatched UA
-        # string is itself a bot signal).
-        return pw.chromium.launch_persistent_context(
-            str(PROFILE_DIR), channel="chrome", **common
-        )
+        return _launch()
+    except Exception as exc:
+        if "already in use" not in str(exc).lower():
+            raise
+        # A crashed or killed run leaves Chromium's singleton lock files behind,
+        # and every later launch refuses the profile — the error says "another
+        # instance of Chromium" even when nothing is running. Clearing the stale
+        # locks is the documented recovery; doing it automatically avoids a dead
+        # end that can only be escaped by hand on a server.
+        _clear_stale_profile_locks()
+        log.warning("[devaid] profile was locked by a previous run — cleared and retrying")
+        return _launch()
+
+
+def _clear_stale_profile_locks() -> None:
+    """Remove Chromium singleton locks when no browser is actually using them.
+
+    Deliberately conservative: if a live Chromium still has the profile open,
+    the locks are left alone and the original error stands. Deleting them under
+    a running browser corrupts the profile, which would lose the session this
+    whole flow exists to protect.
+    """
+    import subprocess
+
+    try:
+        running = subprocess.run(
+            ["pgrep", "-f", str(PROFILE_DIR)],
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
     except Exception:
-        log.warning("[devaid] real Chrome not available — using bundled Chromium")
-        return pw.chromium.launch_persistent_context(
-            str(PROFILE_DIR), user_agent=settings.user_agent, **common
+        running = ""                     # pgrep unavailable — assume nothing holds it
+
+    if running:
+        log.error(
+            "[devaid] the profile is genuinely open in another process (pids: %s). "
+            "Stop it before connecting: pkill -f chrome",
+            running.replace("\n", ", "),
         )
+        return
+
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        try:
+            (PROFILE_DIR / name).unlink(missing_ok=True)
+        except OSError:
+            log.warning("[devaid] could not remove stale lock %s", name)
 
 
 def _context_from_session(pw, common: dict):
@@ -320,16 +370,20 @@ def connect_interactive_sync() -> bool:
     # login is CAPTCHA-protected and scripting it is what their terms forbid.)
     if not display_available():
         raise NoDisplayError(
-            "This server has no display, so the DevelopmentAid login window "
-            "cannot be shown. Three ways forward:\n"
-            "  1. Copy an already-authenticated profile from a machine where "
-            "you have logged in: scp -r backend/data/devaid_profile to this "
-            "host's backend/data/.\n"
-            "  2. Connect over SSH with X11 forwarding (ssh -Y) and an X "
-            "server on your desktop, then click Connect again.\n"
-            "  3. Leave DevelopmentAid running on your own machine and let "
-            "this server scrape the other sources.\n"
-            "Every other source works here without a display."
+            "This server has no screen, so a login window cannot appear here — "
+            "and it could never appear on your own computer either, because "
+            "clicking this button runs code on the server, not on your machine.\n"
+            "\n"
+            "Use 'Upload session' just below instead:\n"
+            "  1. On your own computer, open the dashboard and click Connect "
+            "account — the window appears there, because that machine has a "
+            "screen. Log in as usual.\n"
+            "  2. Click 'Download session' on that same machine.\n"
+            "  3. Come back here and click 'Upload session', choosing the file "
+            "you just downloaded.\n"
+            "\n"
+            "Your password never leaves your own browser; only the resulting "
+            "session travels. Every other source scrapes here without a display."
         )
 
     with sync_playwright() as pw:

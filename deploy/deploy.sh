@@ -16,7 +16,13 @@ set -euo pipefail
 # directory name. A hard-coded path here silently deployed the wrong tree if the
 # repo was cloned under its GitHub name rather than "lead-scanning".
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WEB_ROOT="/var/www/lead-scanning/dist"
+# Read the web root from Nginx rather than assuming it. A hard-coded guess sent
+# a good build to a directory that didn't exist; `cp` failed, the previous files
+# stayed in place, and the deploy looked like it had worked while the dashboard
+# kept serving the old bundle. Override with WEB_ROOT=... if needed.
+WEB_ROOT="${WEB_ROOT:-$(sudo nginx -T 2>/dev/null \
+    | awk '/^[[:space:]]*root[[:space:]]/ {gsub(/;/,"",$2); print $2; exit}')}"
+WEB_ROOT="${WEB_ROOT:-/var/www/lead-scanning/dist}"
 SERVICE="lead-scanning-api"
 TARGET="${1:-all}"
 
