@@ -56,6 +56,12 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="report, change nothing")
     ap.add_argument("--members", action="store_true", help="merge team_members too")
     ap.add_argument(
+        "--experts", action="store_true",
+        help="merge Expert Pool counts. DevelopmentAid's bot protection blocks "
+             "datacentre IPs, so a server cannot refresh these itself — refresh "
+             "them on a machine that can reach the site, then carry them over",
+    )
+    ap.add_argument(
         "--active-only", action="store_true",
         help="skip expired rows (the dashboard shows live ones by default, and "
              "the Archive toggle was removed, so expired rows are invisible in "
@@ -109,7 +115,10 @@ def main() -> int:
             new,
         )
         dst.commit()
-        print(f"inserted             : {dst.total_changes}")
+        # len(new), not dst.total_changes: the FTS triggers write a row into the
+        # search index for every insert, so total_changes counts those too and
+        # reports a number several times larger than the opportunities added.
+        print(f"inserted             : {len(new)}")
 
     if args.members:
         m_shared = [c for c in columns(dst, "team_members")
@@ -124,6 +133,33 @@ def main() -> int:
                 f"VALUES ({','.join('?' * len(m_shared))})",
                 m_new,
             )
+            dst.commit()
+
+    if args.experts:
+        # Upsert by vertical, and only when the incoming row is actually newer.
+        # These are a snapshot of a live count, so "most recently refreshed
+        # wins" is the right rule — unlike opportunities, where the target's
+        # copy may carry an approval and must not be overwritten.
+        e_shared = [c for c in columns(dst, "expert_counts")
+                    if c in columns(src, "expert_counts") and c != "id"]
+        existing = {
+            r[0]: r[1] for r in dst.execute("SELECT vertical, updated_at FROM expert_counts")
+        }
+        rows_e = src.execute(f"SELECT {','.join(e_shared)} FROM expert_counts").fetchall()
+        newer = [r for r in rows_e
+                 if r["vertical"] not in existing
+                 or str(r["updated_at"] or "") > str(existing[r["vertical"]] or "")]
+        print(f"\nexpert counts newer  : {len(newer)} of {len(rows_e)}")
+        for r in newer:
+            print(f"    {r['vertical']:34} {r['count']}")
+        if newer and not args.dry_run:
+            for r in newer:
+                dst.execute("DELETE FROM expert_counts WHERE vertical = ?", (r["vertical"],))
+                dst.execute(
+                    f"INSERT INTO expert_counts ({','.join(e_shared)}) "
+                    f"VALUES ({','.join('?' * len(e_shared))})",
+                    tuple(r[c] for c in e_shared),
+                )
             dst.commit()
 
     total = dst.execute("SELECT count(*) FROM opportunities").fetchone()[0]

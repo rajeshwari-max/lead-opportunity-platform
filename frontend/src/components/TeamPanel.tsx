@@ -80,8 +80,23 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
   };
 
   const remove = async (m: TeamMember) => {
-    await api.deleteMember(m.id);
-    load();
+    // Deleting a member also loses their send history, so it is worth a pause.
+    if (!window.confirm(`Remove ${m.name} (${m.email}) from lead routing?`)) return;
+    try {
+      const res = await api.deleteMember(m.id);
+      // The response was previously ignored entirely: a 403, a 405 from a proxy
+      // that disallows DELETE, or a 404 all looked identical to success — the
+      // row simply stayed put with no explanation.
+      if (res.ok || res.status === 204) {
+        notify("ok", `Removed ${m.name}`);
+      } else {
+        notify("err", `Could not remove ${m.name} — server said ${res.status}`);
+      }
+    } catch {
+      notify("err", "Could not remove — is the backend reachable?");
+    } finally {
+      load();
+    }
   };
 
   const sendNow = async (m: TeamMember, resend = false) => {

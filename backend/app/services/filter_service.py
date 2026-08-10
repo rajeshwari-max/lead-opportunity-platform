@@ -148,15 +148,26 @@ class FilterService:
 
     # ---------------------------------------------------------------- facets
     def facets(self) -> dict[str, list[str]]:
-        """Distinct values powering the filter sidebar (normalized across sources)."""
+        """Distinct values powering the filter sidebar (normalized across sources).
+
+        Every step is defensive about NULLs and non-strings. This endpoint feeds
+        the entire filter sidebar, so when it raises, the sidebar renders nothing
+        at all — the user sees an app with no filters and no error, which is a
+        very expensive way to signal one bad row. Rows imported from another
+        database can carry NULL in columns the ORM treats as always-string
+        (SQLAlchemy defaults apply on insert through the ORM, not at the DB
+        level), and `NULL != ''` is NULL in SQL, so such rows slip past the
+        obvious guard.
+        """
         def distinct(col) -> list[str]:
             rows = self.db.execute(
-                select(col).where(col != "").distinct().order_by(col)
+                select(col).where(col.is_not(None)).where(col != "").distinct()
             ).scalars().all()
-            return [str(r) for r in rows]
+            return sorted({str(r) for r in rows if r is not None and str(r).strip()})
 
         def merged(col, baseline: list[str]) -> list[str]:
-            return sorted(set(distinct(col)) | set(baseline))
+            values = set(distinct(col)) | {str(b) for b in baseline if b}
+            return sorted(values)
 
         return {
             "categories": [
