@@ -10,3 +10,14 @@ frontend/dist/
 # Word lock files (created while a .docx is open) — never belong in the repo
 ~$*.docx
 ~$*.xlsx
+
+# Live DevelopmentAid session — cookies for a signed-in account. backend/data/
+# is already ignored, but the export writes wherever it is run from, and one of
+# these reached the repo as an empty file. This repository is public, so a
+# populated one would publish a working session to anyone who looked.
+devaid_session.json
+*devaid_session*.json
+# Databases, wherever they land
+*.db
+*.db-wal
+*.db-shm
