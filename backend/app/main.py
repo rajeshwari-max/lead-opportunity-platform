@@ -44,6 +44,7 @@ async def lifespan(_app: FastAPI):
     from app.services.geography import backfill_geography
     from app.services.organization import backfill_organizations
     from app.services.verticals import backfill_verticals
+    from app.services.deadline_audit import audit_deadlines
     from app.services.links import repair_links
     from app.services.study_type import backfill_study_types
     from app.services.work_type import backfill_work_types
@@ -65,7 +66,10 @@ async def lifespan(_app: FastAPI):
     st_task = asyncio.create_task(asyncio.to_thread(backfill_study_types))
     # Clear links that resolve to a homepage rather than the opportunity.
     link_task = asyncio.create_task(asyncio.to_thread(repair_links))
+    # Sentinel deadlines (9999-12-31 = "ongoing") and Active/Expired drift.
+    dl_task = asyncio.create_task(asyncio.to_thread(audit_deadlines))
     yield
+    dl_task.cancel()
     link_task.cancel()
     st_task.cancel()
     wt_task.cancel()
@@ -85,6 +89,34 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --------------------------------------------------------------- auth gate
+# A middleware rather than a route dependency: it has to cover the static
+# frontend as well as the API, and a dependency on the router would leave the
+# dashboard HTML itself readable by anyone.
+@app.middleware("http")
+async def _require_password(request, call_next):
+    from fastapi.responses import JSONResponse
+
+    from app.core.auth import COOKIE_NAME, auth_required, read_session
+
+    if auth_required():
+        path = request.url.path
+        # Exempt: the login flow itself, the capability probe the frontend needs
+        # before it can show a login form, and the signed one-click approval
+        # links from digest emails (whose HMAC is stronger proof than this
+        # password, and whose recipients are in their inbox, not the dashboard).
+        exempt = (
+            path.startswith(f"{settings.api_prefix}/login")
+            or path.startswith(f"{settings.api_prefix}/config")
+            or path.startswith(f"{settings.api_prefix}/approve/")
+        )
+        if not exempt and not read_session(request.cookies.get(COOKIE_NAME)):
+            if path.startswith(settings.api_prefix):
+                return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+            # Not an API call — let the SPA load so it can show its login form.
+    return await call_next(request)
+
 
 app.include_router(router, prefix=settings.api_prefix)
 

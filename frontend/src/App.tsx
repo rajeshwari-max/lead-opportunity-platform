@@ -4,6 +4,8 @@ import { ExpertsCard } from "@/components/ExpertsCard";
 import { FiltersSidebar } from "@/components/FiltersSidebar";
 import { Header } from "@/components/Header";
 import { AutoEmailPanel } from "@/components/AutoEmailPanel";
+import { LoginScreen } from "@/components/LoginScreen";
+import { UserMenu } from "@/components/UserMenu";
 import { OpportunitiesTable } from "@/components/OpportunitiesTable";
 import { ScraperPanel } from "@/components/ScraperPanel";
 import { StatCards } from "@/components/StatCards";
@@ -56,13 +58,29 @@ export default function App() {
   // hide them instead of showing viewers "not configured" / "connect account"
   // warnings that look like something is broken.
   const [readOnly, setReadOnly] = useState(false);
+  // null = we haven't asked the server yet, so render nothing rather than
+  // flashing the dashboard before the gate is known.
+  const [authed, setAuthed] = useState<boolean | null>(null);
+  // Admin unlocks the panels that change behaviour — scraping, team routing,
+  // email schedule. Reading and approving stay open to everyone signed in.
+  const [isAdmin, setIsAdmin] = useState(true);
+  const [user, setUser] = useState({ name: "", email: "", authRequired: false });
 
   useEffect(() => {
     api
       .config()
-      .then((c) => setReadOnly(c.read_only))
-      .catch(() => setReadOnly(false));
-  }, []);
+      .then((c) => {
+        setReadOnly(c.read_only);
+        setAuthed(c.authenticated);
+        setIsAdmin(c.is_admin);
+        setUser({ name: c.name, email: c.email, authRequired: c.auth_required });
+      })
+      .catch(() => {
+        setReadOnly(false);
+        setAuthed(true);   // backend unreachable — don't trap the user behind a
+                           // login form that cannot possibly succeed
+      });
+  }, [refreshKey]);
 
   useEffect(() => {
     localStorage.setItem(FILTERS_KEY, JSON.stringify(filters));
@@ -82,9 +100,14 @@ export default function App() {
   const { stats, statsLoading, facets, sources } = useDashboardData(filters, refreshKey);
   const progress = useScrapeProgress(refresh); // auto-refresh when a scrape finishes
 
+  if (authed === null) return null;
+  if (!authed) return <LoginScreen onSuccess={() => setRefreshKey((k) => k + 1)} />;
+
   return (
     <div className="min-h-screen">
-      <Header filters={filters} onChange={setFilters} onRefresh={resetAndRefresh} stats={stats} />
+      <Header filters={filters} onChange={setFilters} onRefresh={resetAndRefresh} stats={stats}
+              userMenu={<UserMenu name={user.name} email={user.email} isAdmin={isAdmin}
+                                  authRequired={user.authRequired} />} />
 
       <main className="mx-auto flex max-w-[1600px] flex-col gap-6 p-4 sm:p-6">
         <StatCards stats={stats} loading={statsLoading} filters={filters} onChange={setFilters} />
@@ -96,10 +119,11 @@ export default function App() {
             <OpportunitiesTable data={data} loading={loading} filters={filters} onChange={setFilters} readOnly={readOnly} />
           </div>
           <div className="flex w-full flex-col gap-6 lg:w-80 lg:shrink-0">
-            <ScraperPanel sources={sources} progress={progress} />
+            {/* Only the scraper is admin-only. Everything else stays visible. */}
+            {isAdmin && <ScraperPanel sources={sources} progress={progress} />}
             <AutoEmailPanel readOnly={readOnly} />
             <TeamPanel readOnly={readOnly} />
-            <ExpertsCard readOnly={readOnly} />
+            <ExpertsCard readOnly={readOnly} isAdmin={isAdmin} />
           </div>
         </div>
       </main>

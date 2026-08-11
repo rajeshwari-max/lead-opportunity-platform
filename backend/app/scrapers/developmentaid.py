@@ -76,9 +76,25 @@ _CARD_URL = re.compile(r'href="(/(?:grants|tenders)/view/\d+)', re.IGNORECASE)
 # An explicit sort is included so paging is deterministic: without one the
 # backend is free to reorder between requests, which makes page N overlap
 # page N-1 no matter how well the navigation works.
+# The site's own filters do work we were doing badly afterwards:
+#
+#   languages=92   English only. This is the fix for the Arabic and Russian
+#                  listings — filtered at source, they are never fetched,
+#                  parsed, classified or stored, rather than being discarded
+#                  at the end of the pipeline.
+#   sectors=…      the four sectors the team actually bids in, so the crawl
+#                  spends its per-search read budget on relevant calls instead
+#                  of the whole 1.2M-row tender archive.
+#
+# Overridable via LOP_DEVAID_GRANTS_URL / LOP_DEVAID_TENDERS_URL for when the
+# team's sector interests change, without editing code.
+_DEVAID_FILTERS = "hiddenAdvancedFilters=0&sort=deadline.desc&sectors=100,7,11,87&languages=92"
+
 _SECTIONS: list[tuple[str, str]] = [
-    ("https://www.developmentaid.org/grants/search?sort=deadline.desc", "grants"),
-    ("https://www.developmentaid.org/tenders/search?sort=deadline.desc", "tenders"),
+    (settings.devaid_grants_url or
+     f"https://www.developmentaid.org/grants/search?{_DEVAID_FILTERS}", "grants"),
+    (settings.devaid_tenders_url or
+     f"https://www.developmentaid.org/tenders/search?{_DEVAID_FILTERS}", "tenders"),
 ]
 
 _SECTION_URLS: dict[str, str] = {slug: url for url, slug in _SECTIONS}

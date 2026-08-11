@@ -224,6 +224,11 @@ def _render_digest(
        f'lists its {cap} soonest deadlines — the rest are in the '
        f'<a href="{settings.dashboard_url}" style="color:#4f46e5;">dashboard</a>.</p>'
        if capped else ''}
+      <p style="margin:12px 0 4px;">
+        <a href="{settings.dashboard_url}" style="display:inline-block;
+        background:#4f46e5;color:#ffffff;border-radius:6px;padding:9px 16px;
+        font-size:13px;font-weight:600;text-decoration:none;">Open the dashboard</a>
+      </p>
       <div style="margin:14px 0 4px;">{index}</div>
       {''.join(sections)}
       <p style="color:#9ca3af;font-size:12px;margin-top:22px;">Sent by Lead Scanning Platform</p>

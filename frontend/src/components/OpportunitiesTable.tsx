@@ -4,7 +4,7 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -24,6 +24,25 @@ import { daysLeft, formatDate } from "@/lib/utils";
 import type { FilterState, Opportunity, Paginated } from "@/lib/types";
 
 const col = createColumnHelper<Opportunity>();
+
+/** Table layout preferences live in the browser, not the server: how wide the
+ *  Title column should be is a personal reading choice, and storing it centrally
+ *  would have two people overwriting each other's view. */
+function loadPref<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function savePref(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* private browsing / quota — layout simply won't persist */
+  }
+}
 
 interface Props {
   data: Paginated | null;
@@ -62,10 +81,26 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
   const columns = [
     col.accessor("title", {
       header: "Title",
+      size: 300,
       // title={} gives the full text on hover — titles are routinely longer
       // than two lines and were previously unreadable once clamped.
       cell: (info) => {
-        const { opportunity_url, website } = info.row.original;
+        const { opportunity_url, website, source_website } = info.row.original;
+        // Some sources put every listing behind their own login. The link is
+        // correct, but an unauthenticated visitor lands on a sign-in page and
+        // reasonably concludes the link is broken. Saying so first costs a
+        // second and stops that conclusion.
+        const needsLogin = /developmentaid|devex|globaltenders/i.test(source_website || "");
+        const warnThenOpen = (e: React.MouseEvent, url: string) => {
+          if (!needsLogin) return;
+          e.preventDefault();
+          const go = window.confirm(
+            `${source_website} shows this opportunity only to signed-in members.\n\n` +
+            "If you aren't logged in there, you'll land on their sign-in page — " +
+            "log in, then this link will open the opportunity.\n\nOpen it now?"
+          );
+          if (go) window.open(url, "_blank", "noopener");
+        };
         // Some sources never publish a per-call URL, and some older rows had a
         // link that resolved to a homepage. Rather than dress either up as a
         // working link, say so and offer the source site as a clearly separate
@@ -73,7 +108,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
         // missing one.
         if (!opportunity_url) {
           return (
-            <div className="max-w-[17rem]">
+            <div>
               <span className="line-clamp-2 font-medium" title={info.getValue()}>
                 {info.getValue()}
               </span>
@@ -87,20 +122,27 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
           );
         }
         return (
-          <a href={opportunity_url} target="_blank" rel="noreferrer"
-             title={info.getValue()}
-             className="group flex max-w-[17rem] items-start gap-1 font-medium underline-offset-2 hover:text-primary hover:underline">
-            <span className="line-clamp-2">{info.getValue()}</span>
-            <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
-          </a>
+          <div>
+            <a href={opportunity_url} target="_blank" rel="noreferrer"
+               title={info.getValue()}
+               onClick={(e) => warnThenOpen(e, opportunity_url)}
+               className="group flex items-start gap-1 font-medium underline-offset-2 hover:text-primary hover:underline">
+              <span className="line-clamp-2">{info.getValue()}</span>
+              <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+            </a>
+            {needsLogin && (
+              <span className="text-[11px] text-muted-foreground">sign-in required</span>
+            )}
+          </div>
         );
       },
     }),
     col.accessor("organization", {
       header: "Organization",
+      size: 150,
       cell: (info) => (
         <span title={info.getValue() || undefined}
-              className="line-clamp-2 max-w-32 text-muted-foreground">
+              className="line-clamp-2 text-muted-foreground">
           {info.getValue() || "—"}
         </span>
       ),
@@ -111,6 +153,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
     // reads first because it is physically above the category.
     col.accessor("category", {
       header: "Type",
+      size: 130,
       cell: (info) => {
         const { work_type: wt, study_type: study } = info.row.original;
         const tone =
@@ -137,11 +180,12 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
     }),
     col.accessor("verticals", {
       header: "Vertical",
+      size: 160,
       cell: (info) => {
         const tags = (info.getValue() || "").split(",").map((s) => s.trim()).filter(Boolean);
         if (tags.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
         return (
-          <div className="flex max-w-36 flex-wrap gap-1">
+          <div className="flex flex-wrap gap-1">
             {tags.map((t) => (
               <VerticalBadge key={t} vertical={t} />
             ))}
@@ -151,6 +195,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
     }),
     col.accessor("deadline", {
       header: "Deadline",
+      size: 120,
       cell: (info) => {
         if (!info.getValue())
           return <span className="text-emerald-400">Ongoing</span>;
@@ -183,6 +228,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
     // the canonical country leads and the full published text is on hover.
     col.accessor("country", {
       header: "Country",
+      size: 150,
       cell: (info) => {
         const country = info.getValue();
         const { location, region } = info.row.original;
@@ -192,7 +238,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
         // into five stacked words in a narrow column, which read as broken
         // rather than as two fields. The table already scrolls horizontally.
         return (
-          <div className="max-w-36 whitespace-nowrap" title={location || country || undefined}>
+          <div className="whitespace-nowrap" title={location || country || undefined}>
             <div className="truncate">
               {country || location}
               {multi && <span className="ml-1 text-xs text-muted-foreground">+ others</span>}
@@ -204,11 +250,13 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
     }),
     col.accessor("funding_amount", {
       header: "Amount",
+      size: 110,
       cell: (info) => <span className="whitespace-nowrap">{info.getValue() || "—"}</span>,
     }),
     col.display({
       id: "approve",
       header: "Approve",
+      size: 110,
       cell: (info) => {
         const o = info.row.original;
         const approved = pendingApproval[o.id] ?? o.approved;
@@ -265,14 +313,33 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
     }),
     col.accessor("source_website", {
       header: "Source",
+      size: 130,
       cell: (info) => <span className="whitespace-nowrap text-xs text-muted-foreground">{info.getValue()}</span>,
     }),
   ];
+
+  // --- adjustable table -----------------------------------------------------
+  // Column widths, which columns are shown and how tall the rows are, all kept
+  // in localStorage. This is a per-person reading preference: someone scanning
+  // titles wants a wide Title column and no Source; someone reconciling funders
+  // wants the opposite. A single fixed layout cannot serve both.
+  const [sizing, setSizing] = useState<Record<string, number>>(
+    () => loadPref("lop-col-sizing", {} as Record<string, number>)
+  );
+  useEffect(() => savePref("lop-col-sizing", sizing), [sizing]);
 
   const table = useReactTable({
     data: data?.items ?? [],
     columns,
     getCoreRowModel: getCoreRowModel(),
+    columnResizeMode: "onChange",
+    // 70px floor: a column dragged to zero is unrecoverable without
+    // clearing localStorage, since there is no edge left to grab.
+    defaultColumn: { minSize: 70 },
+    enableColumnResizing: true,
+    state: { columnSizing: sizing },
+    onColumnSizingChange: (updater) =>
+      setSizing((cur) => (typeof updater === "function" ? updater(cur) : cur)),
     manualPagination: true,
     manualSorting: true,
   });
@@ -331,7 +398,10 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
         </div>
       </CardHeader>
       <CardContent className="overflow-x-auto p-0">
-        <table className="w-full text-sm">
+        {/* table-fixed makes the browser honour the widths set on each
+                header instead of auto-sizing columns to their content —
+                without it, dragging a column changes nothing visible. */}
+        <table className="w-full table-fixed text-sm" style={{ width: table.getTotalSize() }}>
           {/* Sticky header: the table runs to 100 rows a page, and the column
               labels used to scroll out of sight. */}
           <thead className="sticky top-0 z-10">
@@ -347,7 +417,8 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
                     : filters.sort_dir === "asc" ? ArrowUp : ArrowDown;
                   return (
                     <th key={h.id}
-                        className="bg-card px-4 py-3 font-medium text-muted-foreground">
+                        style={{ width: h.getSize() }}
+                        className="group relative bg-card px-4 py-3 font-medium text-muted-foreground">
                       <button
                         className={`inline-flex items-center gap-1 transition-colors hover:text-foreground ${
                           isSorted ? "text-foreground" : ""}`}
@@ -356,6 +427,19 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
                         {flexRender(h.column.columnDef.header, h.getContext())}
                         <Icon className={`h-3 w-3 ${isSorted ? "text-primary" : "opacity-50"}`} />
                       </button>
+                      {/* Drag to resize. The handlers come from the table
+                          instance so the width tracks the pointer rather than
+                          snapping on release. */}
+                      {h.column.getCanResize() && (
+                        <span
+                          onMouseDown={h.getResizeHandler()}
+                          onTouchStart={h.getResizeHandler()}
+                          onDoubleClick={() => h.column.resetSize()}
+                          title="Drag to resize \u00b7 double-click to reset"
+                          className={`absolute right-0 top-0 h-full w-1.5 cursor-col-resize touch-none select-none rounded transition-colors hover:bg-primary/40 ${
+                            h.column.getIsResizing() ? "bg-primary" : "bg-transparent"}`}
+                        />
+                      )}
                     </th>
                   );
                 })}
@@ -386,7 +470,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
                 {row.getVisibleCells().map((cell, ci) => (
                   <td
                     key={cell.id}
-                    className={`px-4 py-3 align-top ${
+                    className={`px-4 align-top py-3 ${
                       ci === 0
                         ? "relative before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-primary before:opacity-0 before:transition-opacity group-hover:before:opacity-100"
                         : ""

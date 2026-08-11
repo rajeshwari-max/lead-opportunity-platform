@@ -194,9 +194,33 @@ _VERTICAL_KEYWORDS: dict[str, list[str]] = {
     ],
 }
 
+def _merge_team_keywords() -> dict[str, list[str]]:
+    """Fold the BD team's spreadsheet keywords into the patterns above.
+
+    Added rather than replacing: the hand-written patterns encode word
+    boundaries and variants ("bio[\\s-]?diversity") that a flat term list can't,
+    and dropping them would lose recall on phrasings the sheet doesn't spell
+    out. The sheet's terms are escaped and wrapped in \\b so a term like "Fund"
+    matches the word and not "funding" inside "refunding".
+    """
+    from app.services.keyword_inventory import VERTICAL_KEYWORDS
+
+    merged = {k: list(v) for k, v in _VERTICAL_KEYWORDS.items()}
+    for vertical, terms in VERTICAL_KEYWORDS.items():
+        if vertical not in merged:
+            continue                       # unknown vertical name — ignore quietly
+        for term in terms:
+            t = term.strip()
+            # Very short terms match far too much ("CE", "TB" inside words).
+            if len(t) < 4:
+                continue
+            merged[vertical].append(rf"\b{re.escape(t)}\b".replace(r"\ ", r"\s+"))
+    return merged
+
+
 _COMPILED: dict[str, list[re.Pattern[str]]] = {
     vertical: [re.compile(p, re.IGNORECASE) for p in patterns]
-    for vertical, patterns in _VERTICAL_KEYWORDS.items()
+    for vertical, patterns in _merge_team_keywords().items()
 }
 
 _TITLE_WEIGHT = 3

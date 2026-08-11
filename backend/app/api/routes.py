@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -33,12 +33,84 @@ router = APIRouter()
 
 
 @router.get("/config")
-def get_config() -> dict[str, bool]:
-    """Lets the frontend hide admin-only panels (scraper controls, team routing,
-    expert pool connect) on the read-only cloud mirror — those features don't
-    work there and showing their "not configured" warnings to outside viewers
-    looks broken rather than intentional."""
-    return {"read_only": settings.read_only}
+def get_config(request: Request) -> dict:
+    """Capability + identity probe. Exempt from the auth gate so the frontend
+    can decide whether to show a login form before it has a session."""
+    from app.core.auth import COOKIE_NAME, admin_required, auth_required, current_user
+
+    user = current_user(request.cookies.get(COOKIE_NAME))
+    return {
+        "read_only": settings.read_only,
+        "auth_required": auth_required(),
+        "admin_required": admin_required(),
+        **user,
+    }
+
+
+@router.post("/login")
+def login(body: dict, response: Response, db: Session = Depends(get_db)) -> dict:
+    """Sign in as a named team member.
+
+    The email identifies who you are; the password authorises you. Supplying the
+    admin password instead of the dashboard one signs you in with admin rights,
+    so there is one form rather than two.
+    """
+    from sqlalchemy import func, select
+
+    from app.core.auth import (COOKIE_NAME, SESSION_DAYS, admin_password_matches,
+                               auth_required, make_session_token, password_matches)
+
+    if not auth_required():
+        return {"authenticated": True, "name": "Local", "email": "", "is_admin": True}
+
+    email = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+    is_admin = admin_password_matches(password)
+    if not (is_admin or password_matches(password)):
+        raise HTTPException(status_code=401, detail="Incorrect password")
+
+    member = db.execute(
+        select(TeamMember).where(func.lower(TeamMember.email) == email)
+    ).scalar_one_or_none()
+    if member is None or not member.active:
+        # Named sessions only work for people who are actually on the team, so
+        # the identity in the cookie always corresponds to someone real.
+        raise HTTPException(
+            status_code=403,
+            detail="That email isn't on the team list. Ask an admin to add you "
+                   "in Team & Lead Routing.",
+        )
+
+    response.set_cookie(
+        COOKIE_NAME, make_session_token(member.email, member.name, is_admin),
+        max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/",
+    )
+    return {"authenticated": True, "name": member.name,
+            "email": member.email, "is_admin": is_admin}
+
+
+@router.post("/logout")
+def logout(response: Response) -> dict:
+    from app.core.auth import COOKIE_NAME
+
+    response.delete_cookie(COOKIE_NAME, path="/")
+    return {"authenticated": False}
+
+
+def require_admin(request: Request) -> None:
+    """Guards the panels that change how the system behaves.
+
+    Reading opportunities and approving them is open to anyone with the
+    dashboard password; starting a scrape, editing team routing or changing the
+    email schedule is not. Separate cookie, separate password.
+    """
+    from app.core.auth import COOKIE_NAME, current_user
+
+    if not current_user(request.cookies.get(COOKIE_NAME))["is_admin"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Admin only. Sign in with the admin password to use this.",
+        )
 
 
 def require_writable() -> None:
@@ -96,12 +168,22 @@ def list_opportunities(
     dependencies=[Depends(require_writable)],
 )
 def approve_opportunity(
-    opportunity_id: int, body: ApprovalRequest, db: Session = Depends(get_db)
+    opportunity_id: int, body: ApprovalRequest, request: Request,
+    db: Session = Depends(get_db),
 ) -> OpportunityOut:
     """Dashboard sign-off. Writable instances only — on the public mirror the
     button is hidden and this returns 403, so a stranger with the link can't
-    change what the team has approved."""
-    opp = approval_service.set_approved(db, opportunity_id, body.approved, body.by)
+    change what the team has approved.
+
+    Attribution comes from the signed session, never from the request body: a
+    client could otherwise claim to be anyone, and "who approved this" is the
+    one field that has to be trustworthy.
+    """
+    from app.core.auth import COOKIE_NAME, current_user
+
+    user = current_user(request.cookies.get(COOKIE_NAME))
+    who = user.get("email") or user.get("name") or body.by
+    opp = approval_service.set_approved(db, opportunity_id, body.approved, who)
     if opp is None:
         raise HTTPException(status_code=404, detail="Opportunity not found")
     return OpportunityOut.model_validate(opp)
@@ -193,6 +275,19 @@ border-radius:12px;padding:32px;">
 </div></body></html>"""
 
 
+@router.get("/keywords")
+def get_keywords() -> dict:
+    """The BD team's own search vocabulary, for the dashboard search box.
+
+    Grouped the way the team thinks about it (Health, Waste, Funding, Leads…)
+    rather than by our six verticals, because these are the words they actually
+    type when hunting, not a taxonomy.
+    """
+    from app.services.keyword_inventory import ALL_SEARCH_TERMS, KEYWORD_INVENTORY
+
+    return {"groups": KEYWORD_INVENTORY, "all": ALL_SEARCH_TERMS}
+
+
 @router.get("/filters")
 def get_filters(db: Session = Depends(get_db)) -> dict[str, list[str]]:
     return FilterService(db).facets()
@@ -240,7 +335,7 @@ def export_xlsx(
 
 
 # ---------------------------------------------------------------------- scraping
-@router.post("/scrape", status_code=202, dependencies=[Depends(require_writable)])
+@router.post("/scrape", status_code=202, dependencies=[Depends(require_writable), Depends(require_admin)])
 async def start_scrape(req: ScrapeRequest) -> dict[str, str]:
     try:
         await manager.start(req.sources or None, req.verticals or None)
@@ -251,19 +346,19 @@ async def start_scrape(req: ScrapeRequest) -> dict[str, str]:
     return {"status": "started"}
 
 
-@router.post("/scrape/pause", dependencies=[Depends(require_writable)])
+@router.post("/scrape/pause", dependencies=[Depends(require_writable), Depends(require_admin)])
 def pause_scrape() -> dict[str, str]:
     manager.pause()
     return {"status": manager.state}
 
 
-@router.post("/scrape/resume", dependencies=[Depends(require_writable)])
+@router.post("/scrape/resume", dependencies=[Depends(require_writable), Depends(require_admin)])
 def resume_scrape() -> dict[str, str]:
     manager.resume()
     return {"status": manager.state}
 
 
-@router.post("/stop", dependencies=[Depends(require_writable)])
+@router.post("/stop", dependencies=[Depends(require_writable), Depends(require_admin)])
 async def stop_scrape() -> dict[str, str]:
     await manager.stop()
     return {"status": "stopping"}
@@ -290,7 +385,7 @@ def get_schedule() -> ScheduleStatusOut:
     return scheduler.status()
 
 
-@router.put("/schedule", response_model=ScheduleStatusOut, dependencies=[Depends(require_writable)])
+@router.put("/schedule", response_model=ScheduleStatusOut, dependencies=[Depends(require_writable), Depends(require_admin)])
 def set_schedule(req: ScheduleRequest) -> ScheduleStatusOut:
     try:
         scheduler.configure(req)
@@ -312,7 +407,8 @@ def list_team(db: Session = Depends(get_db)) -> list[TeamMemberOut]:
     return [TeamMemberOut.model_validate(r) for r in rows]
 
 
-@router.post("/team", response_model=TeamMemberOut, status_code=201)
+@router.post("/team", response_model=TeamMemberOut, status_code=201,
+             dependencies=[Depends(require_admin)])
 def add_member(body: TeamMemberIn, db: Session = Depends(get_db)) -> TeamMemberOut:
     if db.query(TeamMember).filter(TeamMember.email == body.email).first():
         raise HTTPException(status_code=409, detail="A member with this email already exists")
@@ -323,7 +419,8 @@ def add_member(body: TeamMemberIn, db: Session = Depends(get_db)) -> TeamMemberO
     return TeamMemberOut.model_validate(member)
 
 
-@router.put("/team/{member_id}", response_model=TeamMemberOut)
+@router.put("/team/{member_id}", response_model=TeamMemberOut,
+            dependencies=[Depends(require_admin)])
 def update_member(member_id: int, body: TeamMemberIn, db: Session = Depends(get_db)) -> TeamMemberOut:
     member = db.get(TeamMember, member_id)
     if member is None:
@@ -335,7 +432,8 @@ def update_member(member_id: int, body: TeamMemberIn, db: Session = Depends(get_
     return TeamMemberOut.model_validate(member)
 
 
-@router.delete("/team/{member_id}", status_code=204)
+@router.delete("/team/{member_id}", status_code=204,
+               dependencies=[Depends(require_admin)])
 def delete_member(member_id: int, db: Session = Depends(get_db)) -> None:
     member = db.get(TeamMember, member_id)
     if member is None:
@@ -385,7 +483,8 @@ def get_email_settings() -> dict:
     return {**cfg.model_dump(), "next_run": nxt.isoformat() if nxt else None}
 
 
-@router.put("/email/settings", dependencies=[Depends(require_writable)])
+@router.put("/email/settings",
+            dependencies=[Depends(require_writable), Depends(require_admin)])
 def update_email_settings(body: dict) -> dict:
     """Save and apply immediately — no restart, no editing .env."""
     from app.services.email_settings import EmailSettings, load, save
@@ -434,7 +533,7 @@ def experts() -> list[dict]:
     return experts_service.get_counts()
 
 
-@router.post("/experts/refresh")
+@router.post("/experts/refresh", dependencies=[Depends(require_admin)])
 async def refresh_experts() -> list[dict]:
     from app.services import experts_service
 
@@ -446,14 +545,14 @@ async def refresh_experts() -> list[dict]:
         raise HTTPException(status_code=502, detail=f"Experts refresh failed: {exc}") from exc
 
 
-@router.get("/devaid/status")
+@router.get("/devaid/status", dependencies=[Depends(require_admin)])
 def devaid_status() -> dict[str, bool]:
     from app.scrapers.devaid_auth import has_profile
 
     return {"connected": has_profile()}
 
 
-@router.get("/devaid/session/export")
+@router.get("/devaid/session/export", dependencies=[Depends(require_admin)])
 async def devaid_session_export() -> Response:
     """Download this machine's signed-in session as a file.
 
@@ -478,7 +577,7 @@ async def devaid_session_export() -> Response:
     )
 
 
-@router.post("/devaid/session/import", dependencies=[Depends(require_writable)])
+@router.post("/devaid/session/import", dependencies=[Depends(require_writable), Depends(require_admin)])
 async def devaid_session_import(payload: dict) -> dict:
     """Install a session exported from a machine that has a screen.
 
@@ -507,7 +606,7 @@ async def devaid_session_import(payload: dict) -> dict:
     return {"status": "connected", "cookies": count}
 
 
-@router.post("/devaid/connect")
+@router.post("/devaid/connect", dependencies=[Depends(require_admin)])
 async def devaid_connect() -> dict[str, str]:
     """Open a visible browser window for the user to log into DevelopmentAid.
 

@@ -21,3 +21,6 @@ devaid_session.json
 *.db
 *.db-wal
 *.db-shm
+
+# Team roster — real colleagues' addresses, and this repo is public.
+backend/scripts/team.txt

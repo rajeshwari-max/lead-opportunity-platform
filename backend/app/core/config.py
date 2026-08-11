@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     # archive a run covers. Tenders is ~1.2M listings (~5 hours) versus ~118k
     # for grants (~30 min), so it's useful to run grants alone.
     devaid_sections: str = "grants,tenders"
+    # Override the DevelopmentAid search URLs. Blank = the built-in ones, which
+    # already carry the English filter (languages=92) and the team's sectors.
+    devaid_grants_url: str = ""
+    devaid_tenders_url: str = ""
     # DevelopmentAid limits how deep a single search can be paged (~100 records),
     # so coverage comes from running many narrowed searches and merging them.
     # This caps how many of those slices one run performs.
@@ -116,6 +120,17 @@ class Settings(BaseSettings):
     # Vite serves the UI on :5173 — and a "view in the dashboard" link built
     # from public_base_url lands on the API, which answers {"detail":"Not Found"}.
     dashboard_url: str = ""
+
+    # Shared password protecting the whole dashboard. Empty = no gate, which
+    # keeps local development unchanged; set it on any public instance.
+    dashboard_password: str = ""
+
+    # Second, higher password for the admin-only panels (scraper controls, team
+    # routing, automatic email, expert pool). Everyone with the dashboard
+    # password can read opportunities and approve them; only an admin can start
+    # a scrape or change who receives email. Empty = anyone signed in is an
+    # admin, which is the sensible default for a single-user local setup.
+    admin_password: str = ""
 
     # HMAC key signing those links. Left blank here on purpose — a hard-coded
     # default would be a published key, and anyone could then mint valid

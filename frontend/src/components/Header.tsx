@@ -10,11 +10,13 @@ interface Props {
   onChange: (f: FilterState) => void;
   onRefresh: () => void;
   stats: Stats | null;
+  /** Signed-in user badge + logout. Null when no password is configured. */
+  userMenu?: React.ReactNode;
 }
 
 const THEME_KEY = "lop-theme";
 
-export function Header({ filters, onChange, onRefresh, stats }: Props) {
+export function Header({ filters, onChange, onRefresh, stats, userMenu }: Props) {
   // Light mode is the default; dark stays available as an explicit opt-in toggle.
   const [dark, setDark] = useState(() => localStorage.getItem(THEME_KEY) === "dark");
 
@@ -54,6 +56,7 @@ export function Header({ filters, onChange, onRefresh, stats }: Props) {
       </div>
 
       <div className="flex items-center gap-2">
+        {userMenu}
         {stats?.last_scraped && (
           <span className="hidden text-xs text-muted-foreground md:block" title="Updated after every successful scrape">
             Last updated: {new Date(stats.last_scraped + "Z").toLocaleString()}

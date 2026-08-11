@@ -100,6 +100,29 @@ def link_kind(url: str) -> str:
     return "deep"
 
 
+# Some boards expose each record twice: a machine endpoint that serves a file
+# download, and the human page. Scrapers naturally grab whichever anchor is in
+# the markup, and on the UN Partner Portal that is the export API — clicking it
+# in the dashboard downloads a blob instead of opening the call. Same record,
+# so this is a rewrite, not a deletion.
+_REWRITES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^(https://(?:www\.)?unpartnerportal\.org)/api/public/export/projects/(\d+)/?$",
+                re.IGNORECASE), r"\1/landing/opportunities/\2/"),
+    (re.compile(r"^(https://(?:www\.)?unpartnerportal\.org)/api/public/projects/(\d+)/?$",
+                re.IGNORECASE), r"\1/landing/opportunities/\2/"),
+)
+
+
+def canonical_link(url: str) -> str:
+    """Swap a known machine/download endpoint for its human-readable page."""
+    u = (url or "").strip()
+    for pattern, repl in _REWRITES:
+        new = pattern.sub(repl, u)
+        if new != u:
+            return new
+    return u
+
+
 def repair_links() -> dict:
     """Clear unusable opportunity_url values on existing rows.
 
@@ -114,22 +137,26 @@ def repair_links() -> dict:
     from app.database.models import Opportunity
 
     log = logging.getLogger("scraper")
-    stats = {"checked": 0, "cleared": 0, "kept": 0}
+    stats = {"checked": 0, "cleared": 0, "kept": 0, "rewritten": 0}
 
     with session_scope() as db:
         for opp in db.execute(select(Opportunity)).scalars():
             stats["checked"] += 1
             if not (opp.opportunity_url or "").strip():
                 continue
+            fixed = canonical_link(opp.opportunity_url)
+            if fixed != opp.opportunity_url:
+                opp.opportunity_url = fixed
+                stats["rewritten"] += 1
             if is_usable_link(opp.opportunity_url, opp.website):
                 stats["kept"] += 1
             else:
                 opp.opportunity_url = ""
                 stats["cleared"] += 1
 
-    if stats["cleared"]:
-        log.info("Link repair: cleared %s unusable links of %s checked",
-                 stats["cleared"], stats["checked"])
+    if stats["cleared"] or stats["rewritten"]:
+        log.info("Link repair: cleared %s, rewritten %s, of %s checked",
+                 stats["cleared"], stats["rewritten"], stats["checked"])
     return stats
 
 

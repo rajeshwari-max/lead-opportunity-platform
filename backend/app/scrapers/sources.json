@@ -424,5 +424,34 @@
     "display_name": "Coefficient Giving (Open Philanthropy)",
     "url": "https://coefficientgiving.org/apply-for-funding/",
     "website": "https://coefficientgiving.org"
+  },
+  {
+    "name": "world_bank",
+    "display_name": "World Bank",
+    "url": "https://projects.worldbank.org/en/projects-operations/opportunities?lang=en",
+    "website": "https://projects.worldbank.org",
+    "page_url": "https://projects.worldbank.org/en/projects-operations/opportunities?lang=en&os={offset}",
+    "page_size": 10
+  },
+  {
+    "name": "undp_procurement",
+    "display_name": "UNDP Procurement",
+    "url": "https://procurement-notices.undp.org/?lang=en",
+    "website": "https://procurement-notices.undp.org",
+    "page_url": "https://procurement-notices.undp.org/?lang=en&page={page}"
+  },
+  {
+    "name": "un_partner_portal",
+    "display_name": "UN Partner Portal",
+    "url": "https://www.unpartnerportal.org/landing/opportunities/?lang=en",
+    "website": "https://www.unpartnerportal.org",
+    "page_url": "https://www.unpartnerportal.org/landing/opportunities/?lang=en&page={page}"
+  },
+  {
+    "name": "adb_tenders",
+    "display_name": "ADB Tenders",
+    "url": "https://www.adb.org/projects/tenders?searchstax%5Bquery%5D=*&searchstax%5Bpage%5D=1&searchstax%5Border%5D=ds_date_closing%20desc&searchstax%5Bfacets%5D%5B0%5D=or:ss_fct_group:consulting&searchstax%5Bfacets%5D%5B1%5D=or:sm_fct_status:Active",
+    "website": "https://www.adb.org",
+    "page_url": "https://www.adb.org/projects/tenders?searchstax%5Bquery%5D=*&searchstax%5Bpage%5D={page}&searchstax%5Border%5D=ds_date_closing%20desc&searchstax%5Bfacets%5D%5B0%5D=or:ss_fct_group:consulting&searchstax%5Bfacets%5D%5B1%5D=or:sm_fct_status:Active"
   }
 ]

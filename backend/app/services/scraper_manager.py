@@ -24,7 +24,9 @@ from app.services.deadline_parser import DeadlineParser
 from app.services.deduplication import make_unique_id
 from app.services.amounts import clean_amount, extract_amount
 from app.services.geography import normalize_geo
-from app.services.links import is_usable_link
+from app.services.links import canonical_link, is_usable_link
+from app.services.deadline_audit import is_sentinel
+from app.services.spam import is_spam
 from app.services.organization import extract_organization, tidy_organization
 from app.services.verticals import VERTICALS as ALL_VERTICALS
 from app.services.verticals import classify_verticals, verticals_to_str
@@ -229,6 +231,13 @@ class ScraperManager:
         with session_scope() as db:
             for raw in batch:
                 deadline = self.deadline_parser.parse(raw.deadline_raw, dayfirst=raw.dayfirst)
+                # 9999-12-31 is DevelopmentAid's "no closing date". Parsed
+                # literally it produced deadlines in the year 9999 and a
+                # countdown of 2.9 million days. Treat it as no deadline, which
+                # is what the source meant, and let the ongoing logic below
+                # handle it from there.
+                if is_sentinel(deadline):
+                    deadline = None
                 ongoing = deadline is None and (
                     self.deadline_parser.is_ongoing(raw.deadline_raw) or raw.assume_active
                 )
@@ -265,6 +274,15 @@ class ScraperManager:
                 amount = clean_amount(raw.funding_amount)
                 if not amount:
                     amount = extract_amount(raw.summary, raw.title)
+                # Public tender boards accept submissions, and some of what is
+                # submitted is advertising. Dropped here rather than filtered in
+                # the UI, so it never reaches the database, the digests or the
+                # counts.
+                if is_spam(raw.title, raw.summary):
+                    log.debug("[%s] spam listing skipped: %s",
+                              raw.source_website, (raw.title or "")[:60])
+                    continue
+
                 uid = make_unique_id(raw.title, raw.organization, deadline, raw.opportunity_url)
 
                 exists = db.execute(
@@ -298,7 +316,7 @@ class ScraperManager:
                     # bare slug, a mailto:, or a bare domain sends the reader to
                     # a homepage and costs more trust than an absent link does.
                     opportunity_url=(
-                        raw.opportunity_url
+                        canonical_link(raw.opportunity_url)
                         if is_usable_link(raw.opportunity_url, raw.website) else ""
                     ),
                     summary=raw.summary,

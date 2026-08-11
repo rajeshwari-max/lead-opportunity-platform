@@ -13,7 +13,13 @@ interface ExpertRow {
   updated_at: string | null;
 }
 
-export function ExpertsCard({ readOnly = false }: { readOnly?: boolean }) {
+/** `isAdmin` decides how much of this card is operational. Non-admins get the
+ *  expert counts and nothing else — no Connect, no session transfer, no
+ *  refresh. Those controls act on a shared DevelopmentAid account, so a viewer
+ *  clicking Refresh consumes the team's search quota, and a viewer uploading a
+ *  session replaces everyone's. The numbers are the useful part for them. */
+export function ExpertsCard({ readOnly = false, isAdmin = true }:
+                            { readOnly?: boolean; isAdmin?: boolean }) {
   const [rows, setRows] = useState<ExpertRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -73,12 +79,16 @@ export function ExpertsCard({ readOnly = false }: { readOnly?: boolean }) {
     try {
       const res = await fetch("/api/experts");
       if (res.ok) setRows(await res.json());
-      const st = await fetch("/api/devaid/status");
-      if (st.ok) setConnected((await st.json()).connected);
+      // Connection state drives admin-only controls, and the endpoint is now
+      // admin-only too — asking for it as a viewer would only log a 403.
+      if (isAdmin) {
+        const st = await fetch("/api/devaid/status");
+        if (st.ok) setConnected((await st.json()).connected);
+      }
     } catch (e) {
       console.error(e);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     load();
@@ -129,13 +139,15 @@ export function ExpertsCard({ readOnly = false }: { readOnly?: boolean }) {
           <UserSearch className="h-4 w-4" /> Expert Pool
           <span className="text-xs font-normal text-muted-foreground">(DevelopmentAid)</span>
         </CardTitle>
-        <Button size="sm" variant="outline" disabled={busy} onClick={refresh}
-                title="Re-count experts per vertical (English, 5+ yrs experience)">
-          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-        </Button>
+        {isAdmin && (
+          <Button size="sm" variant="outline" disabled={busy} onClick={refresh}
+                  title="Re-count experts per vertical (English, 5+ yrs experience)">
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          </Button>
+        )}
       </CardHeader>
       <CardContent className="space-y-2">
-        {!connected && !readOnly && (
+        {!connected && !readOnly && isAdmin && (
           <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5">
             <p className="text-xs text-amber-500">
               Not connected to DevelopmentAid. Click below — a Chrome window opens.
@@ -152,7 +164,7 @@ export function ExpertsCard({ readOnly = false }: { readOnly?: boolean }) {
         {/* Sessions expire, so reconnecting must always be reachable — when the
             saved marker wrongly said "connected" this control was hidden, which
             left no way to fix the very problem that needed fixing. */}
-        {connected && !readOnly && (
+        {connected && !readOnly && isAdmin && (
           <Button size="sm" variant="outline" className="w-full" disabled={connecting}
                   onClick={connect}
                   title="Sign in to DevelopmentAid again if scrapes only return one page">
@@ -164,7 +176,7 @@ export function ExpertsCard({ readOnly = false }: { readOnly?: boolean }) {
         {/* Session transfer. On a server the Connect button above cannot work —
             there is no screen to open a login window on — so the session is
             carried across from a machine that has one. */}
-        {!readOnly && (
+        {!readOnly && isAdmin && (
           <div className="space-y-1.5 rounded-lg border border-border p-2.5">
             <p className="text-xs font-medium">Move this session to another machine</p>
             <p className="text-xs text-muted-foreground">

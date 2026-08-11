@@ -47,7 +47,25 @@ _NAV_WORDS = {
     "read more", "learn more", "find out more", "view all", "see all", "next",
     "previous", "back", "share", "download", "apply", "apply now", "faq", "faqs",
     "sitemap", "accessibility", "français", "español", "english",
+    # Institutional site chrome seen on the World Bank / ADB / UN boards. These
+    # were being stored as opportunities: "Skip to main content" and
+    # "Procurement Policy" are both plain <a> tags of a plausible length inside
+    # the listing region, so nothing else rejected them.
+    "skip to main content", "skip to content", "projects & operations",
+    "projects and operations", "procurement notices", "procurement policy",
+    "procurement", "tenders", "opportunities", "notices", "results",
+    "operational procurement", "business opportunities", "how to apply",
+    "guidance", "documents", "publications", "data", "reports", "help",
+    "site map", "disclaimer", "fraud & corruption", "integrity",
 }
+# Titles that are a bare section heading rather than a call. Anchored so a real
+# call that merely mentions the word ("Procurement of Assistive Technology…")
+# survives.
+_SECTION_TITLE = re.compile(
+    r"^(skip\s|projects?\b.{0,3}operations?$|procurement\s*(notices?|policy|"
+    r"guidance|documents?)?$|tenders?$|opportunit(y|ies)$|notices?$|"
+    r"grants?$|about\b|browse\b|filter\b|sort\b|all\s+\w+$)",
+    re.IGNORECASE)
 _NAV_HREF = re.compile(
     r"/(about|contact|privacy|terms|cookie|login|signin|register|subscribe|careers?|"
     r"jobs?|press|media|team|faq|sitemap|accessibility|donate|newsletter|tag|category|"
@@ -64,11 +82,23 @@ _DEADLINE = re.compile(
     re.IGNORECASE)
 
 
+def clean_title(text: str) -> str:
+    """Strip the field label some boards render inside the link text.
+
+    UNDP's procurement board marks up each row as "Title <the actual title>",
+    so every one of its 588 rows was stored with a leading "Title ". Also drops
+    "Deadline:"-style trailing labels left behind by the same markup.
+    """
+    t = re.sub(r"\s+", " ", (text or "")).strip()
+    t = re.sub(r"^(title|name|subject|notice)\s*[:\-–]?\s+", "", t, flags=re.IGNORECASE)
+    return t.strip(" :-–|")
+
+
 def _looks_like_opportunity(text: str, href: str) -> bool:
-    t = text.strip()
+    t = clean_title(text)
     if not (_MIN_TITLE <= len(t) <= _MAX_TITLE):
         return False
-    if t.lower() in _NAV_WORDS:
+    if t.lower() in _NAV_WORDS or _SECTION_TITLE.match(t):
         return False
     if _NAV_HREF.search(href or ""):
         return False
@@ -108,14 +138,14 @@ class GenericListingScraper(BaseScraper):
                 href = a.get("href") or ""
                 if not href:
                     continue
-                title = a.get_text(" ", strip=True)
+                title = clean_title(a.get_text(" ", strip=True))
                 if not _looks_like_opportunity(title, href):
                     # Very common card layout: the title lives in a heading and
                     # the link is a separate "Learn More" / image anchor, so the
                     # anchor's own text is useless. Fall back to the nearest
                     # heading in the same block. (Gates Grand Challenges lists
                     # its open calls exactly this way, and we saw none of them.)
-                    title = self._heading_title(a)
+                    title = clean_title(self._heading_title(a))
                     if not title or _NAV_HREF.search(href):
                         continue
                 url = urljoin(page_url, href)
@@ -172,6 +202,29 @@ class GenericListingScraper(BaseScraper):
         use numbered links, an arrow glyph, or a WordPress /page/N/ URL rather
         than a literal "Next" anchor.
         """
+        # 0. An explicit template from sources.json wins over any guessing.
+        #    Auto-detection only knows the common shapes (?page=N, /page/N/), and
+        #    misses anything else — ADB paginates with searchstax%5Bpage%5D=N, so
+        #    every run stopped at page 1 while reporting success. A template also
+        #    lets a source declare its English URL, since several of these boards
+        #    default to the local language.
+        template = getattr(self, "page_url_template", "")
+        if template and self._page_had_items:
+            # Two pagination dialects, because sites disagree about what the
+            # number in the URL means:
+            #   {page}   1-based page index   (?page=2 = the second page)
+            #   {offset} 0-based row offset   (?os=10  = the second page of 10)
+            # World Bank uses the second. It was configured with {page}, so the
+            # crawler asked for os=2, os=3 … — sliding the window down by a
+            # single row each time. Nine of every ten results were repeats, the
+            # stale-page counter tripped almost immediately, and the source
+            # stopped after 38 rows while reporting success.
+            size = int(self.config.get("page_size") or 10)
+            nxt = template.format(page=page_number + 1, offset=page_number * size)
+            if nxt != page_url:
+                return PageRequest(nxt)
+            return None
+
         soup = BeautifulSoup(html, "lxml")
 
         # 1. rel="next" — the unambiguous signal when it exists.
@@ -238,6 +291,10 @@ def _build() -> list[type[GenericListingScraper]]:
                 # available but fall back to plain HTTP rather than failing.
                 "prefer_js": bool(cfg.get("requires_js", True)),
                 "enrich_details": bool(cfg.get("enrich_details", True)),
+                # Optional "…&page={page}" template for sources whose pagination
+                # the generic detector can't see.
+                "page_url_template": cfg.get("page_url", ""),
+                "stale_page_streak_override": cfg.get("stale_page_streak", None),
             },
         )
         built.append(register(cls))

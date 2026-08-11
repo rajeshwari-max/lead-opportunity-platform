@@ -93,6 +93,21 @@ class FilterService:
             stmt = stmt.where(Opportunity.work_type == f.work_type)
         if getattr(f, "study_type", ""):
             stmt = stmt.where(Opportunity.study_type == f.study_type)
+        # English-only and classified-only are unconditional, not options. The
+        # team works in English and routes work by vertical, so a row that is
+        # neither readable nor ownable is not a lead — it is noise in every
+        # view, every export and every digest. Making them togglable put the
+        # burden on the reader to remember to switch them on.
+        if True:
+            for lo, hi in (("\u0590", "\u05ff"), ("\u0600", "\u06ff"),
+                           ("\u0400", "\u04ff"), ("\u0900", "\u097f"),
+                           ("\u0e00", "\u0e7f"), ("\u4e00", "\u9fff"),
+                           ("\u3040", "\u30ff"), ("\uac00", "\ud7af")):
+                stmt = stmt.where(~Opportunity.title.op("GLOB")(f"*[{lo}-{hi}]*"))
+        if True:
+            stmt = stmt.where(
+                Opportunity.verticals.is_not(None), Opportunity.verticals != ""
+            )
         if f.categories:
             stmt = stmt.where(Opportunity.category.in_([Category(c) for c in f.categories]))
         if f.verticals:

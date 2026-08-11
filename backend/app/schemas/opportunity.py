@@ -101,6 +101,13 @@ class OpportunityFilters(BaseModel):
     # Routing axes: Research vs Implementation, and which kind of study.
     work_type: str = ""
     study_type: str = ""
+    # Hide listings whose title is written in a non-Latin script. A display
+    # preference, not a deletion — those rows are real opportunities.
+    english_only: bool = True
+    # Hide rows the classifier couldn't place in any vertical. Default on: an
+    # unclassified row is one nobody owns, so it is noise in the working view.
+    # A toggle rather than a deletion — many are real, just thin on text.
+    has_vertical: bool = True
     page: int = 1
     page_size: int = 25
     sort_by: str = "deadline"

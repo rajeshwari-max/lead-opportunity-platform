@@ -100,6 +100,10 @@ export interface FilterState {
   approved: boolean;
   work_type: string;
   study_type: string;
+  /** Hide listings whose title is in a non-Latin script. */
+  english_only: boolean;
+  /** Hide rows with no vertical. Default on. */
+  has_vertical: boolean;
   page: number;
   page_size: number;
   sort_by: string;
@@ -120,6 +124,8 @@ export const emptyFilters: FilterState = {
   approved: false,
   work_type: "",
   study_type: "",
+  english_only: true,
+  has_vertical: true,
   page: 1,
   page_size: 25,
   sort_by: "deadline",
