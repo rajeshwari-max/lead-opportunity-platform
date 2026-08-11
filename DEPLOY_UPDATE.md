@@ -5,10 +5,31 @@ Copy-paste one block at a time.
 
 ---
 
+## 0. Push from your PC first — this is where it goes wrong
+
+`git pull` on EC2 can only fetch what has been pushed. Work sitting uncommitted
+on the Windows machine is invisible to it, and the pull reports "Already up to
+date" while the server rebuilds the same old code.
+
+On the PC (PowerShell):
+
+```powershell
+cd E:\lead-opportunity-platform
+git add -A          # -A matters: several new modules are untracked, and
+                    # main.py imports one of them. Commit the modified files
+                    # alone and the API dies with ModuleNotFoundError.
+git commit -m "your message"
+git push
+```
+
+Confirm before moving on — this must NOT say "Already up to date" on EC2.
+
+---
+
 ## 1. Pull the new code
 
 ```bash
-cd /home/ubuntu/lead-opportunity-platform
+cd ~/Deployment/lead-opportunity-platform
 git pull
 ```
 
@@ -68,15 +89,15 @@ database is untouched. It is only the published copy that went missing.
 ## 3. Restart the backend
 
 ```bash
-sudo supervisorctl restart lead-api
+sudo supervisorctl restart lead-scanning-api
 sleep 8
-sudo supervisorctl status lead-api
+sudo supervisorctl status lead-scanning-api
 ```
 
 On startup the API now runs a deadline audit automatically. Confirm it fired:
 
 ```bash
-tail -40 /home/ubuntu/lead-opportunity-platform/backend/logs/app.log | grep -i "deadline\|link repair"
+tail -40 ~/Deployment/lead-opportunity-platform/backend/logs/app.log | grep -i "deadline\|link repair"
 ```
 
 Expect something like `deadline audit: sentinels_cleared=148 expired=1674`.
@@ -85,6 +106,7 @@ schedulers and duplicate emails:
 
 ```bash
 pgrep -af gunicorn | wc -l    # should be 2 (one master + one worker)
+# Verified 11 Aug: pids 1308418/1308419 on 127.0.0.1:8001 — one pair, no orphans.
 ```
 
 ---
@@ -108,7 +130,7 @@ Or just press **Scrape** in the dashboard with those four selected — easier.
 ## 5. Clear the leftovers already in the database
 
 ```bash
-cd /home/ubuntu/lead-opportunity-platform/backend
+cd ~/Deployment/lead-opportunity-platform/backend
 source .venv/bin/activate
 
 python scripts/clean_spam.py            # dry run, ~370 rows
@@ -132,7 +154,7 @@ serving week-old code:
 sudo ss -lptn 'sport = :8001'
 pgrep -af gunicorn
 sudo pkill -f gunicorn
-sudo supervisorctl restart lead-api
+sudo supervisorctl restart lead-scanning-api
 ```
 
 ---
