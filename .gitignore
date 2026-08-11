@@ -24,3 +24,9 @@ devaid_session.json
 
 # Team roster — real colleagues' addresses, and this repo is public.
 backend/scripts/team.txt
+
+# TypeScript incremental build cache. Tracking it means every `npm run build`
+# on the server dirties the working tree, and the next `git pull` aborts with
+# "local changes would be overwritten" — which silently left EC2 running old
+# code while the deploy appeared to succeed.
+*.tsbuildinfo
