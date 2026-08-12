@@ -93,12 +93,6 @@ export function LoginScreen({ onSuccess }: { onSuccess: () => void }) {
         <Button type="submit" className="h-11 w-full text-sm" disabled={busy || !password || !email}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign in"}
         </Button>
-
-        <p className="mt-5 border-t border-border/60 pt-4 text-center text-[11px] leading-relaxed text-muted-foreground">
-          Any @catalysts.org address works — no need to be added first.<br />
-          Use the admin password to unlock scraper controls.<br />
-          Approval links in emails keep working without signing in.
-        </p>
       </form>
     </div>
   );

@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { daysLeft, formatDate } from "@/lib/utils";
+import { RATES_AS_OF, toInr } from "@/lib/money";
 import type { Facets, FilterState, Opportunity, Paginated } from "@/lib/types";
 
 const col = createColumnHelper<Opportunity>();
@@ -67,6 +68,9 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
 
   // Which rows are open. A Set of ids rather than a flag on the row, because
   // the row objects are replaced on every refetch and a flag would be lost.
+  const [showInr, setShowInr] = useState<boolean>(() => loadPref("lop-show-inr", false));
+  useEffect(() => savePref("lop-show-inr", showInr), [showInr]);
+
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const toggleSelected = (id: number) =>
     setSelected((prev) => {
@@ -212,7 +216,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
       size: 130,
       cell: (info) => (
         <span title={info.getValue() || undefined}
-              className="whitespace-nowrap text-xs text-muted-foreground">
+              className="block truncate text-xs text-muted-foreground">
           {info.getValue() || "—"}
         </span>
       ),
@@ -308,7 +312,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
         // into five stacked words in a narrow column, which read as broken
         // rather than as two fields. The table already scrolls horizontally.
         return (
-          <div className="whitespace-nowrap" title={location || country || undefined}>
+          <div className="min-w-0" title={location || country || undefined}>
             <div className="truncate">
               {country || location}
               {multi && <span className="ml-1 text-xs text-muted-foreground">+ others</span>}
@@ -320,8 +324,28 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
     }),
     col.accessor("funding_amount", {
       header: "Amount",
-      size: 110,
-      cell: (info) => <span className="whitespace-nowrap">{info.getValue() || "—"}</span>,
+      size: 150,
+      // No whitespace-nowrap. Under table-fixed a long amount like
+      // "$905,664 – $1,188,684" cannot shrink, so it ran straight over the
+      // Approve button in the next column. Wrapping keeps it inside its cell;
+      // break-words handles a single token wider than the column.
+      cell: (info) => {
+        const raw = info.getValue();
+        const inr = showInr ? toInr(raw) : "";
+        return (
+          <div className="min-w-0">
+            <span className="block break-words leading-snug">{raw || "—"}</span>
+            {inr && (
+              <span
+                className="mt-0.5 block break-words text-[11px] leading-snug text-muted-foreground"
+                title={`Indicative only, converted at ${RATES_AS_OF} rates`}
+              >
+                {inr}
+              </span>
+            )}
+          </div>
+        );
+      },
     }),
     col.display({
       id: "approve",
@@ -447,6 +471,15 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
             selected={filters.categories}
             onChange={(categories) => onChange({ ...filters, categories, page: 1 })}
           />
+          <Button
+            size="sm"
+            variant={showInr ? "default" : "outline"}
+            onClick={() => setShowInr((v) => !v)}
+            title={`Show an approximate INR equivalent under each amount (${RATES_AS_OF} rates, indicative only)`}
+            className={showInr ? "h-8 bg-amber-600 text-xs hover:bg-amber-700" : "h-8 text-xs"}
+          >
+            ₹ INR
+          </Button>
           {/* Approving is only useful if the approved set can be read back — this
               is how you review what the team has signed off. */}
           <Button
@@ -614,7 +647,14 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
                             {o.location && <span><b className="font-semibold text-foreground">Location:</b> {o.location}</span>}
                             {o.country && <span><b className="font-semibold text-foreground">Country:</b> {o.country}</span>}
                             {o.region && <span><b className="font-semibold text-foreground">Region:</b> {o.region}</span>}
-                            {o.funding_amount && <span><b className="font-semibold text-foreground">Amount:</b> {o.funding_amount}</span>}
+                            {o.funding_amount && (
+                              <span>
+                                <b className="font-semibold text-foreground">Amount:</b> {o.funding_amount}
+                                {toInr(o.funding_amount) && (
+                                  <span className="ml-1 opacity-80">({toInr(o.funding_amount)})</span>
+                                )}
+                              </span>
+                            )}
                             {o.work_type && <span><b className="font-semibold text-foreground">Work type:</b> {o.work_type}</span>}
                             {o.study_type && <span><b className="font-semibold text-foreground">Study:</b> {o.study_type}</span>}
                             <span>
