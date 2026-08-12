@@ -38,6 +38,25 @@ def auth_required() -> bool:
     return bool(settings.dashboard_password)
 
 
+def allowed_domains() -> list[str]:
+    return [d.strip().lower().lstrip("@")
+            for d in (settings.allowed_email_domains or "").split(",") if d.strip()]
+
+
+def domain_allowed(email: str) -> bool:
+    """Is this address at one of the company domains we auto-admit?
+
+    Matches the domain exactly, and any subdomain of it, so
+    india.catalysts.org passes for "catalysts.org" — but notcatalysts.org does
+    not, which a bare "endswith" would have wrongly accepted.
+    """
+    addr = (email or "").strip().lower()
+    if "@" not in addr:
+        return False
+    domain = addr.rsplit("@", 1)[1]
+    return any(domain == d or domain.endswith("." + d) for d in allowed_domains())
+
+
 def admin_required() -> bool:
     return bool(settings.admin_password)
 

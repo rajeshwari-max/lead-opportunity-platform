@@ -125,6 +125,16 @@ class Settings(BaseSettings):
     # keeps local development unchanged; set it on any public instance.
     dashboard_password: str = ""
 
+    # Email domains that may sign in with the dashboard password without an
+    # admin adding them to the team list first. Comma separated, no "@".
+    # Blank = closed: only people already on the team list can sign in.
+    #
+    # This widens *who* can sign in, not *what* they can do — the dashboard
+    # password is still required, and admin still needs the admin password. So
+    # it is "anyone at our company who also knows the shared password", not
+    # "anyone who claims a company address".
+    allowed_email_domains: str = "catalysts.org"
+
     # Second, higher password for the admin-only panels (scraper controls, team
     # routing, automatic email, expert pool). Everyone with the dashboard
     # password can read opportunities and approve them; only an admin can start

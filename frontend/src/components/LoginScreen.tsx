@@ -55,7 +55,7 @@ export function LoginScreen({ onSuccess }: { onSuccess: () => void }) {
           </div>
           <h1 className="text-lg font-semibold tracking-tight">Lead Scanning Platform</h1>
           <p className="mt-1 text-xs text-muted-foreground">
-            Sign in with your team email
+            Sign in with your work email
           </p>
         </div>
 
@@ -65,7 +65,7 @@ export function LoginScreen({ onSuccess }: { onSuccess: () => void }) {
             <div className="relative">
               <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <input
-                type="email" autoFocus value={email} placeholder="you@example.org"
+                type="email" autoFocus value={email} placeholder="you@catalysts.org"
                 onChange={(e) => setEmail(e.target.value)}
                 className="h-11 w-full rounded-lg border border-border bg-background pl-10 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20"
               />
@@ -95,6 +95,7 @@ export function LoginScreen({ onSuccess }: { onSuccess: () => void }) {
         </Button>
 
         <p className="mt-5 border-t border-border/60 pt-4 text-center text-[11px] leading-relaxed text-muted-foreground">
+          Any @catalysts.org address works — no need to be added first.<br />
           Use the admin password to unlock scraper controls.<br />
           Approval links in emails keep working without signing in.
         </p>

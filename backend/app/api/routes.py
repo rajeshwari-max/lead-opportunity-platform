@@ -49,6 +49,13 @@ def get_config(request: Request) -> dict:
     }
 
 
+def _name_from_email(email: str) -> str:
+    """A readable display name from the local part: rajeshwari.c -> Rajeshwari C."""
+    local = (email or "").split("@")[0]
+    parts = [p for p in local.replace("_", ".").replace("-", ".").split(".") if p]
+    return " ".join(p.capitalize() for p in parts) or email
+
+
 @router.post("/login")
 def login(body: dict, response: Response, db: Session = Depends(get_db)) -> dict:
     """Sign in as a named team member.
@@ -60,7 +67,8 @@ def login(body: dict, response: Response, db: Session = Depends(get_db)) -> dict
     from sqlalchemy import func, select
 
     from app.core.auth import (COOKIE_NAME, SESSION_DAYS, admin_password_matches,
-                               auth_required, make_session_token, password_matches)
+                               auth_required, domain_allowed, make_session_token,
+                               password_matches)
 
     if not auth_required():
         return {"authenticated": True, "name": "Local", "email": "", "is_admin": True}
@@ -74,14 +82,36 @@ def login(body: dict, response: Response, db: Session = Depends(get_db)) -> dict
     member = db.execute(
         select(TeamMember).where(func.lower(TeamMember.email) == email)
     ).scalar_one_or_none()
-    if member is None or not member.active:
-        # Named sessions only work for people who are actually on the team, so
-        # the identity in the cookie always corresponds to someone real.
+
+    if member is not None and not member.active:
+        # Deactivating someone is how access is revoked, so it has to beat the
+        # domain rule below — otherwise removing a leaver would do nothing.
         raise HTTPException(
             status_code=403,
-            detail="That email isn't on the team list. Ask an admin to add you "
-                   "in Team & Lead Routing.",
+            detail="This account has been deactivated. Ask an admin to re-enable it.",
         )
+
+    if member is None:
+        # Anyone at a company domain may sign in with the dashboard password,
+        # without an admin adding them first. They are still recorded as a team
+        # member, because approvals are attributed by email and the digest
+        # needs somewhere to hang preferences.
+        if not domain_allowed(email):
+            raise HTTPException(
+                status_code=403,
+                detail="Sign in with your work email address, or ask an admin "
+                       "to add you in Team & Lead Routing.",
+            )
+        # auto_send stays off: a new member has no keywords, and a member with
+        # no keywords matches *everything*. Switching one on unattended would
+        # send them a digest of many thousands of rows at the next 09:00 run.
+        member = TeamMember(
+            name=_name_from_email(email), email=email, keywords="", categories="",
+            verticals="", auto_send=False, active=True,
+        )
+        db.add(member)
+        db.commit()
+        db.refresh(member)
 
     response.set_cookie(
         COOKIE_NAME, make_session_token(member.email, member.name, is_admin),
