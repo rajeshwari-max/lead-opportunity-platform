@@ -138,7 +138,14 @@ class Settings(BaseSettings):
     # kept on disk (see below) so links keep working across restarts.
     approval_secret: str = ""
 
-    model_config = SettingsConfigDict(env_prefix="LOP_", env_file=".env", extra="ignore")
+    # env_file is an absolute path on purpose. A bare ".env" is resolved against
+    # the process's working directory, so whether the file is read at all depends
+    # on where Supervisor happens to start gunicorn from. That makes a fully
+    # populated .env look empty — no password, no SMTP — with nothing in the logs
+    # to say why. Anchoring it to backend/ removes the question entirely.
+    model_config = SettingsConfigDict(
+        env_prefix="LOP_", env_file=BASE_DIR / ".env", extra="ignore"
+    )
 
 
 settings = Settings()
