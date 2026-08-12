@@ -162,6 +162,12 @@ class TeamMemberOut(TeamMemberIn):
     created_at: datetime
 
 
+class SendSelectionIn(BaseModel):
+    """Hand-picked opportunities plus the team members to send them to."""
+    opportunity_ids: list[int]
+    member_ids: list[int]
+
+
 class SendResult(BaseModel):
     member: str
     sent: int

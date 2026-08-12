@@ -1,6 +1,7 @@
 """REST API — thin controllers delegating to services (no business logic here)."""
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -17,6 +18,7 @@ from app.schemas.opportunity import (
     ScheduleStatusOut,
     ScrapeRequest,
     SendResult,
+    SendSelectionIn,
     StatsOut,
     TeamMemberIn,
     TeamMemberOut,
@@ -471,6 +473,21 @@ async def send_now(member_id: int, resend: bool = False) -> SendResult:
     except Exception as exc:  # SMTP/auth failures surface clearly in the UI
         raise HTTPException(status_code=502, detail=f"Email send failed: {exc}") from exc
     return SendResult(**result)
+
+
+@router.post("/opportunities/send", response_model=list[SendResult],
+             dependencies=[Depends(require_writable)])
+async def send_selection(payload: SendSelectionIn) -> list[SendResult]:
+    """Email a chosen set of opportunities to chosen team members."""
+    from app.services import dispatch_service
+
+    try:
+        results = await asyncio.to_thread(
+            dispatch_service.send_selection, payload.opportunity_ids, payload.member_ids
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [SendResult(**r) for r in results]
 
 
 @router.get("/email/settings")

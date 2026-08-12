@@ -32,6 +32,13 @@ function loadFilters(): FilterState {
     saved = {};
   }
 
+  // The Research/Implementation buttons are gone, so nothing on screen can
+  // clear a work_type left in localStorage from before. Someone who had
+  // "Research" active would come back to a silently filtered table with no
+  // control to unset it. A link can still set it (see below); a stale saved
+  // value cannot.
+  delete (saved as Partial<FilterState>).work_type;
+
   const params = new URLSearchParams(window.location.search);
   if (![...params.keys()].length) return { ...emptyFilters, ...saved };
 
@@ -116,7 +123,8 @@ export default function App() {
         <div className="flex flex-col gap-6 lg:flex-row">
           <FiltersSidebar facets={facets} filters={filters} onChange={setFilters} />
           <div id="opportunities-table" className="flex min-w-0 flex-1 scroll-mt-20 flex-col gap-6">
-            <OpportunitiesTable data={data} loading={loading} filters={filters} onChange={setFilters} readOnly={readOnly} />
+            <OpportunitiesTable data={data} loading={loading} filters={filters} onChange={setFilters}
+                                facets={facets} readOnly={readOnly} />
           </div>
           <div className="flex w-full flex-col gap-6 lg:w-80 lg:shrink-0">
             {/* Only the scraper is admin-only. Everything else stays visible. */}

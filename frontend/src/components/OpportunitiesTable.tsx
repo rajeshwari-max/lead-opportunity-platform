@@ -4,7 +4,7 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -17,11 +17,13 @@ import {
 } from "lucide-react";
 import { Badge, VerticalBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { MultiSelect } from "@/components/ui/multi-select";
+import { SendSelectionBar } from "@/components/SendSelectionBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { daysLeft, formatDate } from "@/lib/utils";
-import type { FilterState, Opportunity, Paginated } from "@/lib/types";
+import type { Facets, FilterState, Opportunity, Paginated } from "@/lib/types";
 
 const col = createColumnHelper<Opportunity>();
 
@@ -49,17 +51,37 @@ interface Props {
   loading: boolean;
   filters: FilterState;
   onChange: (f: FilterState) => void;
+  /** Distinct values powering the Source and Type dropdowns in the toolbar. */
+  facets: Facets | null;
   /** The public mirror can be read but not changed — approving is disabled there. */
   readOnly?: boolean;
 }
 
-export function OpportunitiesTable({ data, loading, filters, onChange, readOnly = false }: Props) {
+export function OpportunitiesTable({ data, loading, filters, onChange, facets, readOnly = false }: Props) {
   // Approvals are tracked locally so the button responds on click rather than
   // after a refetch of the whole page. Keyed by id and merged over the server
   // value, so it survives re-renders but never masks a fresh fetch of a row
   // someone else approved.
   const [pendingApproval, setPendingApproval] = useState<Record<number, boolean>>({});
   const [failedApproval, setFailedApproval] = useState<number | null>(null);
+
+  // Which rows are open. A Set of ids rather than a flag on the row, because
+  // the row objects are replaced on every refetch and a flag would be lost.
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const toggleSelected = (id: number) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const toggleExpanded = (id: number) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   const toggleApproval = async (o: Opportunity) => {
     const next = !(pendingApproval[o.id] ?? o.approved);
@@ -78,7 +100,42 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
     }
   };
 
+  const pageIds = (data?.items ?? []).map((o) => o.id);
+  const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+
   const columns = [
+    // Selection lives in its own narrow column rather than on the title cell,
+    // so ticking a row never risks following the title link by accident.
+    col.display({
+      id: "select",
+      size: 44,
+      enableResizing: false,
+      header: () => (
+        <input
+          type="checkbox"
+          checked={allOnPageSelected}
+          title={allOnPageSelected ? "Deselect this page" : "Select every row on this page"}
+          onChange={(e) =>
+            setSelected((prev) => {
+              const next = new Set(prev);
+              // Only this page. Selecting across pages silently would let
+              // someone email thousands of rows believing they picked twenty.
+              pageIds.forEach((id) => (e.target.checked ? next.add(id) : next.delete(id)));
+              return next;
+            })
+          }
+          className="h-4 w-4 rounded accent-[hsl(var(--primary))]"
+        />
+      ),
+      cell: (info) => (
+        <input
+          type="checkbox"
+          checked={selected.has(info.row.original.id)}
+          onChange={() => toggleSelected(info.row.original.id)}
+          className="h-4 w-4 rounded accent-[hsl(var(--primary))]"
+        />
+      ),
+    }),
     col.accessor("title", {
       header: "Title",
       size: 300,
@@ -143,6 +200,19 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
       cell: (info) => (
         <span title={info.getValue() || undefined}
               className="line-clamp-2 text-muted-foreground">
+          {info.getValue() || "—"}
+        </span>
+      ),
+    }),
+    // Directly after Organization: the two are read together — "who is funding
+    // this, and which board did we find it on" — and having Source at the far
+    // right meant scrolling away from the funder to answer the second half.
+    col.accessor("source_website", {
+      header: "Source",
+      size: 130,
+      cell: (info) => (
+        <span title={info.getValue() || undefined}
+              className="whitespace-nowrap text-xs text-muted-foreground">
           {info.getValue() || "—"}
         </span>
       ),
@@ -311,11 +381,6 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
         );
       },
     }),
-    col.accessor("source_website", {
-      header: "Source",
-      size: 130,
-      cell: (info) => <span className="whitespace-nowrap text-xs text-muted-foreground">{info.getValue()}</span>,
-    }),
   ];
 
   // --- adjustable table -----------------------------------------------------
@@ -366,24 +431,22 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
           )}
         </CardTitle>
         <div className="flex flex-wrap items-center gap-1.5">
-          {/* Routing filter — the split that decides research team vs brand team. */}
-          {["Research", "Implementation"].map((wt) => (
-            <Button
-              key={wt}
-              size="sm"
-              variant={filters.work_type === wt ? "default" : "outline"}
-              onClick={() =>
-                onChange({ ...filters, work_type: filters.work_type === wt ? "" : wt, page: 1 })
-              }
-              className={
-                filters.work_type === wt
-                  ? `h-8 text-xs ${wt === "Research" ? "bg-violet-600 hover:bg-violet-700" : "bg-sky-600 hover:bg-sky-700"}`
-                  : "h-8 text-xs"
-              }
-            >
-              {wt}
-            </Button>
-          ))}
+          {/* Source and Type filter right above the table, where the eye already
+              is. The sidebar carries the same two filters and stays in sync —
+              both write the same FilterState, so picking a source here ticks
+              its sidebar checkbox and vice versa. */}
+          <MultiSelect
+            label="Source"
+            options={facets?.sources ?? []}
+            selected={filters.sources}
+            onChange={(sources) => onChange({ ...filters, sources, page: 1 })}
+          />
+          <MultiSelect
+            label="Type"
+            options={facets?.categories ?? []}
+            selected={filters.categories}
+            onChange={(categories) => onChange({ ...filters, categories, page: 1 })}
+          />
           {/* Approving is only useful if the approved set can be read back — this
               is how you review what the team has signed off. */}
           <Button
@@ -397,6 +460,10 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
           </Button>
         </div>
       </CardHeader>
+      <SendSelectionBar
+        selectedIds={[...selected]}
+        onClear={() => setSelected(new Set())}
+      />
       <CardContent className="overflow-x-auto p-0">
         {/* table-fixed makes the browser honour the widths set on each
                 header instead of auto-sizing columns to their content —
@@ -451,7 +518,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
               <>
                 {Array.from({ length: 6 }).map((_, i) => (
                   <tr key={`sk-${i}`} className="border-b border-border/50">
-                    {Array.from({ length: 8 }).map((__, j) => (
+                    {Array.from({ length: table.getVisibleFlatColumns().length }).map((__, j) => (
                       <td key={j} className="px-4 py-3">
                         <Skeleton className="h-4 w-full" />
                       </td>
@@ -460,30 +527,123 @@ export function OpportunitiesTable({ data, loading, filters, onChange, readOnly 
                 ))}
               </>
             )}
-            {table.getRowModel().rows.map((row) => (
-              <tr
-                key={row.id}
-                // A left accent bar on hover makes it obvious which row the
-                // cursor is on across eight columns of dense text.
-                className="group border-b border-border/50 transition-colors hover:bg-primary/[0.04]"
-              >
-                {row.getVisibleCells().map((cell, ci) => (
-                  <td
-                    key={cell.id}
-                    className={`px-4 align-top py-3 ${
-                      ci === 0
-                        ? "relative before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-primary before:opacity-0 before:transition-opacity group-hover:before:opacity-100"
-                        : ""
+            {table.getRowModel().rows.map((row) => {
+              const o = row.original;
+              const isOpen = expanded.has(o.id);
+              return (
+                <Fragment key={row.id}>
+                  <tr
+                    // A left accent bar on hover makes it obvious which row the
+                    // cursor is on across eight columns of dense text.
+                    className={`group cursor-pointer border-b border-border/50 transition-colors hover:bg-primary/[0.04] ${
+                      isOpen ? "bg-primary/[0.06]" : ""
                     }`}
+                    // Clicking anywhere on the row expands it, except on a link
+                    // or a button — the title link and Approve must keep doing
+                    // their own job rather than opening a panel.
+                    onClick={(e) => {
+                      const el = e.target as HTMLElement;
+                      if (el.closest("a,button,input,label")) return;
+                      toggleExpanded(o.id);
+                    }}
                   >
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
-                ))}
-              </tr>
-            ))}
+                    {row.getVisibleCells().map((cell, ci) => (
+                      <td
+                        key={cell.id}
+                        className={`px-4 align-top py-3 ${
+                          ci === 0
+                            ? "relative before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-primary before:opacity-0 before:transition-opacity group-hover:before:opacity-100"
+                            : ""
+                        }`}
+                      >
+                        {ci === 1 ? (
+                          <div className="flex items-start gap-1.5">
+                            <ChevronRight
+                              className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${
+                                isOpen ? "rotate-90" : ""
+                              }`}
+                            />
+                            <div className="min-w-0 flex-1">
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            </div>
+                          </div>
+                        ) : (
+                          flexRender(cell.column.columnDef.cell, cell.getContext())
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                  {isOpen && (
+                    <tr className="border-b border-border/50 bg-muted/30">
+                      <td colSpan={row.getVisibleCells().length} className="px-4 py-4">
+                        <div className="space-y-3 text-sm">
+                          {/* The full title, unclamped. In the row it is capped
+                              at two lines, which cuts most of these in half. */}
+                          <div>
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              Title
+                            </p>
+                            <p className="mt-0.5 font-medium leading-snug">{o.title}</p>
+                          </div>
+
+                          {o.summary && (
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Summary
+                              </p>
+                              <p className="mt-0.5 whitespace-pre-line leading-relaxed text-muted-foreground">
+                                {o.summary}
+                              </p>
+                            </div>
+                          )}
+
+                          {o.eligibility && (
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                Eligibility
+                              </p>
+                              <p className="mt-0.5 whitespace-pre-line leading-relaxed text-muted-foreground">
+                                {o.eligibility}
+                              </p>
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-muted-foreground">
+                            {o.organization && <span><b className="font-semibold text-foreground">Organisation:</b> {o.organization}</span>}
+                            {o.source_website && <span><b className="font-semibold text-foreground">Source:</b> {o.source_website}</span>}
+                            {o.location && <span><b className="font-semibold text-foreground">Location:</b> {o.location}</span>}
+                            {o.country && <span><b className="font-semibold text-foreground">Country:</b> {o.country}</span>}
+                            {o.region && <span><b className="font-semibold text-foreground">Region:</b> {o.region}</span>}
+                            {o.funding_amount && <span><b className="font-semibold text-foreground">Amount:</b> {o.funding_amount}</span>}
+                            {o.work_type && <span><b className="font-semibold text-foreground">Work type:</b> {o.work_type}</span>}
+                            {o.study_type && <span><b className="font-semibold text-foreground">Study:</b> {o.study_type}</span>}
+                            <span>
+                              <b className="font-semibold text-foreground">Deadline:</b>{" "}
+                              {o.deadline ? formatDate(o.deadline) : "Ongoing"}
+                            </span>
+                          </div>
+
+                          {o.opportunity_url && (
+                            <a
+                              href={o.opportunity_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                            >
+                              Open the original listing <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
             {data && data.items.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
+                <td colSpan={table.getVisibleFlatColumns().length}
+                    className="px-4 py-10 text-center text-muted-foreground">
                   {(() => {
                     const active: string[] = [
                       ...filters.categories,

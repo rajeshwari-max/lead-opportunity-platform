@@ -78,6 +78,16 @@ export const api = {
 
   // ---- team & lead routing ----
   team: () => get<TeamMember[]>("/team"),
+  /** Email a hand-picked set of opportunities to chosen team members. */
+  sendSelection: async (opportunity_ids: number[], member_ids: number[]) => {
+    const res = await fetch(`${BASE}/opportunities/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ opportunity_ids, member_ids }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail ?? "Send failed");
+    return (await res.json()) as { member: string; sent: number; detail?: string }[];
+  },
   addMember: (body: Omit<TeamMember, "id" | "created_at">) =>
     fetch(`${BASE}/team`, {
       method: "POST",
