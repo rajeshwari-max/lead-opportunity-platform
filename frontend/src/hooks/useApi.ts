@@ -57,9 +57,22 @@ export function useDashboardData(filters: FilterState, refreshKey: number) {
     return () => clearTimeout(timer.current);
   }, [statsKey, refreshKey]);
 
-  // Facets and sources are filter-independent — fetched only on refresh.
+  // Facets now follow the active filters, so a Source dropdown under a chosen
+  // vertical offers only the sources that actually have rows there. Same
+  // debounce and same key as stats: this is a scan over the whole table, so
+  // firing it per keystroke would queue up ~800ms queries behind each other.
+  const facetTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
-    api.facets().then(setFacets).catch(console.error);
+    clearTimeout(facetTimer.current);
+    facetTimer.current = setTimeout(() => {
+      api.facets(filtersRef.current).then(setFacets).catch(console.error);
+    }, 200);
+    return () => clearTimeout(facetTimer.current);
+  }, [statsKey, refreshKey]);
+
+  // The scraper's own source list is a fixed catalogue of what CAN be scraped,
+  // not what the current filter reaches — it must not narrow.
+  useEffect(() => {
     api.sources().then(setSources).catch(console.error);
   }, [refreshKey]);
 

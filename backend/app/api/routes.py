@@ -291,8 +291,16 @@ def get_keywords() -> dict:
 
 
 @router.get("/filters")
-def get_filters(db: Session = Depends(get_db)) -> dict[str, list[str]]:
-    return FilterService(db).facets()
+def get_filters(
+    f: OpportunityFilters = Depends(filters_dep), db: Session = Depends(get_db)
+) -> dict[str, list[str]]:
+    """Filter options, narrowed to what the current selection can still reach.
+
+    Passing the active filters in means the Source dropdown offers only the
+    sources that actually have a row under the chosen vertical, instead of all
+    86 configured scrapers.
+    """
+    return FilterService(db).facets(f)
 
 
 @router.get("/stats", response_model=StatsOut)

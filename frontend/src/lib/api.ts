@@ -36,7 +36,8 @@ async function get<T>(path: string): Promise<T> {
 
 export const api = {
   opportunities: (f: FilterState) => get<Paginated>(`/opportunities?${filterParams(f)}`),
-  facets: () => get<Facets>("/filters"),
+  facets: (f?: FilterState) =>
+    get<Facets>(f ? `/filters?${filterParams(f)}` : "/filters"),
   config: () => get<{
     read_only: boolean; auth_required: boolean; admin_required: boolean;
     authenticated: boolean; name: string; email: string; is_admin: boolean;

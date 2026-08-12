@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.database.models import Category, Opportunity, ScrapeRun, Status
-from app.scrapers.registry import SCRAPER_REGISTRY
 from app.schemas.opportunity import (
     OpportunityFilters,
     OpportunityOut,
@@ -162,7 +161,7 @@ class FilterService:
             )
 
     # ---------------------------------------------------------------- facets
-    def facets(self) -> dict[str, list[str]]:
+    def facets(self, f: OpportunityFilters | None = None) -> dict[str, list[str]]:
         """Distinct values powering the filter sidebar (normalized across sources).
 
         Every step is defensive about NULLs and non-strings. This endpoint feeds
@@ -174,29 +173,78 @@ class FilterService:
         level), and `NULL != ''` is NULL in SQL, so such rows slip past the
         obvious guard.
         """
-        def distinct(col) -> list[str]:
+        f = f or OpportunityFilters()
+
+        # Each facet is computed against every OTHER active filter, but not its
+        # own. Applying its own filter too would collapse the list to whatever
+        # is already picked — choose one source and the source dropdown would
+        # offer only that source, leaving no way to add a second or see what
+        # else exists. Excluding it is what makes the control still usable
+        # after a selection.
+        #
+        # Statements are cached by the excluded field, because when only one
+        # filter is active the other facets all share the same statement and
+        # would otherwise repeat an identical scan five times.
+        stmt_cache: dict[str, object] = {}
+
+        def scoped(exclude: str):
+            if exclude not in stmt_cache:
+                narrowed = f.model_copy(update={exclude: []}) if getattr(f, exclude, None) else f
+                stmt_cache[exclude] = self._base_statement(narrowed).subquery()
+            return stmt_cache[exclude]
+
+        def distinct(col_name: str, exclude: str) -> list[str]:
+            col = scoped(exclude).c[col_name]
             rows = self.db.execute(
                 select(col).where(col.is_not(None)).where(col != "").distinct()
             ).scalars().all()
-            return sorted({str(r) for r in rows if r is not None and str(r).strip()})
+            # `category` comes back as the Category enum, whose str() is
+            # "Category.GRANT" — unwrap it to the value the UI filters on
+            # ("Grant"), or the category list silently comes back empty.
+            out = set()
+            for r in rows:
+                if r is None:
+                    continue
+                v = r.value if hasattr(r, "value") else str(r)
+                if v.strip():
+                    out.add(v)
+            return sorted(out)
 
-        def merged(col, baseline: list[str]) -> list[str]:
-            values = set(distinct(col)) | {str(b) for b in baseline if b}
-            return sorted(values)
+        def keep_selected(values: list[str], chosen: list[str]) -> list[str]:
+            """Never hide something the user has currently ticked.
+
+            A narrowed list can otherwise strand a selection: pick source X,
+            then filter to a vertical X has no rows in, and X disappears from
+            the dropdown while still filtering the table — an empty result with
+            no visible control to undo it.
+            """
+            return sorted(set(values) | {c for c in (chosen or []) if c})
+
+        present_sources = set(distinct("source_website", "sources"))
+        present_categories = set(distinct("category", "categories"))
+        present_verticals = " | ".join(distinct("verticals", "verticals"))
 
         return {
+            # Fixed taxonomies keep their canonical order rather than being
+            # re-sorted alphabetically by whatever the data happens to contain.
             "categories": [
-                c.value for c in Category if c.value in settings.enabled_categories
+                c.value for c in Category
+                if c.value in settings.enabled_categories
+                and (c.value in present_categories or c.value in (f.categories or []))
             ],
-            # Canonical six-vertical system (fixed order, not data-derived).
-            "verticals": list(VERTICALS),
-            "countries": merged(Opportunity.country, settings.default_countries),
-            "regions": merged(Opportunity.region, settings.default_regions),
-            "sources": merged(
-                Opportunity.source_website,
-                [cls.display_name for cls in SCRAPER_REGISTRY.values()],
-            ),
-            "organizations": distinct(Opportunity.organization)[:500],
+            "verticals": [
+                v for v in VERTICALS
+                if v in present_verticals or v in (f.verticals or [])
+            ],
+            "countries": keep_selected(distinct("country", "countries"), f.countries),
+            "regions": keep_selected(distinct("region", "regions"), f.regions),
+            # Only sources that actually have a row in the current view. The
+            # registry baseline is deliberately not merged in here any more: it
+            # listed all 86 configured scrapers regardless of whether any of
+            # them had produced a single matching row, which is precisely the
+            # noise this is meant to remove.
+            "sources": keep_selected(sorted(present_sources), f.sources),
+            "organizations": distinct("organization", "organizations")[:500],
         }
 
     # ----------------------------------------------------------------- stats
