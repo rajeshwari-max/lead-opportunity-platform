@@ -7,10 +7,14 @@ import io
 from openpyxl import Workbook
 
 from app.database.models import Opportunity
+from app.services.links import resolve_link
 
 _COLUMNS = [
     "unique_id", "title", "organization", "country", "region", "funding_type",
     "vertical", "verticals", "category", "deadline", "website", "opportunity_url",
+    # The resolved link — a search URL when no direct one exists, so an
+    # exported row is never a dead end either.
+    "link",
     "summary", "location", "eligibility", "funding_amount", "status",
     "source_website", "date_scraped",
 ]
@@ -21,7 +25,9 @@ def _row(o: Opportunity) -> list[str]:
         o.unique_id, o.title, o.organization, o.country, o.region, o.funding_type,
         o.vertical, o.verticals or "", o.category.value,
         o.deadline.isoformat() if o.deadline else "",
-        o.website, o.opportunity_url, o.summary, o.location, o.eligibility,
+        o.website, o.opportunity_url,
+        resolve_link(o.opportunity_url, o.website, o.source_website, o.title)[0],
+        o.summary, o.location, o.eligibility,
         o.funding_amount, o.status.value, o.source_website,
         o.date_scraped.isoformat(sep=" ", timespec="seconds"),
     ]

@@ -88,7 +88,23 @@ _CARD_URL = re.compile(r'href="(/(?:grants|tenders)/view/\d+)', re.IGNORECASE)
 #
 # Overridable via LOP_DEVAID_GRANTS_URL / LOP_DEVAID_TENDERS_URL for when the
 # team's sector interests change, without editing code.
-_DEVAID_FILTERS = "hiddenAdvancedFilters=0&sort=deadline.desc&sectors=100,7,11,87&languages=92"
+def _devaid_filters() -> str:
+    """Query string shared by the grants and tenders searches.
+
+    Built from settings rather than hard-coded so coverage can be widened
+    without a code change: clearing LOP_DEVAID_SECTORS searches every sector,
+    which is the switch to flip when asking "are we capturing everything that
+    is currently open?".
+    """
+    parts = ["hiddenAdvancedFilters=0", "sort=deadline.desc"]
+    if settings.devaid_sectors.strip():
+        parts.append(f"sectors={settings.devaid_sectors.strip()}")
+    if settings.devaid_language.strip():
+        parts.append(f"languages={settings.devaid_language.strip()}")
+    return "&".join(parts)
+
+
+_DEVAID_FILTERS = _devaid_filters()
 
 _SECTIONS: list[tuple[str, str]] = [
     (settings.devaid_grants_url or

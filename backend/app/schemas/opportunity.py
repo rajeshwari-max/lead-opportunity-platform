@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, model_validator, Field
 
 from app.database.models import Category, Status
 
@@ -62,6 +62,25 @@ class OpportunityOut(BaseModel):
     approved: bool = False
     approved_at: datetime | None = None
     approved_by: str = ""
+
+    # Always-clickable destination, computed rather than stored so a change to
+    # the fallback rules applies to every existing row without a migration.
+    #   link_kind == "direct" -> the listing itself
+    #   link_kind == "search" -> a search that will find it
+    # The kind is exposed so the UI can label it honestly; presenting a search
+    # result as though it were the listing would be worse than the dead end it
+    # replaces.
+    link: str = ""
+    link_kind: str = "direct"
+
+    @model_validator(mode="after")
+    def _resolve_link(self) -> "OpportunityOut":
+        from app.services.links import resolve_link
+
+        self.link, self.link_kind = resolve_link(
+            self.opportunity_url, self.website, self.source_website, self.title
+        )
+        return self
 
 
 class ApprovalRequest(BaseModel):

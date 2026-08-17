@@ -10,7 +10,7 @@ from email.mime.text import MIMEText
 
 from app.core.config import settings
 from app.database.models import Opportunity, TeamMember
-from app.services.links import link_kind
+from app.services.links import link_kind, resolve_link
 
 log = logging.getLogger("scraper")
 
@@ -263,21 +263,21 @@ def _digest_rows(
         # recurring complaint: the title looked like a link to the call and
         # silently wasn't. Where no direct link exists, the title is plain text
         # and the source site is offered separately, labelled for what it is.
-        if o.opportunity_url:
-            title = (f'<a href="{o.opportunity_url}" style="color:#4f46e5;font-weight:600;'
-                     f'text-decoration:none;">{o.title}</a>')
-            # Say so when the link lands on an index rather than the call. Some
-            # sources publish no per-call URL at all, so this is the best link
-            # available — the reader just shouldn't be surprised by it.
-            if link_kind(o.opportunity_url) == "listing":
-                title += ('<div style="color:#9ca3af;font-size:11px;margin-top:2px;">'
-                          'opens a listing page — find it there</div>')
-        else:
-            title = f'<span style="font-weight:600;color:#111827;">{o.title}</span>'
-            if o.website:
-                title += (f'<div style="font-size:11px;margin-top:2px;">'
-                          f'<a href="{o.website}" style="color:#9ca3af;">'
-                          f'no direct link — open source site</a></div>')
+        # Every title is a link. Where no per-call URL exists, resolve_link
+        # returns a search on the source site that will find it — far more use
+        # in an inbox than plain text plus a homepage, which left the reader to
+        # retype the title into the site's own search box.
+        href, kind = resolve_link(o.opportunity_url, o.website, o.source_website, o.title)
+        title = (f'<a href="{href}" style="color:#4f46e5;font-weight:600;'
+                 f'text-decoration:none;">{o.title}</a>')
+        if kind == "search":
+            title += ('<div style="color:#9ca3af;font-size:11px;margin-top:2px;">'
+                      f'no direct link published — opens a search on {o.source_website}</div>')
+        elif link_kind(o.opportunity_url) == "listing":
+            # Lands on an index rather than the call itself. Best available, but
+            # the reader shouldn't be surprised by it.
+            title += ('<div style="color:#9ca3af;font-size:11px;margin-top:2px;">'
+                      'opens a listing page — find it there</div>')
         rows.append(f"""
         <tr>
           <td style="padding:10px;border-bottom:1px solid #eee;vertical-align:top;">

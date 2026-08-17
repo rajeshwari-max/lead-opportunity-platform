@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Check,
   ExternalLink,
+  Search,
   Undo2,
 } from "lucide-react";
 import { Badge, VerticalBadge } from "@/components/ui/badge";
@@ -146,7 +147,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
       // title={} gives the full text on hover — titles are routinely longer
       // than two lines and were previously unreadable once clamped.
       cell: (info) => {
-        const { opportunity_url, website, source_website } = info.row.original;
+        const { website, source_website } = info.row.original;
         // Some sources put every listing behind their own login. The link is
         // correct, but an unauthenticated visitor lands on a sign-in page and
         // reasonably concludes the link is broken. Saying so first costs a
@@ -163,35 +164,33 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
           if (go) window.open(url, "_blank", "noopener");
         };
         // Some sources never publish a per-call URL, and some older rows had a
-        // link that resolved to a homepage. Rather than dress either up as a
-        // working link, say so and offer the source site as a clearly separate
-        // fallback — a link that goes somewhere wrong costs more trust than a
-        // missing one.
-        if (!opportunity_url) {
-          return (
-            <div>
-              <span className="line-clamp-2 font-medium" title={info.getValue()}>
-                {info.getValue()}
-              </span>
-              {website && (
-                <a href={website} target="_blank" rel="noreferrer"
-                   className="text-xs text-muted-foreground underline-offset-2 hover:text-primary hover:underline">
-                  no direct link — open source site
-                </a>
-              )}
-            </div>
-          );
-        }
+        // Every row is clickable. Where we have no link to the listing itself,
+        // the backend supplies a search on the source site that will find it
+        // (link_kind === "search"). The label says which it is — a search
+        // presented as the listing would cost more trust than the dead end it
+        // replaces, but a dead end costs the reader the manual lookup this
+        // tool exists to remove.
+        const { link, link_kind } = info.row.original;
+        const isSearch = link_kind === "search";
         return (
           <div>
-            <a href={opportunity_url} target="_blank" rel="noreferrer"
-               title={info.getValue()}
-               onClick={(e) => warnThenOpen(e, opportunity_url)}
+            <a href={link || website} target="_blank" rel="noreferrer"
+               title={isSearch
+                 ? `No direct link published for this one — opens a search on ${source_website}`
+                 : info.getValue()}
+               onClick={(e) => warnThenOpen(e, link || website)}
                className="group flex items-start gap-1 font-medium underline-offset-2 hover:text-primary hover:underline">
               <span className="line-clamp-2">{info.getValue()}</span>
-              <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+              {isSearch
+                ? <Search className="mt-0.5 h-3 w-3 shrink-0 opacity-60" />
+                : <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />}
             </a>
-            {needsLogin && (
+            {isSearch && (
+              <span className="text-[11px] text-muted-foreground">
+                opens a search on {source_website}
+              </span>
+            )}
+            {!isSearch && needsLogin && (
               <span className="text-[11px] text-muted-foreground">sign-in required</span>
             )}
           </div>
@@ -663,14 +662,14 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
                             </span>
                           </div>
 
-                          {o.opportunity_url && (
+                          {o.link && (
                             <a
-                              href={o.opportunity_url}
+                              href={o.link}
                               target="_blank"
                               rel="noreferrer"
                               className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                             >
-                              Open the original listing <ExternalLink className="h-3 w-3" />
+                              {o.link_kind === "search" ? `Search ${o.source_website} for this` : "Open the original listing"} <ExternalLink className="h-3 w-3" />
                             </a>
                           )}
                         </div>

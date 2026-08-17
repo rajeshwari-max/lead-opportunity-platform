@@ -661,6 +661,19 @@ async def devaid_session_import(payload: dict) -> dict:
     return {"status": "connected", "cookies": count}
 
 
+@router.get("/devaid/probe", dependencies=[Depends(require_admin)])
+async def devaid_probe() -> dict:
+    """Can this machine reach DevelopmentAid without a browser?
+
+    Diagnostic only — fetches one page and changes nothing. Distinguishes
+    "blocked at the edge" from "reached but logged out", which need completely
+    different fixes and are indistinguishable from a bare failure.
+    """
+    from app.scrapers import devaid_http
+
+    return await asyncio.to_thread(devaid_http.probe)
+
+
 @router.post("/devaid/connect", dependencies=[Depends(require_admin)])
 async def devaid_connect() -> dict[str, str]:
     """Open a visible browser window for the user to log into DevelopmentAid.

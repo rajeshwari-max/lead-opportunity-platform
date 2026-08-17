@@ -25,7 +25,7 @@ offering the source site explicitly labelled as such.
 from __future__ import annotations
 
 import re
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, urlparse
 
 # Several ids joined by commas — the donorIds bug. The record's own id is not
 # recoverable from these, so they cannot be repaired, only dropped.
@@ -181,3 +181,63 @@ def junk_rows() -> list[tuple[int, str, str, str]]:
             if email_like.match(title) or title.lower() in furniture or len(title) < 8:
                 out.append((opp.id, opp.source_website, title, opp.opportunity_url or ""))
     return out
+
+# ---------------------------------------------------------------- fallbacks
+# Where to send someone when we have no direct link to the listing itself.
+#
+# The alternative — showing "no direct link" and a homepage — makes the row a
+# dead end: the reader has to retype the title into the site's own search. That
+# is exactly the manual work this tool exists to remove, so a search URL that
+# lands on (or beside) the opportunity is strictly better even though it is not
+# the listing itself.
+_SEARCH_TEMPLATES: dict[str, str] = {
+    "DevelopmentAid":     "https://www.developmentaid.org/tenders/search?keywords={q}",
+    "UNDP Procurement":   "https://procurement-notices.undp.org/search.cfm?keywords={q}",
+    "UN Partner Portal":  "https://www.unpartnerportal.org/landing/opportunities/?search={q}",
+    "World Bank":         "https://projects.worldbank.org/en/projects-operations/procurement?searchTerm={q}",
+    "ADB Tenders":        "https://www.adb.org/projects/tenders?searchstax%5Bquery%5D={q}",
+    "FundsForNGOs":       "https://www2.fundsforngos.org/?s={q}",
+    "Bond UK":            "https://www.bond.org.uk/search/?keywords={q}",
+    "NGOBOX":             "https://ngobox.org/search.php?q={q}",
+    "GrantWatch Intl":    "https://www.grantwatch.com/cat/search.php?keyword={q}",
+    "DevNetJobsIndia":    "https://www.devnetjobsindia.org/rfp_assignments.aspx",
+}
+
+
+def search_link(title: str, website: str = "", source_website: str = "") -> str:
+    """A URL that will find this opportunity when we have no direct one.
+
+    Order of preference:
+      1. the source's own search page, which knows about its own listings
+      2. a web search restricted to the source's domain
+      3. the funder's homepage, as an absolute last resort
+    """
+    q = quote_plus(" ".join((title or "").split())[:180])
+    if not q:
+        return (website or "").strip()
+
+    template = _SEARCH_TEMPLATES.get((source_website or "").strip())
+    if template:
+        return template.format(q=q) if "{q}" in template else template
+
+    domain = urlparse(website or "").netloc
+    if domain:
+        # Site-scoped web search. Not elegant, but it reliably finds a specific
+        # titled page on a domain, which is what the reader actually wants.
+        return f"https://duckduckgo.com/?q=site%3A{domain}+{q}"
+
+    return (website or "").strip()
+
+
+def resolve_link(opportunity_url: str, website: str, source_website: str,
+                 title: str) -> tuple[str, str]:
+    """(url, kind) where kind is "direct" or "search".
+
+    Every row gets something clickable. `kind` is returned so the UI can be
+    honest about which it is — a search result presented as the listing itself
+    would be worse than the dead end it replaces.
+    """
+    if is_usable_link(opportunity_url, website):
+        return opportunity_url, "direct"
+    return search_link(title, website, source_website), "search"
+

@@ -17,6 +17,10 @@ export interface Opportunity {
   deadline: string | null;
   website: string;
   opportunity_url: string;
+  /** Always-clickable destination. "direct" = the listing, "search" = a search
+   *  on the source site that will find it. Computed by the backend. */
+  link: string;
+  link_kind: "direct" | "search";
   summary: string;
   location: string;
   eligibility: string;
