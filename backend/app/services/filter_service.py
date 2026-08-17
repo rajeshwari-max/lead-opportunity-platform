@@ -210,6 +210,34 @@ class FilterService:
                     out.add(v)
             return sorted(out)
 
+        def narrowed_or_all(col_name: str, exclude: str) -> list[str]:
+            """Narrowed values, falling back to the full list when empty.
+
+            A narrowed facet that comes back empty removes the whole section
+            from the sidebar, and the user sees filters "disappearing" — which
+            is what happens the moment you pick a source whose rows carry no
+            country at all (UNDP Procurement and World Bank both do, because
+            their detail pages aren't scraped yet). A control that vanishes
+            reads as a broken app; showing every value is worse only in that
+            some choices return nothing, which is visible and recoverable.
+            """
+            values = distinct(col_name, exclude)
+            if values:
+                return values
+            return distinct_unfiltered(col_name)
+
+        def distinct_unfiltered(col_name: str) -> list[str]:
+            col = getattr(Opportunity, col_name)
+            rows = self.db.execute(
+                select(col).where(col.is_not(None)).where(col != "").distinct()
+            ).scalars().all()
+            out = set()
+            for r in rows:
+                v = r.value if hasattr(r, "value") else str(r)
+                if v and v.strip():
+                    out.add(v)
+            return sorted(out)
+
         def keep_selected(values: list[str], chosen: list[str]) -> list[str]:
             """Never hide something the user has currently ticked.
 
@@ -230,14 +258,16 @@ class FilterService:
             "categories": [
                 c.value for c in Category
                 if c.value in settings.enabled_categories
-                and (c.value in present_categories or c.value in (f.categories or []))
+                and (not present_categories
+                     or c.value in present_categories
+                     or c.value in (f.categories or []))
             ],
-            "verticals": [
-                v for v in VERTICALS
-                if v in present_verticals or v in (f.verticals or [])
-            ],
-            "countries": keep_selected(distinct("country", "countries"), f.countries),
-            "regions": keep_selected(distinct("region", "regions"), f.regions),
+            # The six verticals are a fixed taxonomy and always shown. Hiding
+            # one because the current selection has no rows in it removes the
+            # only control that could widen the selection again.
+            "verticals": list(VERTICALS),
+            "countries": keep_selected(narrowed_or_all("country", "countries"), f.countries),
+            "regions": keep_selected(narrowed_or_all("region", "regions"), f.regions),
             # Only sources that actually have a row in the current view. The
             # registry baseline is deliberately not merged in here any more: it
             # listed all 86 configured scrapers regardless of whether any of

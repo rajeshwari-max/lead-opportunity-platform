@@ -18,10 +18,24 @@ _KEYWORD_MAP: list[tuple[Category, list[str]]] = [
         r"\brfp\b", r"request\s+for\s+proposals?", r"\brfq\b", r"request\s+for\s+quotation",
         r"\beoi\b", r"expression\s+of\s+interest", r"\btor\b", r"terms\s+of\s+reference",
         r"empanel(ment)?", r"hiring\s+(of\s+)?(an?\s+)?agenc", r"consultanc(y|ies)",
+        # UN procurement notations. UNDP alone publishes IC (417 rows), RFQ
+        # (324), ITB (91), LTA (27), RFI and RFEI — every one of which is a
+        # solicitation the team can respond to, and none of which the generic
+        # words above reliably catch when the title is only a code plus a
+        # reference number ("UNDP-IC-2026-184: Financial Reporting Support").
+        r"\brfi\b", r"request\s+for\s+information",
+        r"\brfei\b", r"request\s+for\s+expressions?\s+of\s+interest",
+        r"\bic\b", r"individual\s+contract(or)?",
+        r"\blta\b", r"long[\s-]term\s+agreement",
+        r"\bsssa\b", r"\bcfa\b", r"call\s+for\s+applications?\s+\(consultan",
+        r"request\s+for\s+services?", r"solicitation",
     ]),
     (Category.TENDER, [
         r"\btenders?\b", r"\bbid(s|ding)?\b", r"procurement\s+notice", r"\bnit\b",
         r"invitation\s+to\s+bid", r"supply\s+(and|&)\s+installation",
+        # ITB/ICB/NCB are formal tender notations rather than proposal requests.
+        r"\bitb\b", r"\bicb\b", r"\bncb\b", r"invitation\s+to\s+tender",
+        r"\bshopping\b", r"prequalification",
     ]),
     (Category.FELLOWSHIP, [r"fellowship", r"\bfellows?\b", r"scholarship", r"residency\s+program"]),
     (Category.AWARD, [r"\bawards?\b", r"\bprizes?\b", r"recognition\s+program", r"medal"]),

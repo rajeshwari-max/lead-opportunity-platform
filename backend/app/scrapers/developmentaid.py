@@ -88,29 +88,35 @@ _CARD_URL = re.compile(r'href="(/(?:grants|tenders)/view/\d+)', re.IGNORECASE)
 #
 # Overridable via LOP_DEVAID_GRANTS_URL / LOP_DEVAID_TENDERS_URL for when the
 # team's sector interests change, without editing code.
-def _devaid_filters() -> str:
-    """Query string shared by the grants and tenders searches.
+def _devaid_filters(sectors: str) -> str:
+    """Query string for one DevelopmentAid section.
 
-    Built from settings rather than hard-coded so coverage can be widened
-    without a code change: clearing LOP_DEVAID_SECTORS searches every sector,
-    which is the switch to flip when asking "are we capturing everything that
-    is currently open?".
+    Built from settings rather than hard-coded so the search can be retuned
+    from .env without a deploy. `statuses=3` is what restricts the walk to
+    currently-open calls — without it the archive of closed listings dominates
+    the results and the search budget is spent on calls nobody can bid for.
     """
-    parts = ["hiddenAdvancedFilters=0", "sort=deadline.desc"]
-    if settings.devaid_sectors.strip():
-        parts.append(f"sectors={settings.devaid_sectors.strip()}")
+    parts = ["hiddenAdvancedFilters=0"]
+    if sectors.strip():
+        parts.append(f"sectors={sectors.strip()}")
+    if settings.devaid_statuses.strip():
+        parts.append(f"statuses={settings.devaid_statuses.strip()}")
     if settings.devaid_language.strip():
         parts.append(f"languages={settings.devaid_language.strip()}")
     return "&".join(parts)
 
 
-_DEVAID_FILTERS = _devaid_filters()
+_TENDER_FILTERS = _devaid_filters(settings.devaid_tender_sectors)
+_GRANT_FILTERS = _devaid_filters(settings.devaid_grant_sectors)
 
 _SECTIONS: list[tuple[str, str]] = [
+    # Both sections are walked in the same run. They are separate catalogues on
+    # DevelopmentAid with their own sector vocabularies, so each gets its own
+    # filter string rather than a shared one.
     (settings.devaid_grants_url or
-     f"https://www.developmentaid.org/grants/search?{_DEVAID_FILTERS}", "grants"),
+     f"https://www.developmentaid.org/grants/search?{_GRANT_FILTERS}", "grants"),
     (settings.devaid_tenders_url or
-     f"https://www.developmentaid.org/tenders/search?{_DEVAID_FILTERS}", "tenders"),
+     f"https://www.developmentaid.org/tenders/search?{_TENDER_FILTERS}", "tenders"),
 ]
 
 _SECTION_URLS: dict[str, str] = {slug: url for url, slug in _SECTIONS}

@@ -661,6 +661,77 @@ async def devaid_session_import(payload: dict) -> dict:
     return {"status": "connected", "cookies": count}
 
 
+# ------------------------------------------------------- per-site logins
+# Some boards show little or nothing to an anonymous visitor. The pattern is the
+# same as DevelopmentAid's: a person signs in once in a real browser, and the
+# session is reused. No password is stored or submitted by this code.
+
+
+@router.get("/sessions", dependencies=[Depends(require_admin)])
+def sessions_status() -> list[dict]:
+    from app.scrapers import site_auth
+
+    return site_auth.status_all()
+
+
+@router.post("/sessions/{source}/connect",
+             dependencies=[Depends(require_writable), Depends(require_admin)])
+async def sessions_connect(source: str) -> dict[str, str]:
+    from app.scrapers import site_auth
+
+    try:
+        ok = await asyncio.to_thread(site_auth.connect_interactive, source)
+    except site_auth.NoDisplayError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail="The window closed before a session was saved. Sign in fully, "
+                   "then close the window.",
+        )
+    return {"status": "connected", "source": source}
+
+
+@router.get("/sessions/{source}/export", dependencies=[Depends(require_admin)])
+async def sessions_export(source: str) -> Response:
+    from app.scrapers import site_auth
+
+    try:
+        state = await asyncio.to_thread(site_auth.export_session, source)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    import json as _json
+
+    return Response(
+        content=_json.dumps(state),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{source}_session.json"'},
+    )
+
+
+@router.post("/sessions/{source}/import",
+             dependencies=[Depends(require_writable), Depends(require_admin)])
+async def sessions_import(source: str, payload: dict) -> dict[str, int | str]:
+    from app.scrapers import site_auth
+
+    try:
+        n = await asyncio.to_thread(site_auth.import_session, source, payload)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "imported", "cookies": n}
+
+
+@router.delete("/sessions/{source}",
+               dependencies=[Depends(require_writable), Depends(require_admin)])
+def sessions_forget(source: str) -> dict[str, str]:
+    from app.scrapers import site_auth
+
+    site_auth.forget(source)
+    return {"status": "disconnected", "source": source}
+
+
 @router.get("/devaid/probe", dependencies=[Depends(require_admin)])
 async def devaid_probe() -> dict:
     """Can this machine reach DevelopmentAid without a browser?

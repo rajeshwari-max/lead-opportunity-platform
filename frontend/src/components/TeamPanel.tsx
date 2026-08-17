@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, Loader2, Mail, Pencil, Plus, RotateCcw, Send, Trash2, Users } from "lucide-react";
+import { AlertTriangle, ChevronDown, Loader2, Mail, Pencil, Plus, RotateCcw, Search, Send, Trash2, Users, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -140,18 +140,68 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
     setForm({ ...form, verticals: [...set].join(", ") });
   };
 
+  // Collapsed by default once the team grows: the panel renders every member
+  // with their keyword, category and vertical rules, which runs to several
+  // screens and pushes the Expert Pool below the fold.
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("lop-team-collapsed") === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("lop-team-collapsed", collapsed ? "1" : "0"); } catch { /* ignore */ }
+  }, [collapsed]);
+
+  const [query, setQuery] = useState("");
+  const shown = query.trim()
+    ? members.filter((m) => {
+        const q = query.trim().toLowerCase();
+        // Search the routing rules too, not just the person — "who is getting
+        // the climate leads?" is the question this panel is usually opened for.
+        return [m.name, m.email, m.keywords, m.categories, m.verticals]
+          .some((v) => (v || "").toLowerCase().includes(q));
+      })
+    : members;
+
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2">
-          <Users className="h-4 w-4" /> Team &amp; Lead Routing
+          <button type="button" onClick={() => setCollapsed((v) => !v)}
+                  title={collapsed ? "Expand" : "Collapse"}
+                  className="flex items-center gap-2 hover:text-primary">
+            <ChevronDown className={`h-4 w-4 transition-transform ${collapsed ? "-rotate-90" : ""}`} />
+            <Users className="h-4 w-4" /> Team &amp; Lead Routing
+          </button>
+          <span className="text-xs font-normal text-muted-foreground">
+            {members.length}
+          </span>
         </CardTitle>
         <Button size="sm" variant="outline"
-                onClick={() => { setEditingId(null); setForm(emptyForm); setShowForm(!showForm); }}>
+                onClick={() => {
+                  setCollapsed(false);          // adding while collapsed hid the form
+                  setEditingId(null); setForm(emptyForm); setShowForm(!showForm);
+                }}>
           <Plus className="h-3.5 w-3.5" /> Add
         </Button>
       </CardHeader>
+      {!collapsed && (
       <CardContent className="space-y-3">
+        {members.length > 3 && (
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name, email, keyword or vertical…"
+              className="h-8 w-full rounded-md border border-border bg-transparent pl-8 pr-7 text-xs outline-none focus:border-primary"
+            />
+            {query && (
+              <button type="button" onClick={() => setQuery("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        )}
         {!emailConfigured && !readOnly && (
           <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-400">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -225,7 +275,12 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
             they'll get a formatted email with every matching active opportunity.
           </p>
         )}
-        {members.map((m) => (
+        {query && shown.length === 0 && (
+          <p className="py-3 text-center text-xs text-muted-foreground">
+            No team member matches "{query}".
+          </p>
+        )}
+        {shown.map((m) => (
           // Two rows, not one. Four buttons and a count chip on a single line
           // left the name with no width at all in this sidebar — every member
           // rendered as an anonymous row of controls. Identity goes first and
@@ -307,6 +362,7 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
           )}
         </AnimatePresence>
       </CardContent>
+      )}
     </Card>
   );
 }

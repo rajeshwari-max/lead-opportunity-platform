@@ -71,9 +71,14 @@ export function FiltersSidebar({ facets, filters, onChange }: Props) {
         </div>
       </section>
 
+      {/* Every section renders even when it currently has no options. Hiding
+          them made the sidebar look broken: picking a source whose rows carry
+          no country made the whole Country and Region sections vanish, which
+          reads as the filters being lost rather than as "this source has no
+          countries recorded". A stable sidebar that explains itself is worth
+          more than a tidy one that rearranges under you. */}
       {sections.map(
-        (s) =>
-          s.options.length > 0 && (
+        (s) => (
             <section key={s.key} className="space-y-1">
               <div className="mb-1 flex items-baseline justify-between gap-2">
                 <h3 className="text-xs font-semibold text-muted-foreground">{s.title}</h3>
@@ -113,7 +118,11 @@ export function FiltersSidebar({ facets, filters, onChange }: Props) {
                             onChange={(c) => toggle(s.key, opt, c)} />
                 ))}
                 {visible(s.key, s.options).length === 0 && (
-                  <p className="py-1 text-xs text-muted-foreground">No match</p>
+                  <p className="py-1 text-xs text-muted-foreground">
+                    {s.options.length === 0
+                      ? "None recorded for the current selection"
+                      : "No match"}
+                  </p>
                 )}
               </div>
             </section>

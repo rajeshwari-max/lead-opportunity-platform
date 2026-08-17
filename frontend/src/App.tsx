@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ChartsRow } from "@/components/ChartsRow";
 import { ExpertsCard } from "@/components/ExpertsCard";
+import { SiteLoginsCard } from "@/components/SiteLoginsCard";
 import { FiltersSidebar } from "@/components/FiltersSidebar";
 import { Header } from "@/components/Header";
 import { AutoEmailPanel } from "@/components/AutoEmailPanel";
@@ -132,6 +133,7 @@ export default function App() {
             <AutoEmailPanel readOnly={readOnly} />
             <TeamPanel readOnly={readOnly} />
             <ExpertsCard readOnly={readOnly} isAdmin={isAdmin} />
+            <SiteLoginsCard isAdmin={isAdmin} />
           </div>
         </div>
       </main>

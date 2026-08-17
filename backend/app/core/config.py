@@ -67,15 +67,19 @@ class Settings(BaseSettings):
     # already carry the English filter (languages=92) and the team's sectors.
     devaid_grants_url: str = ""
     devaid_tenders_url: str = ""
-    # DevelopmentAid sector ids to restrict the search to, comma separated.
-    # "100,7,11,87" are the team's four sectors and is what the shared search
-    # URL carries. **Blank means every sector**, which is what to set if the
-    # question is "are we seeing everything currently open?" — the filter is a
-    # deliberate narrowing, not a limitation of the scraper.
-    devaid_sectors: str = "100,7,11,87"
-    # DevelopmentAid language id. 92 = English. Blank = every language, which
-    # would reintroduce the non-English listings that were removed from the
-    # dashboard, so it is set rather than left open.
+    # DevelopmentAid search filters, from the team's own saved searches.
+    # Grants and tenders carry slightly different sector lists because the two
+    # catalogues don't offer identical sectors.
+    #   statuses=3  -> currently open only (not forecast, not closed)
+    #   languages=92 -> English
+    # Blank sectors = every sector.
+    devaid_tender_sectors: str = (
+        "100,5,95,3,6,7,78,8,29,9,11,54,80,16,30,44,20,85,87,60,22,43,34,48,27"
+    )
+    devaid_grant_sectors: str = (
+        "100,3,95,5,6,7,78,8,54,11,80,30,44,85,87,22,34,48,27,9"
+    )
+    devaid_statuses: str = "3"
     devaid_language: str = "92"
     # DevelopmentAid limits how deep a single search can be paged (~100 records),
     # so coverage comes from running many narrowed searches and merging them.

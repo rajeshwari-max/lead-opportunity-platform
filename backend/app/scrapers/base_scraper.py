@@ -380,13 +380,29 @@ class BaseScraper(ABC):
             return None
 
     def _fetch_rendered_sync(self, url: str) -> str:
-        """Blocking Playwright fetch — runs in its own thread (see above)."""
+        """Blocking Playwright fetch — runs in its own thread (see above).
+
+        When this source has a saved login (see scrapers/site_auth.py) the
+        browser is opened with that session, so gated listings are visible.
+        Sources with no saved session are unaffected — open_context falls back
+        to an ordinary anonymous browser, so an unconnected site still scrapes
+        whatever it shows the public rather than failing.
+        """
         from playwright.sync_api import sync_playwright
 
+        from app.scrapers import site_auth
+
+        needs_login = self.name in site_auth.LOGIN_SITES
+
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
-            try:
+            if needs_login:
+                context = site_auth.open_context(pw, self.name, headless=True)
+                browser = context
+                page = context.pages[0] if context.pages else context.new_page()
+            else:
+                browser = pw.chromium.launch(headless=True)
                 page = browser.new_page(user_agent=settings.user_agent)
+            try:
                 page.goto(url, timeout=int(settings.request_timeout * 1000))
                 try:
                     page.wait_for_load_state("networkidle", timeout=15_000)

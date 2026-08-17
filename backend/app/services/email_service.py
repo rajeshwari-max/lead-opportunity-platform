@@ -247,17 +247,23 @@ def _digest_rows(
             o.location or o.country,
             o.funding_amount,
         ) if x]
-        # In compact mode the summary and the vertical chips go. They are the
-        # bulk of a row's bytes and the least load-bearing part of it — the
-        # title, funder, deadline and link still say what the thing is.
+        # Compact mode drops the vertical chips — they are pure decoration and
+        # the most expensive markup per row.
         verticals = "" if compact else "".join(
             f'<span style="display:inline-block;background:#eef2ff;color:#3730a3;'
             f'border-radius:9999px;padding:1px 8px;font-size:11px;margin:2px 4px 0 0;">{v.strip()}</span>'
             for v in (o.verticals or "").split(",") if v.strip()
         )
-        summary = "" if compact else (o.summary or "").strip().replace("\n", " ")
-        if len(summary) > 220:
-            summary = summary[:220].rsplit(" ", 1)[0] + "…"
+        # The description is NOT dropped. It used to be, and that made the
+        # digest inconsistent in a way that looked like a bug: whether you got
+        # descriptions depended on how many matches you happened to have that
+        # day — under 40 and they appeared, over 40 and every row lost them.
+        # A shortened description costs ~150 bytes and is the single most
+        # useful line in the row, so compact mode shortens it instead.
+        summary = (o.summary or "").strip().replace("\n", " ")
+        limit = 110 if compact else 220
+        if len(summary) > limit:
+            summary = summary[:limit].rsplit(" ", 1)[0] + "…"
         # Only the opportunity's own URL is offered as the title link. Falling
         # back to o.website here is what made "the link opens the homepage" a
         # recurring complaint: the title looked like a link to the call and
