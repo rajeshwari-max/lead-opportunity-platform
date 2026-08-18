@@ -425,14 +425,14 @@
     "url": "https://projects.worldbank.org/en/projects-operations/opportunities?lang=en",
     "website": "https://projects.worldbank.org",
     "page_url": "https://projects.worldbank.org/en/projects-operations/opportunities?lang=en&os={offset}",
-    "page_size": 10
+    "page_size": 20
   },
   {
     "name": "undp_procurement",
     "display_name": "UNDP Procurement",
     "url": "https://procurement-notices.undp.org/?lang=en",
     "website": "https://procurement-notices.undp.org",
-    "page_url": "https://procurement-notices.undp.org/?lang=en&page={page}"
+    "stale_page_streak": 1
   },
   {
     "name": "un_partner_portal",

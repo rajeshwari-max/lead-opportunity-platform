@@ -68,6 +68,10 @@ export interface SourceProgress {
   saved: number;
   skipped_expired: number;
   duplicates: number;
+  /** Rejected as advertising/junk before reaching the database. */
+  spam: number;
+  /** Dropped because the run was restricted to certain verticals. */
+  off_vertical: number;
   errors: number;
   status: string;
 }

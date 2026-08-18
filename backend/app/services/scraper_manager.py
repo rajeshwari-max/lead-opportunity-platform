@@ -82,7 +82,7 @@ class ScraperManager:
         self.started_at = time.monotonic()
         self.progress = {
             s.name: {"display_name": s.display_name, "pages": 0, "found": 0, "saved": 0,
-                     "skipped_expired": 0, "duplicates": 0, "off_vertical": 0,
+                     "skipped_expired": 0, "duplicates": 0, "off_vertical": 0, "spam": 0,
                      "errors": 0, "status": "queued"}
             for s in scrapers
         }
@@ -179,10 +179,20 @@ class ScraperManager:
         try:
             async for batch in scraper.crawl(source_stop, self._pause, on_progress):
                 prog["found"] += len(batch)
-                saved, expired, dupes = await asyncio.to_thread(self._ingest, batch)
+                saved, expired, dupes, spam = await asyncio.to_thread(self._ingest, batch)
                 prog["saved"] += saved
                 prog["skipped_expired"] += expired
                 prog["duplicates"] += dupes
+                prog["spam"] += spam
+                # "found 30, saved 0" is unreadable without this. Every dropped
+                # row now has a stated reason, so a run that looks like it did
+                # nothing can be told apart from one that found only repeats.
+                if not saved and batch:
+                    self._log(
+                        f"[{scraper.display_name}] page yielded {len(batch)}, saved 0 "
+                        f"(duplicates {dupes}, expired {expired}, spam {spam}, "
+                        f"off-vertical {prog.get('off_vertical', 0)})"
+                    )
                 if expired:
                     verb = "archived" if settings.keep_expired else "skipped"
                     self._log(f"[{scraper.display_name}] {verb} {expired} closed listing(s)")
@@ -224,7 +234,7 @@ class ScraperManager:
     def _ingest(self, batch: list[RawOpportunity]) -> tuple[int, int, int]:
         """Normalize deadline → drop expired → classify (category + verticals) →
         vertical-filter → dedupe → upsert."""
-        saved = expired = dupes = 0
+        saved = expired = dupes = spam = 0
         expired_samples: list[str] = []
         today = date.today()
         batch_uids: set[str] = set()  # catch duplicates within the same batch too
@@ -279,6 +289,7 @@ class ScraperManager:
                 # the UI, so it never reaches the database, the digests or the
                 # counts.
                 if is_spam(raw.title, raw.summary):
+                    spam += 1
                     log.debug("[%s] spam listing skipped: %s",
                               raw.source_website, (raw.title or "")[:60])
                     continue
@@ -329,7 +340,7 @@ class ScraperManager:
                 saved += 1
         if expired_samples:
             self._log(f"  ↳ expired examples: {'; '.join(expired_samples)}")
-        return saved, expired, dupes
+        return saved, expired, dupes, spam
 
     # ------------------------------------------------------------- reporting
     def snapshot(self) -> dict[str, Any]:

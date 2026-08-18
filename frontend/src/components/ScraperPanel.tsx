@@ -192,7 +192,25 @@ export function ScraperPanel({ sources, progress }: Props) {
               <div key={name} className="flex items-center justify-between rounded-md bg-muted/50 px-2 py-1.5">
                 <span className="font-medium">{s.display_name}</span>
                 <span className="text-muted-foreground">
-                  p{s.pages} · found {s.found} · saved {s.saved} · expired {s.skipped_expired}
+                  p{s.pages} · found {s.found} · saved {s.saved}
+                  {/* A run reporting "found 30, saved 0" is unreadable without
+                      the reasons. Each of these is a different problem: repeats
+                      mean the source has nothing new, off-vertical means the
+                      run was restricted, and found=0 means parsing failed. */}
+                  {s.skipped_expired > 0 && <> · expired {s.skipped_expired}</>}
+                  {s.duplicates > 0 && <> · already had {s.duplicates}</>}
+                  {s.spam > 0 && <> · junk {s.spam}</>}
+                  {s.off_vertical > 0 && <> · off-vertical {s.off_vertical}</>}
+                  {s.found === 0 && s.pages > 0 && s.status === "completed" && (
+                    <span className="ml-1 font-medium text-amber-500">
+                      nothing parsed — check the site or its login
+                    </span>
+                  )}
+                  {s.pages === 0 && s.status === "completed" && (
+                    <span className="ml-1 font-medium text-red-500">
+                      no page fetched at all
+                    </span>
+                  )}
                   <span className={`ml-2 font-medium ${statusColor[s.status] ?? ""}`}>{s.status}</span>
                 </span>
               </div>
