@@ -425,27 +425,32 @@
     "url": "https://projects.worldbank.org/en/projects-operations/opportunities?lang=en",
     "website": "https://projects.worldbank.org",
     "page_url": "https://projects.worldbank.org/en/projects-operations/opportunities?lang=en&os={offset}",
-    "page_size": 20
+    "page_size": 20,
+    "stale_page_streak": 0
   },
   {
     "name": "undp_procurement",
     "display_name": "UNDP Procurement",
     "url": "https://procurement-notices.undp.org/?lang=en",
     "website": "https://procurement-notices.undp.org",
-    "stale_page_streak": 1
+    "stale_page_streak": 0
   },
   {
     "name": "un_partner_portal",
     "display_name": "UN Partner Portal",
     "url": "https://www.unpartnerportal.org/landing/opportunities/?lang=en",
     "website": "https://www.unpartnerportal.org",
-    "page_url": "https://www.unpartnerportal.org/landing/opportunities/?lang=en&page={page}"
+    "page_url": "https://www.unpartnerportal.org/landing/opportunities/?lang=en&page={page}",
+    "page_size": 10,
+    "stale_page_streak": 0
   },
   {
     "name": "adb_tenders",
     "display_name": "ADB Tenders",
     "url": "https://www.adb.org/projects/tenders?searchstax%5Bquery%5D=*&searchstax%5Bpage%5D=1&searchstax%5Border%5D=ds_date_closing%20desc&searchstax%5Bfacets%5D%5B0%5D=or:ss_fct_group:consulting&searchstax%5Bfacets%5D%5B1%5D=or:sm_fct_status:Active",
     "website": "https://www.adb.org",
-    "page_url": "https://www.adb.org/projects/tenders?searchstax%5Bquery%5D=*&searchstax%5Bpage%5D={page}&searchstax%5Border%5D=ds_date_closing%20desc&searchstax%5Bfacets%5D%5B0%5D=or:ss_fct_group:consulting&searchstax%5Bfacets%5D%5B1%5D=or:sm_fct_status:Active"
+    "page_url": "https://www.adb.org/projects/tenders?searchstax%5Bquery%5D=*&searchstax%5Bpage%5D={page}&searchstax%5Border%5D=ds_date_closing%20desc&searchstax%5Bfacets%5D%5B0%5D=or:ss_fct_group:consulting&searchstax%5Bfacets%5D%5B1%5D=or:sm_fct_status:Active",
+    "page_size": 12,
+    "stale_page_streak": 0
   }
 ]

@@ -39,6 +39,18 @@ SESSIONS_DIR = BASE_DIR / "data" / "sessions"
 # human is sent to sign in; `check` is a substring that only appears once
 # authenticated, used to verify rather than assume.
 LOGIN_SITES: dict[str, dict[str, str]] = {
+    # DevelopmentAid predates this module and has its own auth code
+    # (devaid_auth.py), because its scraper drives the browser itself rather
+    # than going through BaseScraper. It is listed here so there is ONE panel
+    # for site logins instead of two that behave differently — the functions
+    # below delegate to devaid_auth so both paths share one profile on disk.
+    # Two stores would be worse than none: connecting in one place while the
+    # scraper read the other would look connected and scrape as a guest.
+    "developmentaid": {
+        "display": "DevelopmentAid",
+        "login_url": "https://www.developmentaid.org/tenders/search",
+        "check": "logout",
+    },
     "world_bank": {
         "display": "World Bank",
         "login_url": "https://projects.worldbank.org/en/projects-operations/procurement",
@@ -57,11 +69,21 @@ LOGIN_SITES: dict[str, dict[str, str]] = {
 }
 
 
+def _is_devaid(source: str) -> bool:
+    return source == "developmentaid"
+
+
 def profile_dir(source: str) -> Path:
+    if _is_devaid(source):
+        from app.scrapers.devaid_auth import PROFILE_DIR
+        return PROFILE_DIR
     return SESSIONS_DIR / source / "profile"
 
 
 def session_file(source: str) -> Path:
+    if _is_devaid(source):
+        from app.scrapers.devaid_auth import SESSION_FILE
+        return SESSION_FILE
     return SESSIONS_DIR / source / "session.json"
 
 
@@ -137,6 +159,12 @@ def connect_interactive(source: str, timeout_s: int = 300) -> bool:
     """
     if source not in LOGIN_SITES:
         raise KeyError(f"{source} is not configured as a login site")
+    if _is_devaid(source):
+        # Reuse the existing flow, which also verifies the session afterwards
+        # rather than assuming a closed window means success.
+        from app.scrapers.devaid_auth import connect_interactive_sync
+        return connect_interactive_sync()
+
     if not display_available():
         raise NoDisplayError(
             "This machine has no display, so a login window cannot be shown. "
@@ -172,6 +200,10 @@ def connect_interactive(source: str, timeout_s: int = 300) -> bool:
 
 def export_session(source: str) -> dict[str, Any]:
     """storage_state for this source, to move to a server."""
+    if _is_devaid(source):
+        from app.scrapers.devaid_auth import export_session_state
+        return export_session_state()
+
     from playwright.sync_api import sync_playwright
 
     pdir = profile_dir(source)
@@ -189,6 +221,10 @@ def export_session(source: str) -> dict[str, Any]:
 
 def import_session(source: str, state: dict[str, Any]) -> int:
     """Install a session exported elsewhere. Returns the cookie count."""
+    if _is_devaid(source):
+        from app.scrapers.devaid_auth import import_session_state
+        return import_session_state(state)
+
     if source not in LOGIN_SITES:
         raise KeyError(f"{source} is not configured as a login site")
     cookies = state.get("cookies")
