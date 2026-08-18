@@ -767,6 +767,30 @@ async def devaid_connect() -> dict[str, str]:
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Could not open login window: {exc}") from exc
     if not ok:
+        # Say what actually happened. The old message always blamed the login,
+        # which sent people round a loop they could not exit when the real
+        # cause was a bot check that signing in cannot affect.
+        from app.scrapers.devaid_auth import LAST_VERIFY
+
+        reason = LAST_VERIFY.get("reason")
+        if reason == "challenge":
+            raise HTTPException(
+                status_code=503,
+                detail="Could not verify the login: DevelopmentAid served a Cloudflare "
+                       "bot check instead of the search page. This is not a sign-in "
+                       "problem and signing in again will not clear it. Your saved "
+                       "session has been kept — run a DevelopmentAid scrape and see "
+                       "whether results come back. If it stays blocked, the site is "
+                       "refusing automated access and the fix is to request API access "
+                       "from DevelopmentAid.",
+            )
+        if reason == "blank":
+            raise HTTPException(
+                status_code=400,
+                detail="The search page rendered nothing at all, so the login could not "
+                       "be confirmed. This is usually a slow or failed page load rather "
+                       "than a wrong password — try Connect account again.",
+            )
         raise HTTPException(
             status_code=400,
             detail="Login was not completed — the site still shows 'Sign in'. "

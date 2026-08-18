@@ -240,6 +240,18 @@ def is_signed_in(page) -> bool:
         return False
 
 
+# Why the last verification came out the way it did. The connect flow reads
+# this so it can say what actually happened instead of guessing.
+LAST_VERIFY: dict[str, object] = {}
+
+# Cloudflare interstitials render neither results nor a sign-in link, which is
+# indistinguishable from "the page never loaded" unless you look for them.
+_CHALLENGE_MARKERS = (
+    "just a moment", "attention required", "checking your browser",
+    "cf-chl", "challenge-platform", "turnstile", "cf_chl_opt",
+)
+
+
 def verify_session() -> bool:
     """Load a real search page headlessly and report whether we're signed in.
 
@@ -253,7 +265,36 @@ def verify_session() -> bool:
         context = open_persistent(pw, headless=True)
         try:
             page = context.pages[0] if context.pages else context.new_page()
-            page.goto("https://www.developmentaid.org/grants/search", timeout=60_000)
+            page.goto("https://www.developmentaid.org/grants/search", timeout=90_000,
+                      wait_until="domcontentloaded")
+
+            # A bot check must be identified before anything else. Its page has
+            # no cards AND no sign-in link, so every later test reads it as a
+            # failed login — which sent the user back to sign in again, over and
+            # over, for a problem signing in cannot fix.
+            try:
+                _t = (page.title() or "").lower()
+                _b = (page.content() or "")[:4000].lower()
+            except Exception:
+                _t = _b = ""
+            if any(m in _t or m in _b for m in _CHALLENGE_MARKERS):
+                # Give it the chance to clear on its own before deciding.
+                page.wait_for_timeout(12_000)
+                try:
+                    _t = (page.title() or "").lower()
+                except Exception:
+                    pass
+                if any(m in _t for m in _CHALLENGE_MARKERS):
+                    LAST_VERIFY.clear()
+                    LAST_VERIFY.update({"reason": "challenge", "title": _t})
+                    log.error(
+                        "[devaid] verify: Cloudflare bot check (page title %r), not a "
+                        "login problem. Signing in again will not clear it — the site "
+                        "is refusing automated browsing. The session on disk may be "
+                        "perfectly valid.", _t,
+                    )
+                    return False
+
             try:
                 page.wait_for_selector("da-search-card", timeout=45_000)
             except Exception:
@@ -307,6 +348,8 @@ def verify_session() -> bool:
                 and detail.get("cards", 0) == 0
             )
             if nothing_rendered:
+                LAST_VERIFY.clear()
+                LAST_VERIFY.update({"reason": "blank", "detail": detail})
                 log.error(
                     "[devaid] verify: the search page rendered nothing (no cards, no "
                     "sign-in link, no account menu). The session cannot be confirmed "
@@ -315,6 +358,9 @@ def verify_session() -> bool:
                 )
                 return False
 
+            LAST_VERIFY.clear()
+            LAST_VERIFY.update({"reason": "guest" if clearly_guest else "ok",
+                                "detail": detail})
             signed_in = not clearly_guest
             log.info("[devaid] verify: signed_in=%s (member_signals=%s) details=%s",
                      signed_in, member_signals, detail)
@@ -416,11 +462,32 @@ def connect_interactive_sync() -> bool:
         _CONNECTED_MARKER.write_text("connected", encoding="utf-8")
         log.info("[devaid] login verified — session saved and usable for scraping")
     else:
-        _CONNECTED_MARKER.unlink(missing_ok=True)
-        log.error(
-            "[devaid] login NOT completed — the site still shows a 'Sign in' link, so "
-            "scrapes would only reach the public first page. Click 'Connect account' "
-            "again and finish signing in (email, password, and the reCAPTCHA) BEFORE "
-            "closing the window."
-        )
+        reason = LAST_VERIFY.get("reason")
+        if reason == "challenge":
+            # Deliberately NOT unlinking the marker: the session may be fine and
+            # only the verification was blocked. Throwing it away would discard
+            # a good login because a bot check got in the way of checking it.
+            log.error(
+                "[devaid] could not verify the login — Cloudflare served a bot check "
+                "instead of the search page. This is NOT a sign-in problem, and "
+                "signing in again will not change it. The saved session has been "
+                "kept; try a scrape and see whether it returns cards. If it stays "
+                "blocked, DevelopmentAid is refusing automated access and the fix is "
+                "an API/data agreement with them rather than more retries."
+            )
+        elif reason == "blank":
+            _CONNECTED_MARKER.unlink(missing_ok=True)
+            log.error(
+                "[devaid] login NOT confirmed — the search page rendered nothing at "
+                "all (no results, no sign-in link). Usually a slow or failed page "
+                "load rather than a bad password. Try Connect account again."
+            )
+        else:
+            _CONNECTED_MARKER.unlink(missing_ok=True)
+            log.error(
+                "[devaid] login NOT completed — the site still shows a 'Sign in' link, "
+                "so scrapes would only reach the public first page. Click 'Connect "
+                "account' again and finish signing in (email, password, and the "
+                "reCAPTCHA) BEFORE closing the window."
+            )
     return ok

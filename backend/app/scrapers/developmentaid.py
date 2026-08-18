@@ -305,8 +305,16 @@ class DevelopmentAidScraper(BaseScraper):
                           if s.strip()} or {"grants", "tenders"}
                 sections = [(u, s) for u, s in _SECTIONS if s in wanted]
                 if len(sections) < len(_SECTIONS):
-                    log.info("[developmentaid] section filter active — walking %s only "
-                             "(LOP_DEVAID_SECTIONS)", ", ".join(s for _, s in sections))
+                    skipped = [s for _, s in _SECTIONS if s not in wanted]
+                    # Loud, because this is silent data loss by configuration:
+                    # the run reports success while an entire catalogue is never
+                    # visited. It read as "the scraper is broken" for weeks.
+                    log.warning(
+                        "[developmentaid] ONLY walking %s — %s will NOT be scraped. "
+                        "This comes from LOP_DEVAID_SECTIONS in backend/.env; set it "
+                        "to 'grants,tenders' (or remove the line) to cover both.",
+                        ", ".join(s for _, s in sections), ", ".join(skipped),
+                    )
 
                 for section_url, slug in sections:
                     if stop_flag.is_set():
@@ -318,7 +326,22 @@ class DevelopmentAidScraper(BaseScraper):
                     # 575 pages / 28,750 grants cards lost to a single
                     # ERR_NAME_NOT_RESOLVED loading the tenders section).
                     try:
-                        resp = page.goto(section_url, timeout=int(settings.request_timeout * 1000))
+                        # Not settings.request_timeout (30s): this site answers
+                        # with a Cloudflare interstitial that takes several
+                        # seconds to evaluate and then navigates on by itself.
+                        # Thirty seconds timed out *during* that wait, so the
+                        # run failed at the one moment it might have succeeded.
+                        # Waiting longer is not working around the check — it
+                        # either clears on its own or it does not.
+                        resp = page.goto(section_url, timeout=90_000,
+                                         wait_until="domcontentloaded")
+                        if resp is not None and resp.status in (403, 429, 503):
+                            # Give an interstitial its chance to resolve, then
+                            # carry on and let the card check below decide.
+                            log.info("[developmentaid] %s: HTTP %s on arrival — "
+                                     "waiting for a possible interstitial to clear",
+                                     slug, resp.status)
+                            page.wait_for_timeout(12_000)
                     except Exception as exc:
                         log.warning(
                             "[developmentaid] %s: failed to load section start page "
@@ -341,6 +364,21 @@ class DevelopmentAidScraper(BaseScraper):
                         # lately — give it generous room to hydrate.
                         page.wait_for_selector("da-search-card", timeout=45_000)
                     except Exception:
+                        _title = ""
+                        try:
+                            _title = (page.title() or "").strip()
+                        except Exception:
+                            pass
+                        if "just a moment" in _title.lower() or "attention required" in _title.lower():
+                            log.error(
+                                "[developmentaid] %s: BLOCKED BY CLOUDFLARE (page title %r). "
+                                "This is a bot check, not a login problem — a session "
+                                "will not get past it. Reconnect via 'Connect account' "
+                                "so the run uses real Chrome, and if it persists the site "
+                                "is refusing automated access and needs an API/data "
+                                "agreement with DevelopmentAid.",
+                                slug, _title,
+                            )
                         log.warning(
                             "[developmentaid] %s: no cards on page 1 — landed on "
                             "url=%s title=%r (if this is a login/captcha page, "
