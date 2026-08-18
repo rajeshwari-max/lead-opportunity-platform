@@ -9,6 +9,7 @@ No existing code changes (Open/Closed Principle).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 import time
@@ -227,6 +228,13 @@ class BaseScraper(ABC):
         request: PageRequest | None = PageRequest(self.start_url)
         page_number = 0
         seen_urls: set[str] = set()
+        # Fingerprint of the ITEMS on each page, not the URL. Several boards
+        # answer an out-of-range page by re-serving the last (or first) one
+        # rather than an empty result, so ?os=490 is a brand-new URL carrying
+        # content already seen. Without this, disabling the "nothing new"
+        # stop rule let World Bank walk to page 490 of a 32-page list,
+        # re-fetching the same 34 rows every time.
+        seen_content: set[str] = set()
         detail_budget = [settings.detail_fetch_limit]   # shared, decremented per page
 
         async with httpx.AsyncClient(
@@ -288,6 +296,25 @@ class BaseScraper(ABC):
                     log.info("[%s] empty page %s — assuming end of listings", self.name, page_number)
                     await progress("page_done", {"source": self.name, "page": page_number, "found": 0})
                     return
+
+                # End-of-list detection that survives "everything is already in
+                # the database". A page whose items exactly repeat a page we
+                # have already walked means the listing has run out — which is
+                # a different thing from a page of rows we happen to have
+                # stored already, and only the former should stop the crawl.
+                content_sig = hashlib.sha256(
+                    "|".join(sorted(
+                        (i.opportunity_url or i.title or "") for i in items
+                    )).encode("utf-8")
+                ).hexdigest()
+                if content_sig in seen_content:
+                    log.info(
+                        "[%s] page %s repeats listings already seen — end of the "
+                        "list, stopping", self.name, page_number,
+                    )
+                    await progress("pages_end", {"source": self.name, "page": page_number})
+                    return
+                seen_content.add(content_sig)
 
                 await self._enrich_batch(items, client, detail_budget)
                 yield items

@@ -115,27 +115,34 @@ def open_context(pw, source: str, headless: bool = True):
     scraper can call this unconditionally: an un-connected site still scrapes
     whatever it shows the public rather than failing outright.
     """
-    common = {
+    # launch() and launch_persistent_context() do NOT take the same arguments.
+    # `viewport` belongs to a context, not a browser, and passing it to launch()
+    # raises TypeError — which is what made ADB fail on every run with
+    # "BrowserType.launch() got an unexpected keyword argument 'viewport'"
+    # and get misread as a Cloudflare block for two days.
+    launch_args = {
         "headless": headless,
-        "viewport": {"width": 1400, "height": 900},
         "args": ["--disable-blink-features=AutomationControlled"],
     }
+    context_args = {
+        "viewport": {"width": 1400, "height": 900},
+        "user_agent": settings.user_agent,
+    }
+
     sfile = session_file(source)
     if sfile.exists():
-        browser = pw.chromium.launch(**common)
-        return browser.new_context(
-            storage_state=str(sfile),
-            user_agent=settings.user_agent,
-            viewport=common["viewport"],
-        )
+        browser = pw.chromium.launch(**launch_args)
+        return browser.new_context(storage_state=str(sfile), **context_args)
 
     pdir = profile_dir(source)
     if pdir.exists() and any(pdir.iterdir()):
-        return pw.chromium.launch_persistent_context(str(pdir), **common)
+        # A persistent context is launched, not created, so it takes both sets.
+        return pw.chromium.launch_persistent_context(
+            str(pdir), **launch_args, **context_args
+        )
 
-    browser = pw.chromium.launch(**common)
-    return browser.new_context(user_agent=settings.user_agent,
-                               viewport=common["viewport"])
+    browser = pw.chromium.launch(**launch_args)
+    return browser.new_context(**context_args)
 
 
 class NoDisplayError(RuntimeError):
@@ -181,7 +188,7 @@ def connect_interactive(source: str, timeout_s: int = 300) -> bool:
         ctx = pw.chromium.launch_persistent_context(
             str(pdir), headless=False, viewport={"width": 1400, "height": 900},
             args=["--disable-blink-features=AutomationControlled"],
-        )
+        )  # persistent_context accepts viewport; plain launch() does not
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.goto(meta["login_url"], timeout=60_000)
         log.info("[%s] waiting for interactive login (up to %ss)", source, timeout_s)
