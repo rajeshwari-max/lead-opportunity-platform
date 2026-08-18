@@ -110,6 +110,16 @@ class BaseScraper(ABC):
     # detail page is plain HTML and actually carries the missing fields.
     enrich_details: bool = False
 
+    # For sources whose results arrive by XHR *after* the page loads. networkidle
+    # is not enough on its own: a page with analytics beacons and a search API
+    # can report idle before the results come back, and the parser then sees a
+    # navigation-only shell and concludes the listing is empty. ADB's tenders
+    # page is exactly this — its HTML contains no tenders at all until
+    # SearchStax responds. Set either of these from sources.json to wait for
+    # proof that real content rendered.
+    render_wait_selector: str = ""     # CSS selector that only exists with results
+    render_wait_text: str = ""         # text that only appears with results
+
     def __init__(self) -> None:
         self._semaphore = asyncio.Semaphore(settings.concurrency_per_source)
         self._last_request = 0.0
@@ -435,6 +445,26 @@ class BaseScraper(ABC):
                     page.wait_for_load_state("networkidle", timeout=15_000)
                 except Exception:
                     pass  # slow trackers shouldn't fail the page — take what rendered
+
+                # Wait for evidence the results themselves rendered, not just
+                # that the shell finished loading.
+                if self.render_wait_selector:
+                    try:
+                        page.wait_for_selector(self.render_wait_selector, timeout=30_000)
+                    except Exception:
+                        log.warning("[%s] %r never appeared — the page may have "
+                                    "rendered without results",
+                                    self.name, self.render_wait_selector)
+                if self.render_wait_text:
+                    try:
+                        page.wait_for_function(
+                            "t => document.body && document.body.innerText.includes(t)",
+                            arg=self.render_wait_text, timeout=30_000,
+                        )
+                    except Exception:
+                        log.warning("[%s] text %r never appeared — the page may have "
+                                    "rendered without results",
+                                    self.name, self.render_wait_text)
 
                 # Bot-check interstitials ("Please Wait" + meta refresh) navigate
                 # by themselves after ~5s — give them time, then settle again.

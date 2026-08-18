@@ -359,11 +359,39 @@ class DevelopmentAidScraper(BaseScraper):
                     except Exception:
                         pass
 
-                    try:
-                        # First page's Angular bootstrap has been taking 20-30s+
-                        # lately — give it generous room to hydrate.
-                        page.wait_for_selector("da-search-card", timeout=45_000)
-                    except Exception:
+                    def _cards_rendered(timeout_ms: int) -> bool:
+                        try:
+                            page.wait_for_selector("da-search-card", timeout=timeout_ms)
+                            return True
+                        except Exception:
+                            return False
+
+                    # First page's Angular bootstrap has been taking 20-30s+
+                    # lately — give it generous room to hydrate.
+                    rendered = _cards_rendered(45_000)
+                    if not rendered:
+                        # One reload before giving up. Evidence for this: a
+                        # failing capture of the GRANTS section was 11 KB with
+                        # the correct page title and zero cards — the shell
+                        # arrived and the Angular app never bootstrapped. That
+                        # is a transient front-end failure, not a block, and a
+                        # second attempt usually renders. (The tenders capture
+                        # from the same run was a Cloudflare interstitial
+                        # instead, which a reload will not fix — hence the
+                        # separate challenge check above.)
+                        try:
+                            _size = len(page.content() or "")
+                        except Exception:
+                            _size = 0
+                        log.info("[developmentaid] %s: no cards after first load "
+                                 "(%s bytes) — reloading once", slug, _size)
+                        try:
+                            page.reload(timeout=90_000, wait_until="domcontentloaded")
+                        except Exception:
+                            pass
+                        rendered = _cards_rendered(60_000)
+
+                    if not rendered:
                         _title = ""
                         try:
                             _title = (page.title() or "").strip()

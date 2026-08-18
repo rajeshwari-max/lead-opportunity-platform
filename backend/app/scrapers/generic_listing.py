@@ -295,6 +295,9 @@ def _build() -> list[type[GenericListingScraper]]:
                 # the generic detector can't see.
                 "page_url_template": cfg.get("page_url", ""),
                 "stale_page_streak_override": cfg.get("stale_page_streak", None),
+                # Proof-of-render hooks for XHR-driven listings (see BaseScraper).
+                "render_wait_selector": cfg.get("render_wait_selector", ""),
+                "render_wait_text": cfg.get("render_wait_text", ""),
             },
         )
         built.append(register(cls))

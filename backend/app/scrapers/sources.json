@@ -447,10 +447,11 @@
   {
     "name": "adb_tenders",
     "display_name": "ADB Tenders",
-    "url": "https://www.adb.org/projects/tenders?searchstax%5Bquery%5D=*&searchstax%5Bpage%5D=1&searchstax%5Border%5D=ds_date_closing%20desc&searchstax%5Bfacets%5D%5B0%5D=or:ss_fct_group:consulting&searchstax%5Bfacets%5D%5B1%5D=or:sm_fct_status:Active",
+    "url": "https://www.adb.org/projects/tenders?searchstax[query]=*&searchstax[page]=1&searchstax[order]=ds_date_closing%20desc&searchstax[facets][0]=or:ss_fct_group:consulting&searchstax[facets][1]=or:sm_fct_status:Active",
     "website": "https://www.adb.org",
-    "page_url": "https://www.adb.org/projects/tenders?searchstax%5Bquery%5D=*&searchstax%5Bpage%5D={page}&searchstax%5Border%5D=ds_date_closing%20desc&searchstax%5Bfacets%5D%5B0%5D=or:ss_fct_group:consulting&searchstax%5Bfacets%5D%5B1%5D=or:sm_fct_status:Active",
+    "page_url": "https://www.adb.org/projects/tenders?searchstax[query]=*&searchstax[page]={page}&searchstax[order]=ds_date_closing%20desc&searchstax[facets][0]=or:ss_fct_group:consulting&searchstax[facets][1]=or:sm_fct_status:Active",
     "page_size": 12,
-    "stale_page_streak": 0
+    "stale_page_streak": 0,
+    "render_wait_text": "Notice Type"
   }
 ]
