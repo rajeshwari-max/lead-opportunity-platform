@@ -443,15 +443,5 @@
     "page_url": "https://www.unpartnerportal.org/landing/opportunities/?lang=en&page={page}",
     "page_size": 10,
     "stale_page_streak": 0
-  },
-  {
-    "name": "adb_tenders",
-    "display_name": "ADB Tenders",
-    "url": "https://www.adb.org/projects/tenders?searchstax[query]=*&searchstax[page]=1&searchstax[order]=ds_date_closing%20desc&searchstax[facets][0]=or:ss_fct_group:consulting&searchstax[facets][1]=or:sm_fct_status:Active",
-    "website": "https://www.adb.org",
-    "page_url": "https://www.adb.org/projects/tenders?searchstax[query]=*&searchstax[page]={page}&searchstax[order]=ds_date_closing%20desc&searchstax[facets][0]=or:ss_fct_group:consulting&searchstax[facets][1]=or:sm_fct_status:Active",
-    "page_size": 12,
-    "stale_page_streak": 0,
-    "render_wait_text": "Notice Type"
   }
 ]

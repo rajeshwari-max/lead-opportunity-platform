@@ -6,6 +6,7 @@ re-enabled here, which is why those names showed zero results despite having
 working scrapers.
 """
 from app.scrapers.bond import BondScraper
+from app.scrapers.adb import AdbTendersScraper
 from app.scrapers.developmentaid import DevelopmentAidScraper
 from app.scrapers.devnet import DevNetScraper
 from app.scrapers.funders_misc import (
