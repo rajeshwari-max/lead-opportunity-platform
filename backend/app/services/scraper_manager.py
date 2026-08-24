@@ -231,9 +231,19 @@ class ScraperManager:
             )
 
     # -------------------------------------------------------------- pipeline
-    def _ingest(self, batch: list[RawOpportunity]) -> tuple[int, int, int]:
-        """Normalize deadline → drop expired → classify (category + verticals) →
-        vertical-filter → dedupe → upsert."""
+    def _ingest(self, batch: list[RawOpportunity]) -> tuple[int, int, int, int]:
+        """One page of scraped rows -> rows in the database.
+
+        normalise deadline -> mark expired -> classify (category, verticals,
+        work type, study type) -> optional vertical filter -> normalise
+        geography/organisation/amount -> reject spam -> fingerprint -> dedupe
+        -> insert.
+
+        Returns (saved, expired, duplicates, spam) so the caller can say *why*
+        a page produced no new rows. "found 30, saved 0" is unreadable without
+        those four numbers — repeats, closed calls and junk are three different
+        situations and only one of them is a problem.
+        """
         saved = expired = dupes = spam = 0
         expired_samples: list[str] = []
         today = date.today()

@@ -81,6 +81,35 @@ class Settings(BaseSettings):
     )
     devaid_statuses: str = "3"
     devaid_language: str = "92"
+    # Whether to request the filtered search URL (sectors/statuses/languages in
+    # the query string) instead of the plain /grants/search and /tenders/search.
+    #
+    # OFF by default, because turning it on is what broke this scraper. The
+    # plain URLs returned 2,463 result cards on 30 July and filled the database;
+    # every run after the filters were added came back 403 with a Cloudflare
+    # "Just a moment..." interstitial. A long machine-generated query string is
+    # itself a bot signal — ADB's firewall was shown to reject the same shape of
+    # URL outright while serving the bare path normally.
+    #
+    # Filtering by sector is not lost: the pipeline already keeps only English,
+    # currently-open rows and classifies each into a vertical, so the narrowing
+    # happens after collection instead of in the request.
+    devaid_filtered_search: bool = False
+    # Run the DevelopmentAid scrape in a *visible* browser window.
+    #
+    # Headless Chrome reports itself as such: with channel="chrome" the browser's
+    # own user agent is used (deliberately — a UA that disagrees with the real
+    # browser is itself a bot signal), and in headless mode that string contains
+    # "HeadlessChrome". So the scraper has been announcing what it is on every
+    # request, which is a plausible reason Cloudflare now serves it a challenge
+    # where it did not in July.
+    #
+    # Running headed is not a disguise — it is a real browser window doing real
+    # browsing with the user's own session. It only works on a machine with a
+    # screen, so it stays off by default for the server.
+    #   true  -> visible window (desktop only, best chance of working)
+    #   false -> headless (required on EC2)
+    devaid_headless: bool = True
     # DevelopmentAid limits how deep a single search can be paged (~100 records),
     # so coverage comes from running many narrowed searches and merging them.
     # This caps how many of those slices one run performs.

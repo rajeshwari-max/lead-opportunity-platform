@@ -109,14 +109,37 @@ def _devaid_filters(sectors: str) -> str:
 _TENDER_FILTERS = _devaid_filters(settings.devaid_tender_sectors)
 _GRANT_FILTERS = _devaid_filters(settings.devaid_grant_sectors)
 
+_PLAIN_GRANTS = "https://www.developmentaid.org/grants/search"
+_PLAIN_TENDERS = "https://www.developmentaid.org/tenders/search"
+
+
+def _section_url(plain: str, filters: str, override: str) -> str:
+    """The URL to walk for one section.
+
+    Plain by default. Requesting the *filtered* search is what stopped this
+    scraper working:
+
+        30 Jul, plain URL      -> 27 MB page, 2,463 result cards
+        after filters added    -> HTTP 403, title "Just a moment..."
+
+    A long generated query string ("sectors=100,5,95,3,6,7,78,8,29,…") reads as
+    machine traffic to a WAF. The same effect was demonstrated on ADB, where the
+    bare path returns 200 and the parameterised one is refused outright. Since
+    the pipeline already filters to English, currently-open, classified rows,
+    narrowing in the request buys little and costs the whole source.
+
+    Set LOP_DEVAID_FILTERED_SEARCH=true to try the filtered form again, or give
+    an explicit URL via LOP_DEVAID_GRANTS_URL / LOP_DEVAID_TENDERS_URL.
+    """
+    if override:
+        return override
+    return f"{plain}?{filters}" if settings.devaid_filtered_search else plain
+
+
 _SECTIONS: list[tuple[str, str]] = [
-    # Both sections are walked in the same run. They are separate catalogues on
-    # DevelopmentAid with their own sector vocabularies, so each gets its own
-    # filter string rather than a shared one.
-    (settings.devaid_grants_url or
-     f"https://www.developmentaid.org/grants/search?{_GRANT_FILTERS}", "grants"),
-    (settings.devaid_tenders_url or
-     f"https://www.developmentaid.org/tenders/search?{_TENDER_FILTERS}", "tenders"),
+    # Both sections are walked in the same run — they are separate catalogues.
+    (_section_url(_PLAIN_GRANTS, _GRANT_FILTERS, settings.devaid_grants_url), "grants"),
+    (_section_url(_PLAIN_TENDERS, _TENDER_FILTERS, settings.devaid_tenders_url), "tenders"),
 ]
 
 _SECTION_URLS: dict[str, str] = {slug: url for url, slug in _SECTIONS}
@@ -240,7 +263,16 @@ class DevelopmentAidScraper(BaseScraper):
 
         with sync_playwright() as pw:
             # persistent profile = the session the user saved via "Connect account"
-            browser = open_persistent(pw, headless=True)
+            #
+            # headless is configurable because it is itself a bot signal: real
+            # Chrome in headless mode puts "HeadlessChrome" in its own user
+            # agent, and the UA is deliberately not overridden here (a UA that
+            # disagrees with the browser is a worse signal than an honest one).
+            # Set LOP_DEVAID_HEADLESS=false on a desktop to run a visible
+            # window, which is an ordinary browser doing ordinary browsing.
+            headless = settings.devaid_headless
+            log.info("[developmentaid] opening browser (headless=%s)", headless)
+            browser = open_persistent(pw, headless=headless)
             try:
                 page = browser.pages[0] if browser.pages else browser.new_page()
                 session_checked = False

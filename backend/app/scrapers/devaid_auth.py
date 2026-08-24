@@ -72,12 +72,23 @@ def open_persistent(pw, headless: bool = True):
     if has_session_file() and not _CONNECTED_MARKER.exists():
         return _context_from_session(pw, common)
 
+    # In HEADED mode leave the browser's own user agent alone — it is already a
+    # normal Chrome string and matching it exactly is the most honest option.
+    #
+    # In HEADLESS mode it is not: real Chrome puts "HeadlessChrome" in its own
+    # user agent, so the header contradicted the rest of the request on every
+    # call. This was the one thing DevelopmentAid did differently from the three
+    # sites that DO connect on EC2 — World Bank, UN Partner Portal and ADB all go
+    # through site_auth.open_context(), which sets user_agent unconditionally.
+    # Same headless mode, same server, same Playwright: the difference was this
+    # single argument. Setting it here makes DevelopmentAid consistent with the
+    # rest of the codebase rather than a special case.
+    ua_override = {} if not headless else {"user_agent": settings.user_agent}
+
     def _launch():
         try:
-            # Real Chrome, real UA — don't override user_agent (a mismatched UA
-            # string is itself a bot signal).
             return pw.chromium.launch_persistent_context(
-                str(PROFILE_DIR), channel="chrome", **common
+                str(PROFILE_DIR), channel="chrome", **ua_override, **common
             )
         except Exception as exc:
             if "already in use" in str(exc).lower():
@@ -262,7 +273,11 @@ def verify_session() -> bool:
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as pw:
-        context = open_persistent(pw, headless=True)
+        # Same headless setting as the scrape itself. Verifying in headless
+        # while scraping headed (or the reverse) would test a different client
+        # than the one that does the work — the check could pass and every
+        # scrape still be challenged, or vice versa.
+        context = open_persistent(pw, headless=settings.devaid_headless)
         try:
             page = context.pages[0] if context.pages else context.new_page()
             page.goto("https://www.developmentaid.org/grants/search", timeout=90_000,
