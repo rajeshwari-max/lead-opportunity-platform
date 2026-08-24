@@ -62,7 +62,19 @@ def open_persistent(pw, headless: bool = True):
     common = dict(
         headless=headless,
         viewport={"width": 1400, "height": 900},
-        args=["--disable-blink-features=AutomationControlled"],
+        locale="en-US",
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            # Chrome's own "this is a test browser" infobar/flag. Left on, it is
+            # one more thing that differs from the browser the human logged in
+            # with, and Cloudflare's cf_clearance cookie is issued against that
+            # browser's fingerprint.
+            "--no-first-run",
+            "--no-default-browser-check",
+        ],
+        # Playwright adds --enable-automation by default, which sets
+        # navigator.webdriver and marks the session as automated.
+        ignore_default_args=["--enable-automation"],
     )
 
     # An uploaded session takes priority over the local profile, but only when
@@ -72,34 +84,37 @@ def open_persistent(pw, headless: bool = True):
     if has_session_file() and not _CONNECTED_MARKER.exists():
         return _context_from_session(pw, common)
 
-    # In HEADED mode leave the browser's own user agent alone — it is already a
-    # normal Chrome string and matching it exactly is the most honest option.
+    # The user agent is NOT set from settings here, in either mode.
     #
-    # In HEADLESS mode it is not: real Chrome puts "HeadlessChrome" in its own
-    # user agent, so the header contradicted the rest of the request on every
-    # call. This was the one thing DevelopmentAid did differently from the three
-    # sites that DO connect on EC2 — World Bank, UN Partner Portal and ADB all go
-    # through site_auth.open_context(), which sets user_agent unconditionally.
-    # Same headless mode, same server, same Playwright: the difference was this
-    # single argument. Setting it here makes DevelopmentAid consistent with the
-    # rest of the codebase rather than a special case.
-    ua_override = {} if not headless else {"user_agent": settings.user_agent}
-
+    # It used to be, for headless only: settings.user_agent hard-codes
+    # "Chrome/126.0.0.0". The Chrome actually installed is 151, and a browser
+    # announces its version twice — in the User-Agent header AND in the
+    # Sec-CH-UA / Sec-CH-UA-Full-Version-List client hints, which come from the
+    # real build and cannot be faked by Playwright's user_agent option. So every
+    # headless request said "I am Chrome 126" in one header and "I am Chrome 151"
+    # in the next. That contradiction is a textbook bot signal, and Cloudflare's
+    # cf_clearance cookie is bound to the exact user agent that earned it — so
+    # the clearance the human's headed login obtained (real UA) was void the
+    # moment a headless run presented the fake one. Result: HTTP 403 and a
+    # "Just a moment..." challenge on every single run, both sections, 0 rows.
+    #
+    # What replaces it: keep the browser's own identity, and only remove the
+    # word "Headless" from it (see _mask_headless), with the matching client
+    # hints supplied from the browser's own values. Headed and headless then
+    # present the same identity, which is what keeps a session usable.
     def _launch():
         try:
             return pw.chromium.launch_persistent_context(
-                str(PROFILE_DIR), channel="chrome", **ua_override, **common
+                str(PROFILE_DIR), channel="chrome", **common
             )
         except Exception as exc:
             if "already in use" in str(exc).lower():
                 raise                    # handled below, not a missing-Chrome case
             log.warning("[devaid] real Chrome not available — using bundled Chromium")
-            return pw.chromium.launch_persistent_context(
-                str(PROFILE_DIR), user_agent=settings.user_agent, **common
-            )
+            return pw.chromium.launch_persistent_context(str(PROFILE_DIR), **common)
 
     try:
-        return _launch()
+        return _mask_headless(_launch())
     except Exception as exc:
         if "already in use" not in str(exc).lower():
             raise
@@ -110,7 +125,113 @@ def open_persistent(pw, headless: bool = True):
         # end that can only be escaped by hand on a server.
         _clear_stale_profile_locks()
         log.warning("[devaid] profile was locked by a previous run — cleared and retrying")
-        return _launch()
+        return _mask_headless(_launch())
+
+
+def _mask_headless(context):
+    """Present the same browser identity headless as headed.
+
+    Headless Chrome writes "HeadlessChrome/151.0.0.0" into its own user agent.
+    That single word is the difference between a session that works and a 403,
+    because Cloudflare issues cf_clearance against the identity it saw and
+    re-challenges anything that presents a different one.
+
+    The fix is deliberately minimal: take the browser's REAL user agent and
+    replace "HeadlessChrome" with "Chrome". Everything else — version, platform,
+    and the Sec-CH-UA client hints — is read back out of the browser itself and
+    passed through unchanged, so no two headers can contradict each other. That
+    is the failure mode this replaces; inventing a version string is what caused
+    it in the first place.
+
+    Applied through CDP rather than Playwright's user_agent option because only
+    CDP can set the client hints (userAgentMetadata) alongside the UA string.
+    Best-effort: any failure leaves the browser exactly as it was.
+    """
+    script = """async () => {
+        const ua = navigator.userAgent;
+        const d = navigator.userAgentData;
+        let meta = null;
+        if (d) {
+            const hi = await d.getHighEntropyValues([
+                'architecture', 'bitness', 'model', 'platformVersion',
+                'uaFullVersion', 'fullVersionList',
+            ]).catch(() => ({}));
+            meta = {
+                brands: d.brands.map(b => ({brand: b.brand, version: b.version})),
+                fullVersionList: (hi.fullVersionList || d.brands).map(
+                    b => ({brand: b.brand, version: b.version})),
+                platform: d.platform,
+                platformVersion: hi.platformVersion || '',
+                architecture: hi.architecture || 'x86',
+                bitness: hi.bitness || '64',
+                model: hi.model || '',
+                mobile: d.mobile,
+                fullVersion: hi.uaFullVersion || '',
+            };
+        }
+        return {ua, meta};
+    }"""
+
+    def _read_identity():
+        """The browser's own identity, read once from a throwaway page."""
+        borrowed = not context.pages
+        page = context.new_page() if borrowed else context.pages[0]
+        try:
+            return page.evaluate(script)
+        except Exception:
+            return None
+        finally:
+            if borrowed:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+
+    try:
+        info = _read_identity()
+    except Exception:
+        info = None
+    ua = (info or {}).get("ua") or ""
+    if "Headless" not in ua:
+        return context                  # headed run — leave the identity alone
+
+    # userAgent ONLY. Setting acceptLanguage here too produced the malformed
+    # "en-US,en;q=0.9;q=0.9" — CDP appends its own q-value on top of the one the
+    # context's locale already generated, and a malformed header is a worse
+    # fingerprint than no override at all. Accept-Language comes from
+    # locale="en-US" on the context, which formats it correctly.
+    override = {"userAgent": ua.replace("HeadlessChrome", "Chrome")}
+    meta = (info or {}).get("meta")
+    if meta:
+        override["platform"] = meta.get("platform") or ""
+        override["userAgentMetadata"] = meta
+
+    # The override is computed ONCE, above, and each page handler only sends it.
+    # Reading navigator.userAgent inside the "page" event handler instead raced
+    # with page creation and silently left every page after the first
+    # unmasked — the sync API cannot re-enter the driver from an event callback.
+    def _apply(page) -> None:
+        try:
+            context.new_cdp_session(page).send(
+                "Emulation.setUserAgentOverride", override)
+        except Exception:
+            log.debug("[devaid] could not apply the user-agent override", exc_info=True)
+
+    try:
+        # navigator.webdriver is true whenever Playwright drives the browser and
+        # is checked by every commercial bot filter. Removing the flag is not
+        # evasion of the login (that stays human, see the module docstring) —
+        # it stops an ordinary signed-in session being refused at the door.
+        context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+        )
+        for existing in context.pages:
+            _apply(existing)
+        context.on("page", _apply)
+        log.info("[devaid] headless browser presenting as %s", override["userAgent"])
+    except Exception:
+        log.debug("[devaid] headless masking unavailable", exc_info=True)
+    return context
 
 
 def _clear_stale_profile_locks() -> None:
@@ -154,11 +275,15 @@ def _context_from_session(pw, common: dict):
     injects the cookies and localStorage instead. Callers only ever use the
     returned object as a context, so the difference doesn't leak out.
     """
-    launch_args = {k: v for k, v in common.items() if k in ("headless", "args")}
+    launch_args = {k: v for k, v in common.items()
+                   if k in ("headless", "args", "ignore_default_args")}
+    # No user_agent here either — same reason as open_persistent: a hard-coded
+    # version contradicts the Sec-CH-UA client hints the real build sends, and
+    # the session's cf_clearance cookie is bound to the identity that earned it.
     context_args = {
         "viewport": common.get("viewport"),
         "storage_state": str(SESSION_FILE),
-        "user_agent": settings.user_agent,
+        "locale": common.get("locale", "en-US"),
     }
     try:
         browser = pw.chromium.launch(channel="chrome", **launch_args)
@@ -166,7 +291,7 @@ def _context_from_session(pw, common: dict):
         log.warning("[devaid] real Chrome not available — using bundled Chromium")
         browser = pw.chromium.launch(**launch_args)
     log.info("[devaid] using uploaded session (%s)", SESSION_FILE.name)
-    return browser.new_context(**context_args)
+    return _mask_headless(browser.new_context(**context_args))
 
 
 def export_session_state() -> dict:

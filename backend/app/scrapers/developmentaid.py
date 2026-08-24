@@ -224,10 +224,15 @@ class DevelopmentAidScraper(BaseScraper):
                     continue               # nothing ready yet — re-check stop/pause
                 if kind == "done":
                     break
-                if kind not in ("page", "items") and kind == "error":
+                if kind == "error":
+                    # Re-raise rather than break. Swallowing it reported
+                    # "completed — 0 found" for a run that never reached the site
+                    # at all, which reads identically to "the site had nothing
+                    # new" in the dashboard and in the digest. The manager
+                    # catches this and marks the source failed instead.
                     log.error("[%s] browser walk failed: %s: %s",
                               self.name, type(payload).__name__, payload)
-                    break
+                    raise payload
 
                 slug, page_nr, body = payload
                 page_number += 1
@@ -294,6 +299,17 @@ class DevelopmentAidScraper(BaseScraper):
                     try:
                         if "/api/" not in resp.url or "/search" in resp.url:
                             return
+                        # Only read bodies that could plausibly BE a filter option
+                        # list. resp.json() blocks the driver thread, and doing it
+                        # for every JSON response on this app's bootstrap added
+                        # tens of seconds to hydration — long enough for the
+                        # card-render wait below to time out and the section to be
+                        # abandoned as "no cards".
+                        if not any(n in resp.url.lower() for n in (
+                            "dictionary", "sector", "location", "countr", "donor",
+                            "status", "language", "purpose", "applicanttype", "type",
+                        )):
+                            return
                         if "json" not in (resp.headers or {}).get("content-type", "").lower():
                             return
                         body = resp.json()
@@ -348,6 +364,12 @@ class DevelopmentAidScraper(BaseScraper):
                         ", ".join(s for _, s in sections), ", ".join(skipped),
                     )
 
+                # Sections that never rendered a card because the site served a
+                # bot challenge instead. Counted so the run can end in a real
+                # failure rather than a cheerful "0 found" — see the raise after
+                # the loop.
+                blocked: list[str] = []
+
                 for section_url, slug in sections:
                     if stop_flag.is_set():
                         return
@@ -368,12 +390,17 @@ class DevelopmentAidScraper(BaseScraper):
                         resp = page.goto(section_url, timeout=90_000,
                                          wait_until="domcontentloaded")
                         if resp is not None and resp.status in (403, 429, 503):
-                            # Give an interstitial its chance to resolve, then
-                            # carry on and let the card check below decide.
+                            # A fixed 12s sleep here was both too short and the
+                            # wrong shape: Cloudflare's non-interactive check
+                            # navigates the page itself when it passes, so what
+                            # matters is whether the title stops being a
+                            # challenge, not how long we waited.
                             log.info("[developmentaid] %s: HTTP %s on arrival — "
-                                     "waiting for a possible interstitial to clear",
+                                     "waiting for the interstitial to clear",
                                      slug, resp.status)
-                            page.wait_for_timeout(12_000)
+                            if self._wait_out_challenge(page, slug):
+                                log.info("[developmentaid] %s: challenge cleared "
+                                         "on its own", slug)
                     except Exception as exc:
                         log.warning(
                             "[developmentaid] %s: failed to load section start page "
@@ -429,7 +456,8 @@ class DevelopmentAidScraper(BaseScraper):
                             _title = (page.title() or "").strip()
                         except Exception:
                             pass
-                        if "just a moment" in _title.lower() or "attention required" in _title.lower():
+                        if self._is_challenge_title(_title):
+                            blocked.append(slug)
                             log.error(
                                 "[developmentaid] %s: BLOCKED BY CLOUDFLARE (page title %r). "
                                 "This is a bot check, not a login problem — a session "
@@ -676,8 +704,77 @@ class DevelopmentAidScraper(BaseScraper):
                             )
                         except Exception:
                             log.exception("[developmentaid] failed to send session-expired alert email")
+
+                # Every section the site refused = a run that never saw a single
+                # listing. Raising turns it into a FAILED source in the dashboard
+                # instead of "completed — 0 found", which is what let this sit
+                # broken across several runs while looking like a quiet week.
+                if blocked and len(blocked) == len(sections):
+                    self._alert_blocked(blocked)
+                    raise RuntimeError(
+                        "DevelopmentAid served a Cloudflare bot challenge for every "
+                        f"section ({', '.join(blocked)}) — nothing was scraped. See "
+                        "logs/devaid_<section>_debug.html for the page the browser got."
+                    )
             finally:
                 browser.close()
+
+    # ---------------------------------------------------------- bot challenge
+    @staticmethod
+    def _is_challenge_title(title: str) -> bool:
+        """True for Cloudflare's interstitial titles."""
+        t = (title or "").strip().lower()
+        return any(m in t for m in (
+            "just a moment", "attention required", "access denied",
+            "checking your browser", "verifying you are human",
+        ))
+
+    def _wait_out_challenge(self, page, slug: str, timeout_ms: int = 45_000) -> bool:
+        """Wait for Cloudflare's non-interactive check to pass itself.
+
+        It clears by navigating the page, so the signal is the title changing —
+        polling for that is both faster when it passes and honest when it never
+        does. Returns True if the page is no longer a challenge.
+        """
+        waited = 0
+        while waited < timeout_ms:
+            try:
+                if not self._is_challenge_title(page.title()):
+                    return True
+            except Exception:
+                pass                       # mid-navigation — try again shortly
+            page.wait_for_timeout(1_500)
+            waited += 1_500
+        log.info("[developmentaid] %s: the interstitial did not clear in %ss",
+                 slug, timeout_ms // 1000)
+        return False
+
+    @staticmethod
+    def _alert_blocked(blocked: list[str]) -> None:
+        try:
+            from app.services import email_service
+            email_service.send_alert(
+                subject="DevelopmentAid blocked the scraper — no listings collected",
+                body=(
+                    "DevelopmentAid answered with a Cloudflare bot challenge "
+                    "(\"Just a moment...\") instead of the search results for: "
+                    f"{', '.join(blocked)}.\n\n"
+                    "Effect: this run collected nothing from DevelopmentAid. Other "
+                    "sources are unaffected.\n\n"
+                    "What to try, in order:\n"
+                    "  1. Open the dashboard and click 'Connect account' under "
+                    "DevelopmentAid, and sign in. That runs a visible Chrome window, "
+                    "which is what earns the cf_clearance cookie the headless runs "
+                    "reuse.\n"
+                    "  2. If it still fails, set LOP_DEVAID_HEADLESS=false on a "
+                    "machine with a screen and run once to refresh the clearance.\n"
+                    "  3. If it persists from the server's IP, the address itself is "
+                    "likely rate-limited or blocked, and the durable fix is a data "
+                    "agreement with DevelopmentAid rather than a scraper change.\n"
+                ),
+            )
+        except Exception:
+            log.exception("[developmentaid] failed to send the blocked-by-Cloudflare alert")
 
     # ------------------------------------------------------------- JSON API
     # The Angular app fetches results from POST /api/frontend/{grant,tender}/search.
@@ -799,7 +896,12 @@ class DevelopmentAidScraper(BaseScraper):
         # The record's OWN id — an exact key match. Using a "contains id" match
         # picked up donorIds and produced links like /tenders/view/118345,118364,
         # which 111 rows shared and none of which open the opportunity.
-        raw_id = item.get("id")
+        # Case-insensitive, because _items_from_json accepts a record set on a
+        # case-insensitive "id" match. A payload keyed "Id" therefore passed that
+        # check and then failed here, leaving every row with an empty URL — which
+        # collapses the whole run to one entry in the dedupe set and makes every
+        # row unsaveable. The two lookups have to agree.
+        raw_id = next((v for k, v in item.items() if k.lower() == "id"), None)
         ident = str(raw_id) if isinstance(raw_id, (int, str)) and str(raw_id).isdigit() else ""
         url = self._pick(item, "url", "link", "slug")
         if url.startswith("/"):
@@ -1764,6 +1866,15 @@ class DevelopmentAidScraper(BaseScraper):
             "[developmentaid] %s cards on page → %s open kept, %s closed/expired, %s duplicates",
             n_cards, len(items), n_closed, n_dupes,
         )
+        # Cards on the page but nothing extracted means the markup moved, not
+        # that the page was empty — the two are indistinguishable from the
+        # per-page counts alone, and at DEBUG this went unseen for entire runs.
+        if n_cards and not items and not n_closed and not n_dupes:
+            log.warning(
+                "[developmentaid] %s cards on %s but none parsed — the card markup "
+                "has probably changed (expected a link matching %s)",
+                n_cards, page_url, _VIEW_LINK.pattern,
+            )
         return items
 
     @staticmethod
