@@ -150,6 +150,43 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
     try { localStorage.setItem("lop-team-collapsed", collapsed ? "1" : "0"); } catch { /* ignore */ }
   }, [collapsed]);
 
+  // Bulk Auto/Manual. Turning everyone ON is a two-step confirm: fetch the real
+  // per-member counts, show them, then apply. Turning everyone OFF applies
+  // immediately — it can only reduce what gets sent, so there is nothing to warn
+  // about and a confirmation would just be friction.
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkPreview, setBulkPreview] = useState<
+    Awaited<ReturnType<typeof api.autoSendPreview>> | null
+  >(null);
+
+  const askAllAuto = async () => {
+    setBulkBusy(true);
+    try {
+      setBulkPreview(await api.autoSendPreview());
+    } catch {
+      setToast({ kind: "err", text: "Could not read the pending counts" });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const applyAll = async (value: boolean) => {
+    setBulkBusy(true);
+    setBulkPreview(null);
+    try {
+      const r = await api.setAutoSendAll(value);
+      setToast({
+        kind: "ok",
+        text: `${r.changed} member(s) set to ${value ? "Auto" : "Manual"}.`,
+      });
+      load();
+    } catch (e) {
+      setToast({ kind: "err", text: e instanceof Error ? e.message : "Update failed" });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const [query, setQuery] = useState("");
   const shown = query.trim()
     ? members.filter((m) => {
@@ -202,6 +239,60 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
             )}
           </div>
         )}
+        {/* Bulk Auto / Manual. Turning everyone ON is confirmed against real
+            counts first, because a member with no keywords matches EVERY
+            opportunity and a sent email cannot be recalled. */}
+        {!readOnly && members.length > 0 && (
+          <div className="space-y-1.5 rounded-lg border border-border p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium">Everyone</span>
+              <span className="text-[11px] text-muted-foreground">
+                {members.filter((m) => m.auto_send).length}/{members.length} on Auto
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <Button size="sm" variant="outline" className="h-7 text-xs"
+                      disabled={bulkBusy}
+                      onClick={askAllAuto}>
+                {bulkBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                All Auto
+              </Button>
+              <Button size="sm" variant="outline" className="h-7 text-xs"
+                      disabled={bulkBusy}
+                      onClick={() => applyAll(false)}>
+                All Manual
+              </Button>
+            </div>
+            {bulkPreview && (
+              <div className="space-y-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 p-2">
+                <p className="text-xs font-medium text-amber-500">
+                  This will queue {bulkPreview.total_pending.toLocaleString()} email rows
+                  at the next scheduled send.
+                </p>
+                <ul className="max-h-32 space-y-0.5 overflow-y-auto text-[11px] text-muted-foreground">
+                  {bulkPreview.members.filter((m) => m.pending > 0).map((m) => (
+                    <li key={m.id}>
+                      {m.name}: <b>{m.pending.toLocaleString()}</b>
+                      {m.no_filters && (
+                        <span className="text-amber-500"> — no keywords, matches everything</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex gap-1.5">
+                  <Button size="sm" className="h-7 text-xs" onClick={() => applyAll(true)}>
+                    Yes, turn all on
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-xs"
+                          onClick={() => setBulkPreview(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {!emailConfigured && !readOnly && (
           <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-400">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />

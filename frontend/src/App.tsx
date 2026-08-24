@@ -128,10 +128,12 @@ export default function App() {
                                 facets={facets} readOnly={readOnly} />
           </div>
           <div className="flex w-full flex-col gap-6 lg:w-80 lg:shrink-0">
-            {/* Only the scraper is admin-only. Everything else stays visible. */}
             {isAdmin && <ScraperPanel sources={sources} progress={progress} />}
-            <AutoEmailPanel readOnly={readOnly} />
-            <TeamPanel readOnly={readOnly} />
+            {/* Admin-only: this panel sets the send time and reminder days for
+                the WHOLE team, and its PUT route already rejects non-admins.
+                Showing a control that would 403 is worse than hiding it. */}
+            {isAdmin && <AutoEmailPanel readOnly={readOnly} />}
+            {isAdmin && <TeamPanel readOnly={readOnly} />}
             <ExpertsCard readOnly={readOnly} isAdmin={isAdmin} />
             <SiteLoginsCard isAdmin={isAdmin} />
           </div>

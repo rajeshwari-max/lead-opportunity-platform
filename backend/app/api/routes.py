@@ -5,6 +5,7 @@ import asyncio
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -457,6 +458,62 @@ def add_member(body: TeamMemberIn, db: Session = Depends(get_db)) -> TeamMemberO
     db.commit()
     db.refresh(member)
     return TeamMemberOut.model_validate(member)
+
+
+# ---------------------------------------------------------------------------
+# These two MUST be declared before /team/{member_id}. FastAPI matches routes in
+# declaration order, so with the parameterised route first, "auto-send" would be
+# parsed as a member id and the request would 422 instead of reaching this code.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/team/auto-send/preview", dependencies=[Depends(require_admin)])
+def preview_auto_send(db: Session = Depends(get_db)) -> dict:
+    """What switching everyone to Auto would actually send, per member.
+
+    Exists because "make everyone Auto" is one click with a very asymmetric
+    downside. A member with NO keywords, verticals or categories matches
+    *everything*, so flipping them on can mail tens of thousands of rows at the
+    next 09:00 run — and a sent email has no undo. Showing the counts first
+    turns an irreversible surprise into a decision.
+    """
+    svc = MatchingService(db)
+    rows = []
+    for m in db.execute(select(TeamMember).where(TeamMember.active == True)).scalars():  # noqa: E712
+        rows.append({
+            "id": m.id,
+            "name": m.name,
+            "email": m.email,
+            "auto_send": m.auto_send,
+            "pending": len(svc.matches_for(m)),
+            # The dangerous case: empty rules match every opportunity, not none.
+            "no_filters": not (m.keywords or "").strip()
+                          and not (m.verticals or "").strip()
+                          and not (m.categories or "").strip(),
+        })
+    rows.sort(key=lambda r: -r["pending"])
+    return {
+        "members": rows,
+        "total_pending": sum(r["pending"] for r in rows),
+        "largest": rows[0] if rows else None,
+    }
+
+
+@router.put("/team/auto-send", dependencies=[Depends(require_writable),
+                                             Depends(require_admin)])
+def set_auto_send_all(body: dict, db: Session = Depends(get_db)) -> dict:
+    """Turn Auto on or off for every active member at once.
+
+    body: {"auto_send": true|false}
+    """
+    value = bool(body.get("auto_send"))
+    changed = 0
+    for m in db.execute(select(TeamMember).where(TeamMember.active == True)).scalars():  # noqa: E712
+        if m.auto_send != value:
+            m.auto_send = value
+            changed += 1
+    db.commit()
+    return {"auto_send": value, "changed": changed}
 
 
 @router.put("/team/{member_id}", response_model=TeamMemberOut,

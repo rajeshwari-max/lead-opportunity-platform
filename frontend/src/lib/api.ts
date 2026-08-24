@@ -79,6 +79,24 @@ export const api = {
 
   // ---- team & lead routing ----
   team: () => get<TeamMember[]>("/team"),
+  /** What switching everyone to Auto would send, per member. */
+  autoSendPreview: () =>
+    get<{
+      members: { id: number; name: string; email: string; auto_send: boolean;
+                 pending: number; no_filters: boolean }[];
+      total_pending: number;
+      largest: { name: string; pending: number } | null;
+    }>("/team/auto-send/preview"),
+  /** Turn Auto on/off for every active member at once. */
+  setAutoSendAll: async (auto_send: boolean) => {
+    const res = await fetch(`${BASE}/team/auto-send`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auto_send }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail ?? "Update failed");
+    return (await res.json()) as { auto_send: boolean; changed: number };
+  },
   /** Email a hand-picked set of opportunities to chosen team members. */
   sendSelection: async (opportunity_ids: number[], member_ids: number[]) => {
     const res = await fetch(`${BASE}/opportunities/send`, {
