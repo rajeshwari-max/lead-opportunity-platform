@@ -33,6 +33,10 @@ _PAGE_PARAM = re.compile(r"[?&](page|page_no|pageno|p)=(\d+)", re.IGNORECASE)
 class NGOBoxScraper(BaseScraper):
     name = "ngobox"
     display_name = "NGOBOX"
+    # Every row on this page is a published call/tender notice, so a row
+    # does not have to contain funding vocabulary to be an opportunity.
+    # See services/opportunity_gate.py.
+    curated = True
     website = "https://ngobox.org"
     start_url = "https://ngobox.org/grant_announcement_listing.php"
     # Stale-cache site: browser-render when Playwright is available.

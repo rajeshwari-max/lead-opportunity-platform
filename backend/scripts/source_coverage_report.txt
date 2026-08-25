@@ -1,0 +1,154 @@
+SOURCE COVERAGE — sheet 'Final Repo of leads' vs registered scrapers
+
+  sheet rows total                : 277
+  marked 'no leads/grants section': 192  (excluded by your own research)
+  usable sources in the sheet     : 85  (81 distinct domains)
+  registered scrapers in the code : 85
+
+SHEET DOMAINS WITH NO SCRAPER (1):
+   openphilanthropy.org             Open Philanthropy                https://www.openphilanthropy.org/grants/
+
+SCRAPERS NOT IN THE SHEET (5) — added later, not errors:
+   adb.org                          ADB Tenders                      https://www.adb.org/projects/tenders
+   devnetjobsindia.org              DevNetJobsIndia                  https://www.devnetjobsindia.org/rfp_assignments.aspx
+   projects.worldbank.org           World Bank                       https://projects.worldbank.org/en/projects-operations/opport
+   procurement-notices.undp.org     UNDP Procurement                 https://procurement-notices.undp.org/?lang=en
+   unpartnerportal.org              UN Partner Portal                https://www.unpartnerportal.org/landing/opportunities/?lang=
+
+
+URL MISMATCHES — scraper targets a different page than the sheet lists.
+Neither is automatically right; validate_sources.py decides which returns opportunities.
+
+  Better Cotton  [abc]
+     sheet  : https://bettercotton.org/?s=grants
+     scraper: https://bettercotton.org/requests-for-proposals/
+
+  Blue Action Fund  [funders_misc]
+     sheet  : https://www.blueactionfund.org/grant-programme/#grants_list
+     scraper: https://www.blueactionfund.org/funding-opportunities/
+
+  Bond UK  [bond]
+     sheet  : https://www.bond.org.uk/hubs/funding-opportunities
+     scraper: https://www.bond.org.uk/funding-opportunities/
+
+  Clean Cooking Alliance  [abc]
+     sheet  : https://cleancooking.org/?s=grants
+     scraper: https://cleancooking.org/funding-opportunities
+
+  Coefficient Giving (Open Philanthropy)  [abc]
+     sheet  : https://coefficientgiving.org/funds/
+     scraper: https://coefficientgiving.org/apply-for-funding/
+
+  Environmental Research & Education Foundation  [abc]
+     sheet  : https://erefdn.org/?s=grants
+     scraper: https://erefdn.org/research-grants/
+
+  King Baudouin Foundation  [abc]
+     sheet  : https://www.kbs-frb.be/en/organisation-europe-andor-internationally
+     scraper: https://kbs-frb.be/en/search?type_id=call
+
+  Packard Foundation  [funders_misc]
+     sheet  : https://www.packard.org/grantees/funding-opportunties/
+     scraper: https://www.packard.org/grantees/funding-opportunties/?visc-qf-funding_meta_filter_tf_active=true
+
+  Paul Hamlyn Foundation  [phf]
+     sheet  : https://www.phf.org.uk/
+     scraper: https://www.phf.org.uk/funds/
+
+  WE4F  [abc]
+     sheet  : https://we4f.org/?s=grants
+     scraper: https://we4f.org/opportunities
+
+  FundsForNGOs  [fundsforngos]
+     sheet  : https://www2.fundsforngos.org/tag/india/
+     scraper: https://www2.fundsforngos.org/wp-json/wp/v2/posts?per_page=50&page=1
+
+
+ALL REGISTERED SCRAPERS:
+
+  module           JS  display name                         start_url
+  abc              -   AFD                                  https://www.afd.fr/fr/appels-a-projets/liste?
+  abc              -   Alliance for Health Policy & System  https://ahpsr.who.int/funding-opportunities
+  abc              -   Audacious Project                    https://www.audaciousproject.org/grantees
+  abc              -   BMGF Grand Challenges                https://gcgh.grandchallenges.org/grant-opportunities
+  abc              -   Better Cotton                        https://bettercotton.org/requests-for-proposals/
+  abc              -   Bosch Stiftung                       https://www.bosch-stiftung.de/en/news/open-calls
+  abc              -   CEPI                                 https://cepi.net/search?term=grants
+  abc              -   CJRF                                 https://cjrfund.org/our-grants/
+  abc              -   Carnegie Foundation                  https://carnegie.org/grants/
+  abc              -   Charity Excellence Framework         https://www.charityexcellence.co.uk/?s=grants
+  abc              -   Citigroup                            https://www.citigroup.com/global/foundation/apply-for-funding
+  abc              -   Clean Air Fund                       https://www.cleanairfund.org/what-we-do/our-grants/
+  abc              -   Clean Cooking Alliance               https://cleancooking.org/funding-opportunities
+  abc              -   ClimateChangeAI                      https://www.climatechange.ai/calls
+  abc              -   Clinton Health Access Initiative     https://www.clintonhealthaccess.org/resource-center/?_sft_category=rfp&sort_or
+  abc              -   Coefficient Giving (Open Philanthro  https://coefficientgiving.org/apply-for-funding/
+  abc              -   Devex                                https://www.devex.com/funding/r
+  abc              -   Doen Foundation                      https://www.doen.nl/en/?s=grants
+  abc              -   DonorDatabase.org                    https://www.donordatabase.org/index.php
+  abc              -   EA Funds                             https://funds.effectivealtruism.org/grants
+  abc              -   Environmental Research & Education   https://erefdn.org/research-grants/
+  abc              -   European Union                       https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportun
+  abc              -   FCDO                                 https://www.gov.uk/international-development-funding?fund_state%5B%5D=open&loc
+  abc              -   Fidelity Charitable                  https://www.fidelitycharitable.org/
+  abc              -   Fogarty International Center         https://www.fic.nih.gov/Grants/Pages/default.aspx
+  abc              -   Foundation for Food & Agriculture R  https://foundationfar.org/grants-funding/
+  abc              -   Gadfly Project                       http://www.thegadflyproject.org/grants.html
+  abc              -   Gatesfoundation                      https://www.gatesfoundation.org/about/committed-grants
+  abc              -   Global Agriculture and Food Safety   https://www.gafspfund.org/call-proposals
+  abc              -   Global Partnership for Social Accou  https://thegpsa.org/grant-making/grant-selection-process/
+  abc              -   Globaltenders                        https://www.globaltenders.com/global-tenders-search
+  abc              -   Goldman Sachs Foundation             https://www.goldmansachs.com/search?query=grants
+  abc              -   Grantmakers Community Project        https://www.grantmakers.io/
+  abc              -   Gulbenkian                           https://www.gulbenkian.pt/en/grants/
+  abc              -   Gupta Family Foundation              https://www.guptafamilyfoundation.org/grant-application-2025/
+  abc              -   HLFPPT                               https://hlfppt.org/rfp-tenders/
+  abc              -   Helmsley Charitable Trust            https://helmsleytrust.org/
+  abc              -   Hewlett Foundation                   https://hewlett.org/grants/
+  abc              -   ICNL                                 https://www.icnl.org/work-with-us/grants-fellowships
+  abc              -   IKEA Foundation                      https://ikeafoundation.org/grants?partner=31472
+  abc              -   Idrc                                 https://www.idrc.ca/en/funding
+  abc              -   Innovations for Poverty Action       https://poverty-action.org/open-funding-opportunities
+  abc              -   J-PAL                                https://www.povertyactionlab.org/
+  abc              -   JPIAMR                               https://jpiamr.eu/?s=grants
+  abc              -   King Baudouin Foundation             https://kbs-frb.be/en/search?type_id=call
+  abc              -   Laudesfoundation                     https://www.laudesfoundation.org/how-we-work/grants-database/
+  abc              -   Macarthur Foundation                 https://www.macfound.org/grants/
+  abc              -   McKnight Foundation                  https://www.mcknight.org/grants/search-our-grants/
+  abc              -   Merck Family Foundation              https://www.merck-family-foundation.com/en/proposal/
+  abc              -   National Institute of Health and Ca  https://www.nihr.ac.uk/funding-opportunities
+  abc              -   National Institutes of Health        https://grants.nih.gov/funding
+  abc              -   Nippon Foundation                    https://www.nippon-foundation.or.jp/en/grant
+  abc              -   Ospreys                              https://www.ospreys.com/research-grants
+  abc              -   Pershing Square Foundation           https://pershingsquarephilanthropies.org/initiatives/grants?grants
+  abc              -   Pfizer Foundation                    https://www.pfizer.com/about/programs-policies/grants/competitive-grants
+  abc              -   Rockefeller Foundation               https://www.rockefellerfoundation.org/our-grants/
+  abc              -   SDG Impact Finance Initiative        https://www.sdgimpactfinance.org/
+  abc              -   Silicon Valley Community Foundation  https://www.svcf.org/search/results?q=grants
+  abc              -   Stavros Niarchos Foundation (SNF)    https://www.snf.org/en/search-results/?page=1&cat=grant&map=undefined
+  abc              -   TY Danjuma Foundation                https://tydanjumafoundation.org/grantmaking/discretionary-grants/
+  abc              -   Tawingo Fund                         https://www.tawingofund.org/grantees
+  abc              -   Temasekfoundation                    https://www.temasekfoundation.org.sg/grant-calls
+  abc              -   The Agency Fund                      https://www.agency.fund/past-calls
+  abc              -   Together Women Rise                  https://togetherwomenrise.org/featured-grant-guidelines/
+  abc              -   Triple Funds                         https://triple-funds.com/
+  abc              -   UN Partner Portal                    https://www.unpartnerportal.org/landing/opportunities/?lang=en
+  abc              -   UNDP Procurement                     https://procurement-notices.undp.org/?lang=en
+  abc              -   Veddis Foundation                    https://veddis.org/catalytic-grants/
+  abc              -   WE4F                                 https://we4f.org/opportunities
+  abc              -   Wellcome Trust                       https://wellcome.org/research-funding/schemes
+  abc              -   Women Strong International           https://www.womenstrong.org/work/grantmaking/
+  abc              -   Woodcock Foundation                  https://woodcockfdn.org/
+  abc              -   World Bank                           https://projects.worldbank.org/en/projects-operations/opportunities?lang=en
+  adb              yes ADB Tenders                          https://www.adb.org/projects/tenders
+  bond             -   Bond UK                              https://www.bond.org.uk/funding-opportunities/
+  developmentaid   yes DevelopmentAid                       https://www.developmentaid.org/grants/search
+  devnet           -   DevNetJobsIndia                      https://www.devnetjobsindia.org/rfp_assignments.aspx
+  funders_misc     -   Blue Action Fund                     https://www.blueactionfund.org/funding-opportunities/
+  funders_misc     -   Open Society Foundations             https://www.opensocietyfoundations.org/grants
+  funders_misc     -   Packard Foundation                   https://www.packard.org/grantees/funding-opportunties/?visc-qf-funding_meta_fi
+  fundsforngos     -   FundsForNGOs                         https://www2.fundsforngos.org/wp-json/wp/v2/posts?per_page=50&page=1
+  grantwatch       -   GrantWatch Intl                      https://international.grantwatch.com/new-grants.php
+  indevjobs        yes IndevJobs                            https://indevjobs.org/funding
+  ngobox           -   NGOBOX                               https://ngobox.org/grant_announcement_listing.php
+  phf              -   Paul Hamlyn Foundation               https://www.phf.org.uk/funds/

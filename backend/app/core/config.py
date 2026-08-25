@@ -26,6 +26,20 @@ class Settings(BaseSettings):
     max_pages_safety_cap: int = 2000    # hard stop against infinite pagination loops
     stale_page_streak: int = 3          # stop a source after N consecutive pages with nothing new
                                         # (listings are newest-first; deeper pages are only older)
+    # How long an undated ("Ongoing") listing may go unseen by a scrape before it
+    # is retired. These rows carry no deadline, so nothing else can ever close
+    # them — without this they stay in the live view permanently, which is why
+    # calls that closed months ago were still on the dashboard.
+    #
+    # 21 days, because the run history shows a roughly weekly cadence (3, 10,
+    # 16-17, 24 Aug): three consecutive scrapes that looked and did not find it.
+    # A retirement only happens when the source itself was demonstrably working
+    # in that window (see audit_deadlines), so a broken source cannot age out
+    # its own catalogue.
+    ongoing_max_age_days: int = 21
+    # Run the deadline/link/junk maintenance pass automatically at the end of
+    # every scrape. These repairs existed but were never called by anything.
+    run_maintenance_after_scrape: bool = True
     detail_fetch_limit: int = 1500      # max detail-page visits per source per run, for scrapers
                                         # with enrich_details=True. Caps the extra load: only rows
                                         # missing an amount/organisation are fetched at all.
@@ -55,18 +69,97 @@ class Settings(BaseSettings):
     ]
 
     # DevelopmentAid membership (optional). When set, the scraper logs in and
+    # Scrape as yourself, everywhere. Point these at your everyday Chrome and
+    # EVERY source reuses whatever you are already signed into — UN Partner
+    # Portal's /cfei/open, DevelopmentAid's unlocked deadlines, any other site
+    # behind a login — with no per-site "Connect account" step and no repeated
+    # logging in.
+    #
+    #   LOP_CHROME_USER_DATA_DIR=C:\Users\<you>\AppData\Local\Google\Chrome\User Data
+    #   LOP_CHROME_PROFILE_DIR=Profile 7
+    #
+    # Chrome must be CLOSED while a scrape runs — it holds an exclusive lock on
+    # the whole User Data folder. Local only: a server has no Chrome profile, so
+    # EC2 keeps using the exported per-source sessions.
+    #
+    # The session is COPIED out (see site_auth.mirror_own_chrome), never driven
+    # in place: Chrome 136+ refuses remote debugging against a live profile.
+    chrome_user_data_dir: str = ""
+    # Blank, NOT "Default". A non-empty default is truthy, so `chrome_profile_dir
+    # or devaid_chrome_profile_dir` short-circuited on it and silently ignored a
+    # profile set under the older name — mirroring the Default profile, which is
+    # signed into nothing, while reporting success. Blank means "not set", and
+    # site_auth.own_chrome_profile() supplies "Default" only as a last resort.
+    chrome_profile_dir: str = ""
+
     # unlocks real deadlines + the experts search counters.
     devaid_email: str = ""
     devaid_password: str = ""
+
+    # UN Partner Portal ------------------------------------------------------
+    # /cfei/open is the signed-in list of open Calls for Expression of Interest.
+    # Signed out, the portal shows /landing/opportunities instead, which is a
+    # different and much shorter list — so a run without a session does not
+    # produce "fewer rows", it produces the wrong ones.
+    #
+    # Two ways in, tried in this order by scrapers/unpp.py:
+    #   1. these credentials, which is the only route that works on EC2;
+    #   2. your everyday Chrome session (LOP_CHROME_USER_DATA_DIR /
+    #      LOP_CHROME_PROFILE_DIR), which needs Chrome closed and a desktop.
+    # Neither available means the scraper yields nothing and says so, rather
+    # than quietly scraping the public teaser.
+    unpp_email: str = ""
+    unpp_password: str = ""
+    # Set false to watch the sign-in happen in a visible window — the fastest
+    # way to see a CAPTCHA or an SSO redirect that headless cannot get past.
+    unpp_headless: bool = True
+    # Scrape using YOUR everyday Chrome profile instead of the dedicated one, so
+    # there is no separate "Connect account" step on your own machine — you are
+    # already signed in there.
+    #
+    #   LOP_DEVAID_CHROME_USER_DATA_DIR=C:\Users\<you>\AppData\Local\Google\Chrome\User Data
+    #   LOP_DEVAID_CHROME_PROFILE_DIR=Default
+    #
+    # Two hard constraints, both enforced in devaid_auth.open_persistent:
+    #   1. Chrome must be FULLY CLOSED while a scrape runs. Chrome holds an
+    #      exclusive lock on the profile; a second process opening it either
+    #      fails or corrupts it. This is checked and refused, not attempted.
+    #   2. It is local-only. A server has no Chrome profile, so EC2 keeps using
+    #      the exported session — see scripts/devaid_session.py push.
+    # Blank (the default) = the dedicated profile in backend/data/devaid_profile.
+    devaid_chrome_user_data_dir: str = ""
+    devaid_chrome_profile_dir: str = "Default"
     # Which DevelopmentAid sections to walk, comma separated: "grants,tenders".
     # Both stay one source in the dashboard — this only bounds how much of the
     # archive a run covers. Tenders is ~1.2M listings (~5 hours) versus ~118k
     # for grants (~30 min), so it's useful to run grants alone.
     devaid_sections: str = "grants,tenders"
-    # Override the DevelopmentAid search URLs. Blank = the built-in ones, which
-    # already carry the English filter (languages=92) and the team's sectors.
-    devaid_grants_url: str = ""
-    devaid_tenders_url: str = ""
+    # The exact filtered searches the team wants scraped — copied verbatim from
+    # DevelopmentAid's own address bar with the advanced filters applied.
+    #
+    # These are set as DEFAULTS, not left blank, because "blank" meant the
+    # scraper fell back to the unfiltered /grants/search and /tenders/search:
+    # devaid_filtered_search defaults to False (a long generated query string
+    # once tripped Cloudflare), so the filters the team had configured were
+    # never actually being sent. An explicit URL bypasses that flag entirely —
+    # this is the search that runs, on every machine, with no .env editing.
+    #
+    # Kept verbatim rather than rebuilt from the sector settings below: the
+    # generated grants list carried sector 9, which this search does not, so
+    # regenerating it would silently scrape a sector the team did not ask for.
+    # Change the search on the site, copy the new URL, paste it here.
+    devaid_grants_url: str = (
+        "https://www.developmentaid.org/grants/search"
+        "?languages=92"
+        "&sectors=100,7,3,95,5,6,11,54,8,78,80,30,44,87,85,22,34,48,27"
+        "&statuses=3"
+    )
+    devaid_tenders_url: str = (
+        "https://www.developmentaid.org/tenders/search"
+        "?sectors=100,5,95,3,6,7,78,8,29,9,11,54,80,16,30,44,20,85,87,60,22,43,34,48,27"
+        "&statuses=3"
+        "&languages=92"
+    )
     # DevelopmentAid search filters, from the team's own saved searches.
     # Grants and tenders carry slightly different sector lists because the two
     # catalogues don't offer identical sectors.
@@ -131,6 +224,23 @@ class Settings(BaseSettings):
     # them. The dashboard filters to Active by default, so this changes what is
     # archived, not what is shown.
     keep_expired: bool = True
+
+    # Dashboard strictness -------------------------------------------------
+    # Every row must carry a link that opens the call itself. Without this a
+    # linkless row was stored anyway and services/links.py handed the reader a
+    # web search, so the dashboard listed entries that opened a search engine.
+    require_usable_link: bool = True
+    # Every row must show positive evidence that it IS an opportunity — see
+    # services/opportunity_gate.py. Most sources are scraped by harvesting every
+    # link on a page, so without this a funder's news post or "our grantees"
+    # card is stored as a fundable call. Set false only to diagnose whether the
+    # gate is what dropped something.
+    strict_opportunity_gate: bool = True
+    # Delete rows that have been Expired for longer than this. Closed calls are
+    # archived rather than deleted so recent history stays queryable; without an
+    # upper bound the archive grows forever (the database is already 176 MB).
+    # 0 disables the purge and keeps everything.
+    expired_purge_days: int = 90
 
     # Email (SMTP) — set these to enable sending. For Gmail use an App Password.
     smtp_host: str = "smtp.gmail.com"

@@ -88,6 +88,69 @@ def cmd_status(_args) -> int:
     return 0
 
 
+def cmd_push(args) -> int:
+    """export -> scp -> remote import, in one step.
+
+    The three-command dance (export, scp, ssh import) is the part people get
+    wrong or skip, and a half-done handoff looks exactly like a working one
+    until a scrape returns nothing. Doing it as a single command means the
+    session either lands and verifies, or says why it did not.
+
+    The session file is a live credential, so the local copy is written to a
+    temporary file with owner-only permissions and deleted afterwards — on both
+    machines, whether or not the transfer succeeded.
+    """
+    import subprocess
+    import tempfile
+
+    try:
+        state = export_session_state()
+    except Exception as exc:
+        print(f"Nothing to push — could not export this machine's session: {exc}",
+              file=sys.stderr)
+        print("Connect the account here first (dashboard -> Connect account).",
+              file=sys.stderr)
+        return 1
+
+    remote_tmp = "/tmp/devaid_session_push.json"
+    fd, local = tempfile.mkstemp(prefix="devaid_session_", suffix=".json")
+    try:
+        with open(fd, "w", encoding="utf-8") as fh:
+            json.dump(state, fh)
+        try:
+            Path(local).chmod(0o600)
+        except OSError:
+            pass
+
+        print(f"Exported {len(state.get('cookies', []))} cookies. "
+              f"Copying to {args.host}…")
+        scp = subprocess.run(["scp", "-q", local, f"{args.host}:{remote_tmp}"])
+        if scp.returncode != 0:
+            print("scp failed — check the host and your SSH key.", file=sys.stderr)
+            return scp.returncode
+
+        # Run the remote import through the server's own venv, then remove the
+        # copied credential whatever the import did.
+        remote_cmd = (
+            f"cd {args.remote} && "
+            f"{args.python} scripts/devaid_session.py import {remote_tmp}; "
+            f"rc=$?; rm -f {remote_tmp}; exit $rc"
+        )
+        print("Installing and verifying on the remote…")
+        rc = subprocess.run(["ssh", args.host, remote_cmd]).returncode
+        if rc == 0:
+            print("\nDone — the server is using your session.")
+        else:
+            print("\nThe remote import did not confirm a signed-in session "
+                  "(see its output above).", file=sys.stderr)
+        return rc
+    finally:
+        try:
+            Path(local).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -96,6 +159,13 @@ def main() -> int:
     imp.add_argument("file", nargs="?", help="path to devaid_session.json (default: stdin)")
     imp.set_defaults(fn=cmd_import)
     sub.add_parser("status", help="report whether this machine has a working session").set_defaults(fn=cmd_status)
+    push = sub.add_parser("push", help="export from here and install on the server, in one step")
+    push.add_argument("--host", default="ubuntu@15.207.68.78", help="ssh target")
+    push.add_argument("--remote", default="~/Deployment/lead-opportunity-platform/backend",
+                      help="backend directory on the server")
+    push.add_argument("--python", default="./.venv/bin/python",
+                      help="python to use on the server")
+    push.set_defaults(fn=cmd_push)
     args = ap.parse_args()
     return args.fn(args)
 

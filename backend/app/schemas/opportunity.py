@@ -29,8 +29,14 @@ class RawOpportunity(BaseModel):
     funding_amount: str = ""
     source_website: str
     category_hint: Category | None = None  # optional hint from the source itself
-    assume_active: bool = False            # source explicitly marks it open but
-                                           # hides the exact deadline (membership sites)
+    # The SOURCE states there is no closing date: rolling, open-ended, until
+    # filled. It is NOT "we could not find a date" — those are two different
+    # things and conflating them is what put closed calls on the dashboard as
+    # permanent "Ongoing" rows for months. A row flagged here never expires on a
+    # date, so only set it when the page actually says so; leave it False when
+    # the deadline is simply unknown, and the pipeline will keep the row live
+    # until its source stops listing it (LOP_ONGOING_MAX_AGE_DAYS).
+    assume_active: bool = False
     dayfirst: bool = True                  # date convention: True=31/07 (IN/EU), False=07/31 (US)
 
 
@@ -65,11 +71,14 @@ class OpportunityOut(BaseModel):
 
     # Always-clickable destination, computed rather than stored so a change to
     # the fallback rules applies to every existing row without a migration.
-    #   link_kind == "direct" -> the listing itself
-    #   link_kind == "search" -> a search that will find it
-    # The kind is exposed so the UI can label it honestly; presenting a search
-    # result as though it were the listing would be worse than the dead end it
-    # replaces.
+    #   link_kind == "direct"  -> the opportunity's own page
+    #   link_kind == "listing" -> the funder's index/section page; the call is
+    #                             on it somewhere, but the reader still has to
+    #                             find the row
+    #   link_kind == "search"  -> a search that will find it
+    # The kind is exposed so the UI can label it honestly; presenting a section
+    # page or a search result as though it were the call itself is what made
+    # links feel like they "open the wrong opportunity".
     link: str = ""
     link_kind: str = "direct"
 
@@ -78,7 +87,8 @@ class OpportunityOut(BaseModel):
         from app.services.links import resolve_link
 
         self.link, self.link_kind = resolve_link(
-            self.opportunity_url, self.website, self.source_website, self.title
+            self.opportunity_url, self.website, self.source_website, self.title,
+            str(getattr(self.category, "value", self.category) or ""),
         )
         return self
 

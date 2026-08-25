@@ -11,7 +11,7 @@ from collections import deque
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.config import settings
 from app.database.db import session_scope
@@ -25,6 +25,7 @@ from app.services.deduplication import make_unique_id
 from app.services.amounts import clean_amount, extract_amount
 from app.services.geography import normalize_geo
 from app.services.links import canonical_link, is_usable_link
+from app.services.opportunity_gate import is_opportunity
 from app.services.deadline_audit import is_sentinel
 from app.services.spam import is_spam
 from app.services.organization import extract_organization, tidy_organization
@@ -128,6 +129,11 @@ class ScraperManager:
         try:
             await asyncio.gather(*(_guarded(s) for s in scrapers))
         finally:
+            if settings.run_maintenance_after_scrape:
+                try:
+                    await asyncio.to_thread(self._maintenance)
+                except Exception:
+                    log.exception("post-scrape maintenance failed")
             self.state = "idle"
             self._log("Scrape job completed")
             if self.on_complete is not None and not self._stop.is_set():
@@ -135,6 +141,39 @@ class ScraperManager:
                     await self.on_complete()
                 except Exception:
                     log.exception("post-scrape hook failed")
+
+    def _maintenance(self) -> None:
+        """Repair passes that run after every scrape.
+
+        audit_deadlines(), repair_links() and junk_rows() were all written,
+        tested and documented — and never called by anything in the application.
+        Three of the dashboard's visible faults were simply these three passes
+        never running: closed calls staying live, links opening the wrong page,
+        and rows titled "Skip to main content" sitting in the list. Wiring them
+        in here is the fix; the functions themselves were already correct.
+        """
+        from app.services.deadline_audit import audit_deadlines
+        from app.services.links import purge_junk_rows, repair_links
+
+        deadlines = audit_deadlines()
+        if deadlines.get("stale_ongoing"):
+            self._log(
+                f"Maintenance: retired {deadlines['stale_ongoing']} undated listing(s) "
+                f"no source has shown for {settings.ongoing_max_age_days} days"
+            )
+        if deadlines.get("expired"):
+            self._log(f"Maintenance: marked {deadlines['expired']} passed-deadline row(s) expired")
+
+        links = repair_links()
+        if links.get("cleared") or links.get("rewritten"):
+            self._log(
+                f"Maintenance: cleared {links['cleared']} unusable link(s), "
+                f"rewrote {links['rewritten']}"
+            )
+
+        junk = purge_junk_rows()
+        if junk:
+            self._log(f"Maintenance: removed {junk} row(s) that were page furniture, not opportunities")
 
     async def _run_source(self, scraper: BaseScraper) -> None:
         prog = self.progress[scraper.name]
@@ -179,11 +218,13 @@ class ScraperManager:
         try:
             async for batch in scraper.crawl(source_stop, self._pause, on_progress):
                 prog["found"] += len(batch)
-                saved, expired, dupes, spam = await asyncio.to_thread(self._ingest, batch)
+                saved, expired, dupes, spam, rejected = await asyncio.to_thread(
+                    self._ingest, batch, scraper.curated)
                 prog["saved"] += saved
                 prog["skipped_expired"] += expired
                 prog["duplicates"] += dupes
                 prog["spam"] += spam
+                prog["rejected"] = prog.get("rejected", 0) + rejected
                 # "found 30, saved 0" is unreadable without this. Every dropped
                 # row now has a stated reason, so a run that looks like it did
                 # nothing can be told apart from one that found only repeats.
@@ -191,7 +232,13 @@ class ScraperManager:
                     self._log(
                         f"[{scraper.display_name}] page yielded {len(batch)}, saved 0 "
                         f"(duplicates {dupes}, expired {expired}, spam {spam}, "
+                        f"not an opportunity {rejected}, "
                         f"off-vertical {prog.get('off_vertical', 0)})"
+                    )
+                if rejected:
+                    self._log(
+                        f"[{scraper.display_name}] rejected {rejected} row(s) that are "
+                        f"not opportunities or have no link to one"
                     )
                 if expired:
                     verb = "archived" if settings.keep_expired else "skipped"
@@ -231,7 +278,8 @@ class ScraperManager:
             )
 
     # -------------------------------------------------------------- pipeline
-    def _ingest(self, batch: list[RawOpportunity]) -> tuple[int, int, int, int]:
+    def _ingest(self, batch: list[RawOpportunity],
+                curated: bool = False) -> tuple[int, int, int, int, int]:
         """One page of scraped rows -> rows in the database.
 
         normalise deadline -> mark expired -> classify (category, verticals,
@@ -239,12 +287,18 @@ class ScraperManager:
         geography/organisation/amount -> reject spam -> fingerprint -> dedupe
         -> insert.
 
-        Returns (saved, expired, duplicates, spam) so the caller can say *why*
-        a page produced no new rows. "found 30, saved 0" is unreadable without
-        those four numbers — repeats, closed calls and junk are three different
-        situations and only one of them is a problem.
+        Returns (saved, expired, duplicates, spam, rejected) so the caller can
+        say *why* a page produced no new rows. "found 30, saved 0" is unreadable
+        without those numbers — repeats, closed calls and junk are different
+        situations and only some of them are a problem.
+
+        `curated` comes from the scraper (BaseScraper.curated) and says whether
+        this source's page contains opportunities and nothing else. It relaxes
+        the vocabulary half of the opportunity gate, never the furniture or
+        page-type half.
         """
-        saved = expired = dupes = spam = 0
+        saved = expired = dupes = spam = rejected = 0
+        undated = rolling_rows = 0
         expired_samples: list[str] = []
         today = date.today()
         batch_uids: set[str] = set()  # catch duplicates within the same batch too
@@ -258,10 +312,30 @@ class ScraperManager:
                 # handle it from there.
                 if is_sentinel(deadline):
                     deadline = None
-                ongoing = deadline is None and (
+                # Three states, not two. Conflating the last two is what put
+                # closed calls on the dashboard as permanent "Ongoing" rows.
+                #
+                #   dated    a date we could read  -> Active or Expired, decided
+                #                                    by the date and nothing else
+                #   rolling  the source SAYS there is no closing date  -> Active
+                #   unknown  no date, and no such statement            -> Active
+                #                                    for now, retired by
+                #                                    audit_deadlines() once the
+                #                                    source stops listing it
+                #
+                # "unknown" must not be treated as expired: that would hide every
+                # row from a funder page that simply does not print dates. And it
+                # must not be treated as rolling either: that is immortality, and
+                # it is the bug being fixed. It is a lease, renewed every time a
+                # scrape sees the row again (last_seen) and allowed to lapse
+                # after LOP_ONGOING_MAX_AGE_DAYS.
+                rolling = deadline is None and (
                     self.deadline_parser.is_ongoing(raw.deadline_raw) or raw.assume_active
                 )
-                is_expired = not ongoing and not self.deadline_parser.is_active(deadline, today)
+                if deadline is None:
+                    undated += 1
+                    rolling_rows += 1 if rolling else 0
+                is_expired = deadline is not None and deadline < today
                 if is_expired:
                     expired += 1
                     if len(expired_samples) < 3:
@@ -304,6 +378,35 @@ class ScraperManager:
                               raw.source_website, (raw.title or "")[:60])
                     continue
 
+                # A link that opens the call itself is not a nice-to-have, it is
+                # the product. A row without one used to be stored anyway with an
+                # empty opportunity_url, and services/links.resolve_link then
+                # handed the reader a web search — so the dashboard was full of
+                # entries that opened a search page instead of an opportunity.
+                # There is nothing useful to keep in such a row: the title alone
+                # is not a lead.
+                if settings.require_usable_link and not is_usable_link(
+                        raw.opportunity_url, raw.website):
+                    rejected += 1
+                    log.debug("[%s] no usable link, row dropped: %s",
+                              raw.source_website, (raw.title or "")[:60])
+                    continue
+
+                # Is this actually an opportunity? Most sources are scraped by
+                # harvesting every link on a page, so without this a funder's
+                # news post, programme page or "our grantees" card is stored as
+                # a fundable call. See services/opportunity_gate.py — curated
+                # boards skip the vocabulary test but not the rest.
+                if settings.strict_opportunity_gate:
+                    keep, why = is_opportunity(
+                        raw.title, raw.summary, raw.opportunity_url,
+                        str(getattr(category, "value", category) or ""), curated)
+                    if not keep:
+                        rejected += 1
+                        log.debug("[%s] rejected (%s): %s", raw.source_website,
+                                  why, (raw.title or "")[:60])
+                        continue
+
                 uid = make_unique_id(raw.title, raw.organization, deadline, raw.opportunity_url)
 
                 exists = db.execute(
@@ -311,6 +414,17 @@ class ScraperManager:
                 ).scalar_one_or_none()
                 if uid in batch_uids or exists is not None:
                     dupes += 1
+                    if exists is not None:
+                        # A duplicate is not nothing: it is proof the source is
+                        # still publishing this call today. Recording that is
+                        # what lets an undated "Ongoing" row be retired later,
+                        # once the source stops returning it. Before this, a
+                        # duplicate was simply dropped and no row ever aged.
+                        db.execute(
+                            update(Opportunity)
+                            .where(Opportunity.id == exists)
+                            .values(last_seen=datetime.now(timezone.utc))
+                        )
                     continue
                 batch_uids.add(uid)
 
@@ -350,7 +464,18 @@ class ScraperManager:
                 saved += 1
         if expired_samples:
             self._log(f"  ↳ expired examples: {'; '.join(expired_samples)}")
-        return saved, expired, dupes, spam
+        if undated:
+            # Visible on purpose. "Rolling" is a claim the source made; "no date
+            # found" is our parser failing. Reporting one number for both is how
+            # the permanent-Ongoing bug stayed invisible for so long — the fix is
+            # only trustworthy if the split can be watched.
+            self._log(
+                f"  ↳ {undated} undated row(s): {rolling_rows} state no closing "
+                f"date, {undated - rolling_rows} we could not read one from "
+                f"(kept live, retired after {settings.ongoing_max_age_days} "
+                f"days unseen)"
+            )
+        return saved, expired, dupes, spam, rejected
 
     # ------------------------------------------------------------- reporting
     def snapshot(self) -> dict[str, Any]:

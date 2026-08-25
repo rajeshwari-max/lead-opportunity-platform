@@ -70,6 +70,7 @@ class ScrapeScheduler:
         # Digest + reminders run on their own daily schedule, independent of how
         # often scraping happens.
         self.apply_email_settings()
+        self._install_deadline_audit()
         # Re-apply the persisted schedule so automatic runs resume after restart.
         if self.current.mode != "manual":
             try:
@@ -94,6 +95,34 @@ class ScrapeScheduler:
                     self.current.mode, self.current.hour, self.current.minute,
                 )
                 asyncio.create_task(self._scrape_all())
+
+    def _install_deadline_audit(self) -> None:
+        """Re-check Active/Expired every night, not only at startup.
+
+        `status` is decided when a row is INGESTED and then never changes by
+        itself. A call scraped with a deadline three days out is stored Active
+        and stays Active after that date passes. The dashboard's list query also
+        filters on `deadline >= today`, so the stale status is normally hidden —
+        but any view that does not apply that filter (the Approved-only view,
+        which deliberately ignores deadlines) shows it, and the counts drift.
+
+        Running this only at startup meant a server left up for a week went a
+        week without a correction. Just after midnight, every night.
+        """
+        from app.services.deadline_audit import audit_deadlines
+
+        def _run() -> None:
+            try:
+                result = audit_deadlines()
+                log.info("Nightly deadline audit: %s", result)
+            except Exception:
+                log.exception("Nightly deadline audit failed")
+
+        self._scheduler.add_job(
+            _run, CronTrigger(hour=0, minute=15),
+            id="deadline-audit", replace_existing=True,
+        )
+        log.info("Scheduler: nightly deadline audit at 00:15")
 
     def apply_email_settings(self) -> None:
         """(Re)install the daily digest job from the dashboard's settings.

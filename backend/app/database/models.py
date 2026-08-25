@@ -72,6 +72,14 @@ class Opportunity(Base):
     date_scraped: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
+    # When a scrape last saw this listing on the source. date_scraped answers
+    # "when did we first find it" and never moves, so it cannot distinguish a
+    # call the funder still lists from one they took down months ago. That
+    # distinction is the only way to retire an undated "Ongoing" row: it has no
+    # deadline to expire by, so without this it stays in the live view forever.
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), index=True
+    )
 
     # Human sign-off. This is the gate for everything downstream — only
     # approved opportunities are meant to reach the retrieval/agentic layer —

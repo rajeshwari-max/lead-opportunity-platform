@@ -1,0 +1,2005 @@
+[
+ {
+  "name": "adb_tenders",
+  "display_name": "ADB Tenders",
+  "start_url": "https://www.adb.org/projects/tenders",
+  "requires_js": true,
+  "verdict": "OK",
+  "items": 12,
+  "deep_pct": 100.0,
+  "deadline_pct": 100.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 9.4,
+  "samples": [
+   {
+    "title": "49450-023: Grant No. 0680-FSM(SF). FSM Renewable Energy Development Project (FSM",
+    "url": "https://www.adb.org/sites/default/files/tenders/fsm0680-redp-w-02-ifb.pdf",
+    "deadline_raw": "23 Oct 2026"
+   },
+   {
+    "title": "49450-023: Grant No. 0680-FSM(SF). FSM Renewable Energy Development Project (FSM",
+    "url": "https://www.adb.org/sites/default/files/tenders/fsm0680-redp-w-03-ifb.pdf",
+    "deadline_raw": "22 Oct 2026"
+   },
+   {
+    "title": "49450-023: Grant No. 0680-FSM(SF). FSM Renewable Energy Development Project (FSM",
+    "url": "https://www.adb.org/sites/default/files/tenders/fsm0680-redp-w-01-ifb.pdf",
+    "deadline_raw": "21 Oct 2026"
+   }
+  ]
+ },
+ {
+  "name": "afd",
+  "display_name": "AFD",
+  "start_url": "https://www.afd.fr/fr/appels-a-projets/liste?",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 1,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 8.7,
+  "samples": [
+   {
+    "title": "Appel \u00e0 initiatives pour la p\u00e9pini\u00e8re urbaine de Madagascar (Programme d\u2019Appui e",
+    "url": "https://www.afd.fr/fr/appels-a-projets/pepiniere-urbaine-madagascar-padeve",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "alliance_for_health_policy_systems_resea",
+  "display_name": "Alliance for Health Policy & Systems Research",
+  "start_url": "https://ahpsr.who.int/funding-opportunities",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 2,
+  "deep_pct": 50.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 4.5,
+  "samples": [
+   {
+    "title": "our funding approach, including frequently asked questions",
+    "url": "https://ahpsr.who.int/funding-opportunities/funding-approach",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Past calls from the Alliance",
+    "url": "https://ahpsr.who.int/call-for-proposals",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "audacious_project",
+  "display_name": "Audacious Project",
+  "start_url": "https://www.audaciousproject.org/grantees",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 1,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 3.5,
+  "samples": [
+   {
+    "title": "Environmental Defense Fund Fighting climate change by tracking gas emissions fro",
+    "url": "https://www.audaciousproject.org/grantees/environmental-defense-fund",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "better_cotton",
+  "display_name": "Better Cotton",
+  "start_url": "https://bettercotton.org/requests-for-proposals/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 4,
+  "deep_pct": 100.0,
+  "deadline_pct": 100.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 5.1,
+  "samples": [
+   {
+    "title": "Request for Proposals \u2013 Training Cascade Review Survey",
+    "url": "https://bettercotton.org/proposals/request-for-proposals-training-cascade-review-survey/",
+    "deadline_raw": "11/09/2026"
+   },
+   {
+    "title": "Request for Proposals: Decent Work Monitoring in Programme Clusters in Uzbekista",
+    "url": "https://bettercotton.org/proposals/request-for-proposals-decent-work-monitoring-in-programme-clusters-in-uzbekistan-to-i",
+    "deadline_raw": "24/08/2026"
+   },
+   {
+    "title": "Request for Proposals: Procurement Technology Provider (Project Acordo)",
+    "url": "https://bettercotton.org/proposals/request-for-proposals-procurement-technology-provider-project-acordo/",
+    "deadline_raw": "01/09/2026"
+   }
+  ]
+ },
+ {
+  "name": "carnegie_foundation",
+  "display_name": "Carnegie Foundation",
+  "start_url": "https://carnegie.org/grants/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 3,
+  "deep_pct": 66.7,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 6.4,
+  "samples": [
+   {
+    "title": "Our Grantmaking Philosophy",
+    "url": "https://carnegie.org/grants/grants-database/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Our Grantmaking Philosophy",
+    "url": "https://carnegie.org/grantee-resources/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "What If 1 Million Young Americans Completed Service Years Annually? Most young A",
+    "url": "https://carnegie.org/article/what-if-1-million-young-americans-completed-service-years-annually/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "citigroup",
+  "display_name": "Citigroup",
+  "start_url": "https://www.citigroup.com/global/foundation/apply-for-funding",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 3,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 23.5,
+  "samples": [
+   {
+    "title": "Community Finance Initiative",
+    "url": "https://www.citigroup.com/global/foundation/programs/community-finance-initiative",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Community Progress Makers",
+    "url": "https://www.citigroup.com/global/foundation/programs/community-progress-makers",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Global Innovation Challenge",
+    "url": "https://www.citigroup.com/global/foundation/programs/global-innovation-challenge",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "cjrf",
+  "display_name": "CJRF",
+  "start_url": "https://cjrfund.org/our-grants/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 4,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 11.3,
+  "samples": [
+   {
+    "title": "Inuit Circumpolar Council",
+    "url": "https://cjrfund.org/grants/icc-canada/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "The Governance for Climate Resilience Project",
+    "url": "https://cjrfund.org/grants/cnrs/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "IMPACT Trust Kenya",
+    "url": "https://cjrfund.org/grants/impact-kenya/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "clean_cooking_alliance",
+  "display_name": "Clean Cooking Alliance",
+  "start_url": "https://cleancooking.org/funding-opportunities",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 2,
+  "deep_pct": 50.0,
+  "deadline_pct": 100.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 6.0,
+  "samples": [
+   {
+    "title": "Closes: December 31, 2030 Katapult Africa Accelerator Katapult Africa supports a",
+    "url": "https://cleancooking.org/funding-opps/katapult-africa-accelerator/",
+    "deadline_raw": "December 31, 2030"
+   },
+   {
+    "title": "See past funding opportunities",
+    "url": "https://cleancooking.org/past-funding-opportunities/",
+    "deadline_raw": "December 31, 2030"
+   }
+  ]
+ },
+ {
+  "name": "climatechangeai",
+  "display_name": "ClimateChangeAI",
+  "start_url": "https://www.climatechange.ai/calls",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 7,
+  "deep_pct": 100.0,
+  "deadline_pct": 57.1,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 5.8,
+  "samples": [
+   {
+    "title": "Climate Change AI Innovation Grants 2025",
+    "url": "https://www.climatechange.ai/calls/innovation_grants_special_track_2025",
+    "deadline_raw": "June 15, 2025"
+   },
+   {
+    "title": "Climate Change AI Innovation Grants 2024",
+    "url": "https://www.climatechange.ai/calls/innovation_grants_2024",
+    "deadline_raw": "September 15, 2024"
+   },
+   {
+    "title": "Climate Change AI Innovation Grants 2023",
+    "url": "https://www.climatechange.ai/calls/innovation_grants_2023",
+    "deadline_raw": "March 1, 2023"
+   }
+  ]
+ },
+ {
+  "name": "clinton_health_access_initiative",
+  "display_name": "Clinton Health Access Initiative",
+  "start_url": "https://www.clintonhealthaccess.org/resource-center/?_sft_category=rfp&sort_order=date+desc",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 8,
+  "deep_pct": 100.0,
+  "deadline_pct": 37.5,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 7.7,
+  "samples": [
+   {
+    "title": "Request for proposals for web and digital support for the Global Oxygen Alliance",
+    "url": "https://www.clintonhealthaccess.org/rfp/web-digital-support-go2al-secretariat/",
+    "deadline_raw": "SEPTEMBER 1, 2026"
+   },
+   {
+    "title": "Request for proposals for a real-time gas monitoring system for LOX in Mozambiqu",
+    "url": "https://www.clintonhealthaccess.org/rfp/mozambique-lox-rtgms/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "CHAI\u2019s partner, Concept Foundation, launches two RFPs for preeclampsia biomarker",
+    "url": "https://www.clintonhealthaccess.org/rfp/concept-foundation-preeclampsia-biomarker-assays/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "openphilanthropy",
+  "display_name": "Coefficient Giving (Open Philanthropy)",
+  "start_url": "https://coefficientgiving.org/apply-for-funding/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 20,
+  "deep_pct": 90.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 16.0,
+  "samples": [
+   {
+    "title": "Learn more and apply",
+    "url": "https://coefficientgiving.org/funds/abundance-and-growth/living-literature-reviews/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Learn more and apply",
+    "url": "https://coefficientgiving.org/funds/farm-animal-welfare/request-for-proposals-humane-fish-slaughter-research-prototypes/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Learn more and apply",
+    "url": "https://coefficientgiving.org/funds/farm-animal-welfare/request-for-proposals-alternative-protein-rd/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "devnet",
+  "display_name": "DevNetJobsIndia",
+  "start_url": "https://www.devnetjobsindia.org/rfp_assignments.aspx",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 34,
+  "deep_pct": 64.7,
+  "deadline_pct": 100.0,
+  "junk": 0,
+  "dup_url": 11,
+  "error": "",
+  "seconds": 5.5,
+  "samples": [
+   {
+    "title": "RFP - For A Digital Campaign On Positive Experiences Of Care",
+    "url": "https://www.devnetjobsindia.org/jobdescription.aspx?job_id=302790",
+    "deadline_raw": "08 Sep 2026"
+   },
+   {
+    "title": "RFQ-IT Infrastructure",
+    "url": "https://www.devnetjobsindia.org/jobdescription.aspx?job_id=302778",
+    "deadline_raw": "29 Aug 2026"
+   },
+   {
+    "title": "RFQ - UNFPA-IND-00015 - Developing a communication video on disability inc...",
+    "url": "https://www.devnetjobsindia.org/jobdescription.aspx?job_id=302776",
+    "deadline_raw": "08 Sep 2026"
+   }
+  ]
+ },
+ {
+  "name": "ea_funds",
+  "display_name": "EA Funds",
+  "start_url": "https://funds.effectivealtruism.org/grants",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 5,
+  "deep_pct": 60.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 11.8,
+  "samples": [
+   {
+    "title": "Download grants database CSV",
+    "url": "https://funds.effectivealtruism.org/api/grants",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Katherine (Katie) Dammer",
+    "url": "https://funds.effectivealtruism.org/funds/transformative-ai",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Shrimp Welfare Project",
+    "url": "https://funds.effectivealtruism.org/funds/animal-welfare",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "european_union",
+  "display_name": "European Union",
+  "start_url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/calls-for-proposals",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 49,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 26.4,
+  "samples": [
+   {
+    "title": "Demonstration of hydropower technologies for efficient and forward-looking refur",
+    "url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/topic-details/HORIZON-CL5-2027-07-D3",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Delivery of industrial CCUS clusters \u2013 Societal Readiness pilot",
+    "url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/topic-details/HORIZON-CL5-2027-07-D3",
+    "deadline_raw": ""
+   },
+   {
+    "title": "PV based electrification of the economy: Designing & optimising PV systems suppo",
+    "url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/topic-details/HORIZON-CL5-2027-07-D3",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "fidelity_charitable",
+  "display_name": "Fidelity Charitable",
+  "start_url": "https://www.fidelitycharitable.org/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 2,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 24.7,
+  "samples": [
+   {
+    "title": "donor-advised fund",
+    "url": "https://www.fidelitycharitable.org/guidance/philanthropy/what-is-a-donor-advised-fund.html",
+    "deadline_raw": ""
+   },
+   {
+    "title": "2026 Impact Snapshot",
+    "url": "https://www.fidelitycharitable.org/content/dam/fc-public/docs/insights/2026-impact-snapshot.pdf",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "fogarty_international_center",
+  "display_name": "Fogarty International Center",
+  "start_url": "https://www.fic.nih.gov/Grants/Pages/default.aspx",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 16,
+  "deep_pct": 93.8,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 14.8,
+  "samples": [
+   {
+    "title": "Get the Latest Updates and FAQs",
+    "url": "https://www.nih.gov/web-modernization",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Search Current and Recent Fogarty Grants",
+    "url": "https://www.fic.nih.gov/Grants/search/Pages/search-grants.aspx",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Grants Frequently Asked Questions (FAQs)",
+    "url": "https://www.fic.nih.gov/Grants/Pages/Frequently-Asked-Questions.aspx",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "foundation_for_food_agriculture_research",
+  "display_name": "Foundation for Food & Agriculture Research",
+  "start_url": "https://foundationfar.org/grants-funding/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 22,
+  "deep_pct": 95.5,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 18.5,
+  "samples": [
+   {
+    "title": "Submit a Research Idea Accepting Submissions",
+    "url": "https://foundationfar.org/grants-funding/opportunities/submit-a-research-idea/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "View all opportunities",
+    "url": "https://foundationfar.org/grants-funding/open-opportunities/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "How We Fund & Approve Research",
+    "url": "https://foundationfar.org/grants-funding/funding-approval-process/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "fundsforngos",
+  "display_name": "FundsForNGOs",
+  "start_url": "https://www2.fundsforngos.org/wp-json/wp/v2/posts?per_page=50&page=1",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 50,
+  "deep_pct": 92.0,
+  "deadline_pct": 100.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 21.2,
+  "samples": [
+   {
+    "title": "Apply for International Scholarships Programme (Ghana)",
+    "url": "https://www2.fundsforngos.org/leadership/apply-for-international-scholarships-programme-ghana/",
+    "deadline_raw": "06-Oct-26"
+   },
+   {
+    "title": "Application Open: Capacity Building Grant (Canada)",
+    "url": "https://www2.fundsforngos.org/community-development-2/application-open-capacity-building-grant-canada/",
+    "deadline_raw": "02-Oct-26"
+   },
+   {
+    "title": "Apply Now: Theatre Society Legacy Fund Grant (Canada)",
+    "url": "https://www2.fundsforngos.org/innovation/apply-now-theatre-society-legacy-fund-grant-canada/",
+    "deadline_raw": "02-Oct-26"
+   }
+  ]
+ },
+ {
+  "name": "global_partnership_for_social_accountabi",
+  "display_name": "Global Partnership for Social Accountability",
+  "start_url": "https://thegpsa.org/grant-making/grant-selection-process/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 4,
+  "deep_pct": 50.0,
+  "deadline_pct": 50.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 11.8,
+  "samples": [
+   {
+    "title": "The GPSA announces the winning proposal from its green accountability call for p",
+    "url": "https://thegpsa.org/green-accountability-call-for-proposals/",
+    "deadline_raw": "June 30, 2026"
+   },
+   {
+    "title": "Fifth Call for Proposals",
+    "url": "https://thegpsa.org/grant-making/grant-selection-process/5th-call-for-proposals/",
+    "deadline_raw": "June 30, 2026"
+   },
+   {
+    "title": "Fourth Call for Proposals",
+    "url": "https://thegpsa.org/grant-making/grant-selection-process/4th-global-call-for-proposals/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "goldman_sachs_foundation",
+  "display_name": "Goldman Sachs Foundation",
+  "start_url": "https://www.goldmansachs.com/search?query=grants",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 4,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 21.2,
+  "samples": [
+   {
+    "title": "Our Vendor Program",
+    "url": "https://www.goldmansachs.com/our-firm/our-vendor-program",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Community Development Grants",
+    "url": "https://www.goldmansachs.com/community-transformation/community-development-grants",
+    "deadline_raw": ""
+   },
+   {
+    "title": "James Grant, Founder of Grant\u2019s Interest Rate Observer",
+    "url": "https://www.goldmansachs.com/insights/talks-at-gs/james-grant",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "grantmakers_community_project",
+  "display_name": "Grantmakers Community Project",
+  "start_url": "https://www.grantmakers.io/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 6,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 5.0,
+  "samples": [
+   {
+    "title": "Gates Foundation Top 1% Seattle, WA 56-2618866 $78,673M",
+    "url": "https://www.grantmakers.io/profiles/v1/562618866-gates-foundation",
+    "deadline_raw": ""
+   },
+   {
+    "title": "J Paul Getty Trust Top 1% Los Angeles, CA 95-1790021 $17,878M",
+    "url": "https://www.grantmakers.io/profiles/v1/951790021-j-paul-getty-trust",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Ford Foundation Top 1% New York, NY 13-1684331 $17,482M",
+    "url": "https://www.grantmakers.io/profiles/v1/131684331-ford-foundation",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "grantwatch",
+  "display_name": "GrantWatch Intl",
+  "start_url": "https://international.grantwatch.com/new-grants.php",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 14,
+  "deep_pct": 100.0,
+  "deadline_pct": 100.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 6.5,
+  "samples": [
+   {
+    "title": "Grants to USA, CAN, and Int'l Early-Career Researchers to Support Kidney Researc",
+    "url": "https://international.grantwatch.com/grant/232335/grants-to-usa-can-and-int-l-early-career-researchers-to-support-kidney",
+    "deadline_raw": "11/19/26"
+   },
+   {
+    "title": "Grants to USA, Canada, and International Educators to Enhance Nephrology Educati",
+    "url": "https://international.grantwatch.com/grant/232333/grants-to-usa-canada-and-international-educators-to-enhance-nephrology",
+    "deadline_raw": "11/19/26"
+   },
+   {
+    "title": "Fellowships to USA, Canada, and International Postdocs to Support Nephrology Res",
+    "url": "https://international.grantwatch.com/grant/232332/fellowships-to-usa-canada-and-international-postdocs-to-support-nephro",
+    "deadline_raw": "11/19/26"
+   }
+  ]
+ },
+ {
+  "name": "gulbenkian",
+  "display_name": "Gulbenkian",
+  "start_url": "https://www.gulbenkian.pt/en/grants/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 4,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 6.9,
+  "samples": [
+   {
+    "title": "Grants / News PALOP students receive Gulbenkian scholarships for master\u2019s degree",
+    "url": "https://gulbenkian.pt/en/news/palop-students-receive-gulbenkian-scholarships-for-masters-degrees-in-portugal/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Culture / Grants / News Gil Mendo Mobility Grant",
+    "url": "https://gulbenkian.pt/en/news/gil-mendo-mobility-grant/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Grants / News Master\u2019s scholarships for PALOP students",
+    "url": "https://gulbenkian.pt/en/news/masters-scholarships-for-palop-students/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "helmsley_charitable_trust",
+  "display_name": "Helmsley Charitable Trust",
+  "start_url": "https://helmsleytrust.org/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 1,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 4.0,
+  "samples": [
+   {
+    "title": "Vulnerable Children in Sub-Saharan Africa Funding holistic programs to support t",
+    "url": "https://helmsleytrust.org/our-focus-areas/vulnerable-children-in-sub-saharan-africa/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "idrc",
+  "display_name": "Idrc",
+  "start_url": "https://www.idrc.ca/en/funding",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 21,
+  "deep_pct": 100.0,
+  "deadline_pct": 4.8,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 16.9,
+  "samples": [
+   {
+    "title": "Supporting STISA 2034: SGCI Multilateral Research Call advancing Africa\u2019s Scienc",
+    "url": "https://www.idrc.ca/en/funding/supporting-stisa-2034-sgci-multilateral-research-call-advancing-africas-science-technolog",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Call for letters of interest: Addressing neglected areas of sexual and reproduct",
+    "url": "https://www.idrc.ca/en/funding/call-letters-interest-addressing-neglected-areas-sexual-and-reproductive-health-and-0",
+    "deadline_raw": ""
+   },
+   {
+    "title": "2026 International Joint Initiative for Research Harnessing Disruptive Technolog",
+    "url": "https://www.idrc.ca/en/funding/2026-international-joint-initiative-research-harnessing-disruptive-technologies-address",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "ikea_foundation",
+  "display_name": "IKEA Foundation",
+  "start_url": "https://ikeafoundation.org/grants?partner=31472",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 1,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 5.0,
+  "samples": [
+   {
+    "title": "Donation: Nepal Earthquake response",
+    "url": "https://ikeafoundation.org/grants/donation-nepal-earthquake-response/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "j_pal",
+  "display_name": "J-PAL",
+  "start_url": "https://www.povertyactionlab.org/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 2,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 4.3,
+  "samples": [
+   {
+    "title": "Test, learn, adapt: Impact evaluations are only as strong as their assumptions",
+    "url": "https://www.povertyactionlab.org/blog/6-17-26/test-learn-adapt-impact-evaluations-are-only-strong-their-assumptions",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Cash for conservation: Climate action on a budget",
+    "url": "https://www.povertyactionlab.org/policy-insight/cash-conservation-climate-action-budget",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "jpiamr",
+  "display_name": "JPIAMR",
+  "start_url": "https://jpiamr.eu/?s=grants",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 8,
+  "deep_pct": 87.5,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 12.9,
+  "samples": [
+   {
+    "title": "Reporting and changes to ongoing grants",
+    "url": "https://jpiamr.eu/resources/ongoing-grants/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "NIH/NIAD Grants Day Training Sessions, 22 January, Stockholm News",
+    "url": "https://jpiamr.eu/workshop-nihniad-grants-day-training-sessions-22-january-stockholm/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "JPIAMR Early Career Researcher Workshop Event The aims of this workshop, \u201cFrom g",
+    "url": "https://jpiamr.eu/events/jpiamr-early-career-researcher-workshop/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "kbs_frb",
+  "display_name": "King Baudouin Foundation",
+  "start_url": "https://kbs-frb.be/en/search?type_id=call",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 5,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 11.3,
+  "samples": [
+   {
+    "title": "The annual Jacqueline Nonkels Prize (\u20ac 10.000) is awarded for the preservation a",
+    "url": "https://kbs-frb.be/en/prize-jacqueline-nonkels-2026-call-projects-individuals",
+    "deadline_raw": ""
+   },
+   {
+    "title": "The annual Jacqueline Nonkels Prize (\u20ac 10.000) is awarded for the preservation a",
+    "url": "https://kbs-frb.be/en/prize-jacqueline-nonkels-2026-call-projects-organisations",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Scholarships for master's students from the Global South to conduct research on ",
+    "url": "https://kbs-frb.be/en/call-scholarships-2026-elisabeth-and-amelie-fund",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "macarthur_foundation",
+  "display_name": "Macarthur Foundation",
+  "start_url": "https://www.macfound.org/grants/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 13,
+  "deep_pct": 92.3,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 29.6,
+  "samples": [
+   {
+    "title": "All Grants and Impact Investments",
+    "url": "javascript:void(0)",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Texas Tribune Austin, Texas $750,000 2026 | 2 years in support of general operat",
+    "url": "https://www.macfound.org/grantee/texas-tribune-10617087/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Resolve Philadelphia Philadelphia, Pennsylvania $350,000 2026 | 2 years in suppo",
+    "url": "https://www.macfound.org/grantee/resolve-philadelphia-10707840/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "mcknight_foundation",
+  "display_name": "McKnight Foundation",
+  "start_url": "https://www.mcknight.org/grants/search-our-grants/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 4,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 8.6,
+  "samples": [
+   {
+    "title": "Global Collaboration for Resilient Food Systems",
+    "url": "https://www.mcknight.org/programs/global-foods/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Midwest Climate & Energy",
+    "url": "https://www.mcknight.org/programs/midwest-climate-energy/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Vibrant & Equitable Communities",
+    "url": "https://www.mcknight.org/programs/vibrant-and-equitable-communities/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "national_institutes_of_health",
+  "display_name": "National Institutes of Health",
+  "start_url": "https://grants.nih.gov/funding",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 11,
+  "deep_pct": 90.9,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 13.2,
+  "samples": [
+   {
+    "title": "Parent Announcements for Investigator-Initiated Applications.",
+    "url": "https://grants.nih.gov/funding/nih-guide-for-grants-and-contracts/parent-announcements",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Explore NIH Opportunities",
+    "url": "https://grants.nih.gov/funding/explore-nih-opportunities",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Learn About Funding Categories",
+    "url": "https://grants.nih.gov/funding/funding-categories",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "pershing_square_foundation",
+  "display_name": "Pershing Square Foundation",
+  "start_url": "https://pershingsquarephilanthropies.org/initiatives/grants?grants",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 3,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 4.8,
+  "samples": [
+   {
+    "title": "PSSCRA Cancer Prize",
+    "url": "https://pershingsquarephilanthropies.org/initiatives/programs/PSSCRA",
+    "deadline_raw": ""
+   },
+   {
+    "title": "MIND Neuroscience Prize",
+    "url": "https://pershingsquarephilanthropies.org/initiatives/programs/mind-prize",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Lotus Ovarian Award",
+    "url": "https://pershingsquarephilanthropies.org/initiatives/programs/lotus-award",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "pfizer_foundation",
+  "display_name": "Pfizer Foundation",
+  "start_url": "https://www.pfizer.com/about/programs-policies/grants/competitive-grants",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 1,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 18.2,
+  "samples": [
+   {
+    "title": "Sign Up for Alerts Details",
+    "url": "https://www.pfizer.com/responsibility/grants_contributions/independent_grants/email_sign_up",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "temasekfoundation",
+  "display_name": "Temasekfoundation",
+  "start_url": "https://www.temasekfoundation.org.sg/grant-calls",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 1,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 4.9,
+  "samples": [
+   {
+    "title": "Liveability & Sustainability Innovations Grant Call",
+    "url": "https://www.temasekfoundation.org.sg/grant-calls/liveability-sustainability-innovations",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "triple_funds",
+  "display_name": "Triple Funds",
+  "start_url": "https://triple-funds.com/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 11,
+  "deep_pct": 54.5,
+  "deadline_pct": 27.3,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 17.8,
+  "samples": [
+   {
+    "title": "Calls for Proposals",
+    "url": "https://triple-funds.com/calls-for-proposals/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "AI Tools for your Grant Finding Journey",
+    "url": "https://triple-funds.com/product/webinar-ai-tools-for-your-grant-funding-journey-incl-1-month-triplefunds/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Call for Proposals 2026 \u2013 Internal Security",
+    "url": "https://triple-funds.com/tf-entry/call-for-proposals-2026-internal-security/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "un_partner_portal",
+  "display_name": "UN Partner Portal",
+  "start_url": "https://www.unpartnerportal.org/cfei/open?page=1&page_size=50",
+  "requires_js": true,
+  "verdict": "OK",
+  "items": 50,
+  "deep_pct": 100.0,
+  "deadline_pct": 100.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 12.6,
+  "samples": [
+   {
+    "title": "Preselecci\u00f3n de una organizaci\u00f3n socia especializada en Salud Mental y Apoyo Psi",
+    "url": "https://www.unpartnerportal.org/landing/opportunities/21645/",
+    "deadline_raw": "2026-09-13"
+   },
+   {
+    "title": "EXPRESI\u00d3N DE INTER\u00c9S PARA ASOCIADO COOPERANTE \u2013 ASISTENCIA ALIMENTARIA A POBLACI",
+    "url": "https://www.unpartnerportal.org/landing/opportunities/21643/",
+    "deadline_raw": "2026-09-03"
+   },
+   {
+    "title": "Call for proposals for implementation of  Community Engagement and Capacity for ",
+    "url": "https://www.unpartnerportal.org/landing/opportunities/21640/",
+    "deadline_raw": "2026-09-07"
+   }
+  ]
+ },
+ {
+  "name": "undp_procurement",
+  "display_name": "UNDP Procurement",
+  "start_url": "https://procurement-notices.undp.org/?lang=en",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 400,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 117.1,
+  "samples": [
+   {
+    "title": "RfQ26/03352: CBM/Installation of Photovoltaic system in Holercani (readvertised)",
+    "url": "https://procurement-notices.undp.org/view_negotiation.cfm?nego_id=49000",
+    "deadline_raw": ""
+   },
+   {
+    "title": "RFQ/SEDIT/2608/47 \u2013 Provision of Logistic Support for Training Workshops Ref No ",
+    "url": "https://procurement-notices.undp.org/view_negotiation.cfm?nego_id=49001",
+    "deadline_raw": ""
+   },
+   {
+    "title": "PRC0189079 : ACHAT ET LIVRAISON DES MATERIELS DE TERRAIN ET BUREAUTIQUE MOBILE R",
+    "url": "https://procurement-notices.undp.org/view_negotiation.cfm?nego_id=49002",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "wellcome_trust",
+  "display_name": "Wellcome Trust",
+  "start_url": "https://wellcome.org/research-funding/schemes",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 8,
+  "deep_pct": 87.5,
+  "deadline_pct": 25.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 5.5,
+  "samples": [
+   {
+    "title": "Lead applicant career stage",
+    "url": "https://wellcome.org/grant-funding/research-careers",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Strategic programme",
+    "url": "https://wellcome.org/what-we-do",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Wellcome Accelerator Awards",
+    "url": "https://wellcome.org/research-funding/schemes/wellcome-accelerator-awards",
+    "deadline_raw": "25 August 2026"
+   }
+  ]
+ },
+ {
+  "name": "women_strong_international",
+  "display_name": "Women Strong International",
+  "start_url": "https://www.womenstrong.org/work/grantmaking/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 4,
+  "deep_pct": 75.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 12.0,
+  "samples": [
+   {
+    "title": "We trust our partners, in a direct challenge to traditional philanthropy.",
+    "url": "https://www.womenstrong.org/partners/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Funding For Climate & Environmental Justice: Expressions of Interest Welcome Now",
+    "url": "https://www.womenstrong.org/news-resources/funding-for-climate-environmental-justice-expressions-of-interest/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "The Way Forward: Game-Changing Shifts in Funding Power Dynamics Read more",
+    "url": "https://www.womenstrong.org/news-resources/the-way-forward-game-changing-shifts-in-funding-power-dynamics/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "woodcock_foundation",
+  "display_name": "Woodcock Foundation",
+  "start_url": "https://woodcockfdn.org/",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 10,
+  "deep_pct": 80.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 6.1,
+  "samples": [
+   {
+    "title": "Featured Grantees & Catalytic Investments",
+    "url": "https://woodcockfdn.org/grantees/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "All Catalytic Investments",
+    "url": "https://woodcockfdn.org/investments/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Acumen Building transformative businesses to help solve the problems of global p",
+    "url": "https://woodcockfdn.org/grantee/acumen-fund/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "world_bank",
+  "display_name": "World Bank",
+  "start_url": "https://projects.worldbank.org/en/projects-operations/opportunities?lang=en",
+  "requires_js": false,
+  "verdict": "OK",
+  "items": 27,
+  "deep_pct": 100.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 19.7,
+  "samples": [
+   {
+    "title": "Regional Cluster No. 1: Design and Build of the Phase 4 and 5 Middle Mile Level ",
+    "url": "https://projects.worldbank.org/en/projects-operations/procurement-detail/OP00463694",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Philippines Digital Infrastructure Project - P176317",
+    "url": "https://projects.worldbank.org/en/projects-operations/project-detail/P176317",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Procurement and installation of Generators for Digital Enforcement Stations (DES",
+    "url": "https://projects.worldbank.org/en/projects-operations/procurement-detail/OP00463957",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "blueaction",
+  "display_name": "Blue Action Fund",
+  "start_url": "https://www.blueactionfund.org/funding-opportunities/",
+  "requires_js": false,
+  "verdict": "WEAK",
+  "items": 3,
+  "deep_pct": 0.0,
+  "deadline_pct": 100.0,
+  "junk": 0,
+  "dup_url": 2,
+  "error": "",
+  "seconds": 1.4,
+  "samples": [
+   {
+    "title": "Calls for proposals",
+    "url": "https://www.blueactionfund.org/funding-opportunities/",
+    "deadline_raw": "16 October 2026"
+   },
+   {
+    "title": "Current call for proposals",
+    "url": "https://www.blueactionfund.org/funding-opportunities/",
+    "deadline_raw": "16 October 2026"
+   },
+   {
+    "title": "Prior calls for proposals",
+    "url": "https://www.blueactionfund.org/funding-opportunities/",
+    "deadline_raw": "15 August 2024"
+   }
+  ]
+ },
+ {
+  "name": "bmgf_grand_challenges",
+  "display_name": "BMGF Grand Challenges",
+  "start_url": "https://gcgh.grandchallenges.org/grant-opportunities",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 5.7,
+  "samples": []
+ },
+ {
+  "name": "bond",
+  "display_name": "Bond UK",
+  "start_url": "https://www.bond.org.uk/funding-opportunities/",
+  "requires_js": false,
+  "verdict": "WEAK",
+  "items": 448,
+  "deep_pct": 42.2,
+  "deadline_pct": 94.6,
+  "junk": 0,
+  "dup_url": 94,
+  "error": "",
+  "seconds": 130.9,
+  "samples": [
+   {
+    "title": "World Childhood Foundation \u2014 Funding Opportunity",
+    "url": "https://childhood.org/propose-a-project/",
+    "deadline_raw": "Ongoing"
+   },
+   {
+    "title": "The Pandemic Fund \u2014 Funding Opportunity",
+    "url": "https://www.thepandemicfund.org/call-for-proposals",
+    "deadline_raw": "Ongoing"
+   },
+   {
+    "title": "DIV Fund \u2014 Funding Opportunity",
+    "url": "https://www.div.fund/apply/form",
+    "deadline_raw": "Ongoing"
+   }
+  ]
+ },
+ {
+  "name": "bosch_stiftung",
+  "display_name": "Bosch Stiftung",
+  "start_url": "https://www.bosch-stiftung.de/en/news/open-calls",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 5.4,
+  "samples": []
+ },
+ {
+  "name": "cepi",
+  "display_name": "CEPI",
+  "start_url": "https://cepi.net/search?term=grants",
+  "requires_js": false,
+  "verdict": "WEAK",
+  "items": 1,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 7.2,
+  "samples": [
+   {
+    "title": "IVI, INOVIO, and KNIH to partner with CEPI in a Phase I/II clinical trial of INO",
+    "url": "https://cepi.net/ivi-inovio-and-knih-partner-cepi-phase-iii-clinical-trial-inovios-covid-19-dna-vaccine-south-korea",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "charity_excellence_framework",
+  "display_name": "Charity Excellence Framework",
+  "start_url": "https://www.charityexcellence.co.uk/?s=grants",
+  "requires_js": false,
+  "verdict": "WEAK",
+  "items": 12,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 9.9,
+  "samples": [
+   {
+    "title": "Grants for Small UK Charities - Funeral Directors",
+    "url": "https://www.charityexcellence.co.uk/grants-for-small-uk-charities/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Charity Funding Scotland - Common Good Fund Grants",
+    "url": "https://www.charityexcellence.co.uk/charity-grant-funding-scotland/",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Small Grants for UK Charities",
+    "url": "https://www.charityexcellence.co.uk/grants-for-small-charities-uk/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "clean_air_fund",
+  "display_name": "Clean Air Fund",
+  "start_url": "https://www.cleanairfund.org/what-we-do/our-grants/",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 2.6,
+  "samples": []
+ },
+ {
+  "name": "developmentaid",
+  "display_name": "DevelopmentAid",
+  "start_url": "https://www.developmentaid.org/grants/search?languages=92&sectors=100,7,3,95,5,6,11,54,8,78,80,30,44,87,85,22,34,48,27&statuses=3",
+  "requires_js": true,
+  "verdict": "ERROR",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "RuntimeError: Chrome is using your profile at C:\\Users\\rajes\\AppData\\Local\\Google\\Chrome\\User Data, so the session cannot be copied out of it (its lockfile is held). Close Chrome completely \u2014 including any background instance in the system tray \u2014 and run again. Or unset LOP_DEVAID_CHROME_USER_DATA_D",
+  "seconds": 1.7,
+  "samples": []
+ },
+ {
+  "name": "devex",
+  "display_name": "Devex",
+  "start_url": "https://www.devex.com/funding/r",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 2.9,
+  "samples": []
+ },
+ {
+  "name": "doen_foundation",
+  "display_name": "Doen Foundation",
+  "start_url": "https://www.doen.nl/en/?s=grants",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 6.1,
+  "samples": []
+ },
+ {
+  "name": "donordatabase_org",
+  "display_name": "DonorDatabase.org",
+  "start_url": "https://www.donordatabase.org/index.php",
+  "requires_js": false,
+  "verdict": "WEAK",
+  "items": 1,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 4.8,
+  "samples": [
+   {
+    "title": "YEARLY SUBSCRIPTION Find the funding you need on a yearly payment plan.",
+    "url": "javascript:void(0);",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "environmental_research_education_foundat",
+  "display_name": "Environmental Research & Education Foundation",
+  "start_url": "https://erefdn.org/research-grants/",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 5.7,
+  "samples": []
+ },
+ {
+  "name": "fcdo",
+  "display_name": "FCDO",
+  "start_url": "https://www.gov.uk/international-development-funding?fund_state%5B%5D=open&location%5B%5D=india&eligible_entities%5B%5D=non-governmental-organisations&eligible_entities%5B%5D=organisations-lmic",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 3.1,
+  "samples": []
+ },
+ {
+  "name": "gadfly_project",
+  "display_name": "Gadfly Project",
+  "start_url": "http://www.thegadflyproject.org/grants.html",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 3.7,
+  "samples": []
+ },
+ {
+  "name": "gatesfoundation",
+  "display_name": "Gatesfoundation",
+  "start_url": "https://www.gatesfoundation.org/about/committed-grants",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 9.2,
+  "samples": []
+ },
+ {
+  "name": "global_agriculture_and_food_safety_progr",
+  "display_name": "Global Agriculture and Food Safety Program",
+  "start_url": "https://www.gafspfund.org/call-proposals",
+  "requires_js": false,
+  "verdict": "WEAK",
+  "items": 9,
+  "deep_pct": 11.1,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 5.6,
+  "samples": [
+   {
+    "title": "2026 Ninth Call for Proposals",
+    "url": "https://www.gafspfund.org/9th-call-proposals",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Technical Advisory Committee",
+    "url": "https://www.gafspfund.org/tac-members",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Eighth Call 2025 Producer Organizations",
+    "url": "https://www.gafspfund.org/8th-call-proposals-producer-organizations",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "globaltenders",
+  "display_name": "Globaltenders",
+  "start_url": "https://www.globaltenders.com/global-tenders-search",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 4.3,
+  "samples": []
+ },
+ {
+  "name": "gupta_family_foundation",
+  "display_name": "Gupta Family Foundation",
+  "start_url": "https://www.guptafamilyfoundation.org/grant-application-2025/",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 15.7,
+  "samples": []
+ },
+ {
+  "name": "hewlett_foundation",
+  "display_name": "Hewlett Foundation",
+  "start_url": "https://hewlett.org/grants/",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 2.1,
+  "samples": []
+ },
+ {
+  "name": "hlfppt",
+  "display_name": "HLFPPT",
+  "start_url": "https://hlfppt.org/rfp-tenders/",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 6.0,
+  "samples": []
+ },
+ {
+  "name": "icnl",
+  "display_name": "ICNL",
+  "start_url": "https://www.icnl.org/work-with-us/grants-fellowships",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 5.2,
+  "samples": []
+ },
+ {
+  "name": "indevjobs",
+  "display_name": "IndevJobs",
+  "start_url": "https://indevjobs.org/funding",
+  "requires_js": true,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 3.1,
+  "samples": []
+ },
+ {
+  "name": "innovations_for_poverty_action",
+  "display_name": "Innovations for Poverty Action",
+  "start_url": "https://poverty-action.org/open-funding-opportunities",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 20.4,
+  "samples": []
+ },
+ {
+  "name": "laudesfoundation",
+  "display_name": "Laudesfoundation",
+  "start_url": "https://www.laudesfoundation.org/how-we-work/grants-database/",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 5.4,
+  "samples": []
+ },
+ {
+  "name": "merck_family_foundation",
+  "display_name": "Merck Family Foundation",
+  "start_url": "https://www.merck-family-foundation.com/en/proposal/",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 1.7,
+  "samples": []
+ },
+ {
+  "name": "national_institute_of_health_and_care_re",
+  "display_name": "National Institute of Health and Care Research",
+  "start_url": "https://www.nihr.ac.uk/funding-opportunities",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 2.8,
+  "samples": []
+ },
+ {
+  "name": "ngobox",
+  "display_name": "NGOBOX",
+  "start_url": "https://ngobox.org/grant_announcement_listing.php",
+  "requires_js": false,
+  "verdict": "WEAK",
+  "items": 13,
+  "deep_pct": 0.0,
+  "deadline_pct": 100.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 5.3,
+  "samples": [
+   {
+    "title": "Applications Invited for Blue Action Fund Grant Call Mangroves Blue Carbon Marke",
+    "url": "https://ngobox.org/full_grant_announcement_Applications-Invited-for-Blue-Action-Fund-Grant-Call-Mangroves-Blue-Carbon-Ma",
+    "deadline_raw": "16 Oct. 2026"
+   },
+   {
+    "title": "Applications Invited for Arts Research Grant 2026",
+    "url": "https://ngobox.org/full_grant_announcement_Applications-Invited-for-Arts-Research-Grant-2026-India-Foundation-for-the-Ar",
+    "deadline_raw": "31 Aug. 2026"
+   },
+   {
+    "title": "Applications Invited for SVRI Research Grant 2027 Data to Evidence Grant",
+    "url": "https://ngobox.org/full_grant_announcement_Applications-Invited-for-SVRI-Research-Grant-2027-Data-to-Evidence-Grant-Sexu",
+    "deadline_raw": "17 Sep. 2026"
+   }
+  ]
+ },
+ {
+  "name": "nippon_foundation",
+  "display_name": "Nippon Foundation",
+  "start_url": "https://www.nippon-foundation.or.jp/en/grant",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 6.8,
+  "samples": []
+ },
+ {
+  "name": "opensociety",
+  "display_name": "Open Society Foundations",
+  "start_url": "https://www.opensocietyfoundations.org/grants",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 0.6,
+  "samples": []
+ },
+ {
+  "name": "ospreys",
+  "display_name": "Ospreys",
+  "start_url": "https://www.ospreys.com/research-grants",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 4.3,
+  "samples": []
+ },
+ {
+  "name": "packard",
+  "display_name": "Packard Foundation",
+  "start_url": "https://www.packard.org/grantees/funding-opportunties/?visc-qf-funding_meta_filter_tf_active=true",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 2.9,
+  "samples": []
+ },
+ {
+  "name": "phf",
+  "display_name": "Paul Hamlyn Foundation",
+  "start_url": "https://www.phf.org.uk/funds/",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 2.9,
+  "samples": []
+ },
+ {
+  "name": "rockefeller_foundation",
+  "display_name": "Rockefeller Foundation",
+  "start_url": "https://www.rockefellerfoundation.org/our-grants/",
+  "requires_js": false,
+  "verdict": "WEAK",
+  "items": 7,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 19.7,
+  "samples": [
+   {
+    "title": "Browse by Focus Area",
+    "url": "https://www.rockefellerfoundation.org/grants/search/?post_type=grant&grant_active_status&keyword&filter_grant_commitment",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Browse by Focus Area",
+    "url": "https://www.rockefellerfoundation.org/grants/search/?post_type=grant&grant_active_status&keyword&filter_grant_commitment",
+    "deadline_raw": ""
+   },
+   {
+    "title": "Browse by Focus Area",
+    "url": "https://www.rockefellerfoundation.org/grants/search/?post_type=grant&grant_active_status&keyword&filter_grant_commitment",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "sdg_impact_finance_initiative",
+  "display_name": "SDG Impact Finance Initiative",
+  "start_url": "https://www.sdgimpactfinance.org/",
+  "requires_js": false,
+  "verdict": "WEAK",
+  "items": 1,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 3.2,
+  "samples": [
+   {
+    "title": "From Concept to Capital",
+    "url": "https://www.sdgimpactfinance.org/impact",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "silicon_valley_community_foundation",
+  "display_name": "Silicon Valley Community Foundation",
+  "start_url": "https://www.svcf.org/search/results?q=grants",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 5.2,
+  "samples": []
+ },
+ {
+  "name": "stavros_niarchos_foundation_snf",
+  "display_name": "Stavros Niarchos Foundation (SNF)",
+  "start_url": "https://www.snf.org/en/search-results/?page=1&cat=grant&map=undefined",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 4.8,
+  "samples": []
+ },
+ {
+  "name": "tawingo_fund",
+  "display_name": "Tawingo Fund",
+  "start_url": "https://www.tawingofund.org/grantees",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 3.8,
+  "samples": []
+ },
+ {
+  "name": "the_agency_fund",
+  "display_name": "The Agency Fund",
+  "start_url": "https://www.agency.fund/past-calls",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 2.6,
+  "samples": []
+ },
+ {
+  "name": "together_women_rise",
+  "display_name": "Together Women Rise",
+  "start_url": "https://togetherwomenrise.org/featured-grant-guidelines/",
+  "requires_js": false,
+  "verdict": "WEAK",
+  "items": 1,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "",
+  "seconds": 9.0,
+  "samples": [
+   {
+    "title": "TOGETHER WOMEN RISE WILL NOT SUPPORT",
+    "url": "https://togetherwomenrise.org/religion-policy/",
+    "deadline_raw": ""
+   }
+  ]
+ },
+ {
+  "name": "ty_danjuma_foundation",
+  "display_name": "TY Danjuma Foundation",
+  "start_url": "https://tydanjumafoundation.org/grantmaking/discretionary-grants/",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 2.8,
+  "samples": []
+ },
+ {
+  "name": "veddis_foundation",
+  "display_name": "Veddis Foundation",
+  "start_url": "https://veddis.org/catalytic-grants/",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 2.5,
+  "samples": []
+ },
+ {
+  "name": "we4f",
+  "display_name": "WE4F",
+  "start_url": "https://we4f.org/opportunities",
+  "requires_js": false,
+  "verdict": "NO_FETCH",
+  "items": 0,
+  "deep_pct": 0.0,
+  "deadline_pct": 0.0,
+  "junk": 0,
+  "dup_url": 0,
+  "error": "crawl yielded no page at all \u2014 the fetch failed (DNS/TLS/proxy/blocked), see the log line above",
+  "seconds": 2.3,
+  "samples": []
+ }
+]

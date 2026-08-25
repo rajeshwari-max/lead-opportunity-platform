@@ -160,27 +160,90 @@ def repair_links() -> dict:
     return stats
 
 
-def junk_rows() -> list[tuple[int, str, str, str]]:
-    """Rows that look like scraped page furniture rather than opportunities.
+# Titles that are navigation or boilerplate, not the name of a call. Grown from
+# what actually reached the live dashboard: "Skip to main content" appeared 25
+# times under Pfizer Foundation alone, and Clean Air Fund's three "open" rows
+# were "Navigation breadcrumbs", "Navigation breadcrumbs" and "Related case
+# study" — a page with no calls on it at all.
+FURNITURE_TITLES = frozenset({
+    "skip to main content", "skip to content", "skip navigation", "read more",
+    "apply now", "click here", "learn more", "find out more", "subscribe",
+    "menu", "home", "navigation breadcrumbs", "breadcrumbs", "navigation",
+    "related case study", "related case studies", "case study", "search",
+    "contact us", "contact", "privacy policy", "cookie policy", "cookies",
+    "terms and conditions", "terms of use", "newsletter", "sign up", "log in",
+    "about us", "about", "our work", "our impact", "news", "events", "blog",
+    "publications", "resources", "careers", "donate", "back to top",
+    "view all", "see all", "next", "previous", "share", "download",
+})
 
-    Reported, never deleted automatically — removing rows is the user's call.
+_EMAIL_TITLE = re.compile(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", re.IGNORECASE)
+
+# Anchors that jump within a page rather than to an opportunity.
+_SKIP_FRAGMENTS = {"main-content", "content", "main", "top", "skip", "nav"}
+
+
+def is_furniture(title: str, url: str = "") -> bool:
+    """True when this row is page furniture rather than an opportunity.
+
+    Deliberately conservative: it matches whole titles, never substrings, so a
+    real call named "Apply now for the 2026 Water Fund" is untouched.
     """
+    t = " ".join((title or "").split()).strip().lower().strip(":-–—|")
+    if not t or len(t) < 8:
+        return True
+    if t in FURNITURE_TITLES or _EMAIL_TITLE.match(t):
+        return True
+    # "Skip to main content" scraped with the page's own skip-link href.
+    if url and "#" in url and url.rsplit("#", 1)[-1].lower() in _SKIP_FRAGMENTS:
+        return t in FURNITURE_TITLES
+    return False
+
+
+def junk_rows() -> list[tuple[int, str, str, str]]:
+    """Rows that look like scraped page furniture rather than opportunities."""
     from sqlalchemy import select
 
     from app.database.db import session_scope
     from app.database.models import Opportunity
 
-    email_like = re.compile(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", re.IGNORECASE)
-    furniture = {"skip to main content", "read more", "apply now", "click here",
-                 "learn more", "subscribe", "menu", "home"}
-
     out = []
     with session_scope() as db:
         for opp in db.execute(select(Opportunity)).scalars():
-            title = (opp.title or "").strip()
-            if email_like.match(title) or title.lower() in furniture or len(title) < 8:
-                out.append((opp.id, opp.source_website, title, opp.opportunity_url or ""))
+            if is_furniture(opp.title or "", opp.opportunity_url or ""):
+                out.append((opp.id, opp.source_website, opp.title or "",
+                            opp.opportunity_url or ""))
     return out
+
+
+def purge_junk_rows() -> int:
+    """Delete page-furniture rows. Returns how many were removed.
+
+    These were previously only *reported* by junk_rows(), and nothing called
+    even that — so "Skip to main content" and "Navigation breadcrumbs" sat in
+    the live dashboard as though they were fundable calls. They carry no
+    information a human would ever want, so unlike a closed opportunity there is
+    nothing to archive: deleting is the honest outcome, and the count is logged
+    so the removal is never silent.
+    """
+    import logging
+
+    from sqlalchemy import delete, select
+
+    from app.database.db import session_scope
+    from app.database.models import Opportunity
+
+    log = logging.getLogger("scraper")
+    with session_scope() as db:
+        ids = [
+            opp.id for opp in db.execute(select(Opportunity)).scalars()
+            if is_furniture(opp.title or "", opp.opportunity_url or "")
+        ]
+        if ids:
+            for chunk in (ids[i:i + 500] for i in range(0, len(ids), 500)):
+                db.execute(delete(Opportunity).where(Opportunity.id.in_(chunk)))
+            log.info("Removed %s page-furniture row(s) that were not opportunities", len(ids))
+    return len(ids)
 
 # ---------------------------------------------------------------- fallbacks
 # Where to send someone when we have no direct link to the listing itself.
@@ -204,7 +267,8 @@ _SEARCH_TEMPLATES: dict[str, str] = {
 }
 
 
-def search_link(title: str, website: str = "", source_website: str = "") -> str:
+def search_link(title: str, website: str = "", source_website: str = "",
+                category: str = "") -> str:
     """A URL that will find this opportunity when we have no direct one.
 
     Order of preference:
@@ -216,28 +280,60 @@ def search_link(title: str, website: str = "", source_website: str = "") -> str:
     if not q:
         return (website or "").strip()
 
-    template = _SEARCH_TEMPLATES.get((source_website or "").strip())
+    source = (source_website or "").strip()
+    # DevelopmentAid keeps grants and tenders in separate catalogues that do not
+    # search each other. The single template sent every fallback to the TENDER
+    # search, so a grant's "find it" link searched a catalogue that cannot
+    # contain it and always came back empty.
+    if source == "DevelopmentAid":
+        section = "grants" if str(category or "").lower().startswith("grant") else "tenders"
+        return f"https://www.developmentaid.org/{section}/search?keywords={q}"
+
+    template = _SEARCH_TEMPLATES.get(source)
     if template:
         return template.format(q=q) if "{q}" in template else template
 
-    domain = urlparse(website or "").netloc
-    if domain:
-        # Site-scoped web search. Not elegant, but it reliably finds a specific
-        # titled page on a domain, which is what the reader actually wants.
-        return f"https://duckduckgo.com/?q=site%3A{domain}+{q}"
-
-    return (website or "").strip()
+    # NO web-search fallback, and no homepage fallback either.
+    #
+    # This used to return https://duckduckgo.com/?q=site:<domain>+<title>. The
+    # intention was decent — better than a dead end — but the effect on the
+    # dashboard was that rows opened a search engine instead of an opportunity,
+    # which is what "these links go to some random page" meant. A search result
+    # is not a lead: the reader still has to find the call, decide whether the
+    # top hit even is the call, and often discover it never existed.
+    #
+    # The real fix is upstream: ScraperManager._ingest now refuses to store a
+    # row that has no link to the call itself (LOP_REQUIRE_USABLE_LINK), so this
+    # branch should never be reached for newly scraped data. Returning "" makes
+    # any remaining row visibly linkless instead of dressing it up, and
+    # scripts/clean_dashboard.py removes the ones already in the database.
+    return ""
 
 
 def resolve_link(opportunity_url: str, website: str, source_website: str,
-                 title: str) -> tuple[str, str]:
-    """(url, kind) where kind is "direct" or "search".
+                 title: str, category: str = "") -> tuple[str, str]:
+    """(url, kind) where kind is "direct", "listing" or "search".
 
     Every row gets something clickable. `kind` is returned so the UI can be
     honest about which it is — a search result presented as the listing itself
     would be worse than the dead end it replaces.
+
+    "listing" is the case this used to get wrong. link_kind() has always been
+    able to tell a per-call page from a section index, but resolve_link never
+    consulted it, so a URL like https://www.idrc.ca/en/funding or a funder's
+    generic "apply for a grant" page was handed to the reader labelled
+    "direct" — they clicked expecting the call and landed on a menu. On a live
+    snapshot that was 584 of 7,772 rows. Nothing is hidden: the same link is
+    still offered, it is just no longer described as the opportunity itself.
     """
     if is_usable_link(opportunity_url, website):
-        return opportunity_url, "direct"
-    return search_link(title, website, source_website), "search"
+        kind = "direct" if link_kind(opportunity_url) == "deep" else "listing"
+        return opportunity_url, kind
+    fallback = search_link(title, website, source_website, category)
+    # "none" is a real answer. Before, every row got *something* clickable, and
+    # a row with nothing to click was given a web search — which reads as a
+    # working link right up until the reader follows it. A row that reaches here
+    # now should not exist at all (see _ingest and clean_dashboard.py); if one
+    # does, the UI can say so rather than sending someone on an errand.
+    return (fallback, "search") if fallback else ("", "none")
 

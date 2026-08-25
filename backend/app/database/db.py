@@ -172,6 +172,17 @@ def _run_migrations(conn) -> None:
             conn.exec_driver_sql(
                 "ALTER TABLE opportunities ADD COLUMN approved_by VARCHAR(320) NOT NULL DEFAULT ''"
             )
+        # When a scrape last saw this listing on its source. Backfilled from
+        # date_scraped, which is the only evidence existing rows carry — setting
+        # them all to "now" instead would hand every stale Ongoing row a fresh
+        # lease on the day this ships, which is the opposite of the point.
+        if "last_seen" not in cols:
+            conn.exec_driver_sql("ALTER TABLE opportunities ADD COLUMN last_seen DATETIME")
+            conn.exec_driver_sql("UPDATE opportunities SET last_seen = date_scraped")
+            conn.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_opportunities_last_seen "
+                "ON opportunities(last_seen)"
+            )
 
     if "team_members" in _tables(conn):
         cols = columns("team_members")

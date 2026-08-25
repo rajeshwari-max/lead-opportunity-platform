@@ -32,6 +32,10 @@ _HIDDEN_FIELDS = ("__VIEWSTATE", "__VIEWSTATEGENERATOR", "__EVENTVALIDATION")
 class DevNetScraper(BaseScraper):
     name = "devnet"
     display_name = "DevNetJobsIndia"
+    # Every row on this page is a published call/tender notice, so a row
+    # does not have to contain funding vocabulary to be an opportunity.
+    # See services/opportunity_gate.py.
+    curated = True
     # This scraper already had a parse_detail() implementation, but the crawl
     # engine never called it — the hook was dead code. It runs now.
     enrich_details = True

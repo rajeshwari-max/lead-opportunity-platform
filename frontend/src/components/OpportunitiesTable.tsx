@@ -172,25 +172,56 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
         // tool exists to remove.
         const { link, link_kind } = info.row.original;
         const isSearch = link_kind === "search";
+        // "none" — we have nothing to open for this row. The backend no longer
+        // invents a web search when a row has no real URL (that is what made
+        // entries open a search engine instead of the call), and it no longer
+        // stores such rows at all. Existing ones are removed by
+        // scripts/clean_dashboard.py, so this should be transient — but while
+        // any remain, saying "no link" is the honest label. Without this branch
+        // they fall through to isDirect and are presented as a direct link to
+        // the call while actually opening the funder's homepage.
+        const isNone = link_kind === "none" || !link;
+        // "listing" is the case that made links feel wrong: the URL is real and
+        // belongs to the funder, but it is a section index ("/funding",
+        // "/apply-for-a-grant") rather than this call's own page. Labelled
+        // "Open the original listing" it read as a link to the wrong
+        // opportunity. Saying which kind it is costs nothing and is true.
+        const isListing = link_kind === "listing";
+        const isDirect = !isSearch && !isListing && !isNone;
         return (
           <div>
             <a href={link || website} target="_blank" rel="noreferrer"
-               title={isSearch
+               title={isNone
+                 ? `${source_website} published no link for this one — nothing to open`
+                 : isSearch
                  ? `No direct link published for this one — opens a search on ${source_website}`
-                 : info.getValue()}
+                 : isListing
+                   ? `${source_website} publishes no page for this call on its own — opens the funder's listing page, where you'll need to find the row`
+                   : info.getValue()}
                onClick={(e) => warnThenOpen(e, link || website)}
                className="group flex items-start gap-1 font-medium underline-offset-2 hover:text-primary hover:underline">
               <span className="line-clamp-2">{info.getValue()}</span>
               {isSearch
                 ? <Search className="mt-0.5 h-3 w-3 shrink-0 opacity-60" />
-                : <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />}
+                : <ExternalLink className={`mt-0.5 h-3 w-3 shrink-0 transition-opacity ${
+                    isListing ? "opacity-60" : "opacity-0 group-hover:opacity-100"}`} />}
             </a>
             {isSearch && (
               <span className="text-[11px] text-muted-foreground">
                 opens a search on {source_website}
               </span>
             )}
-            {!isSearch && needsLogin && (
+            {isNone && (
+              <span className="text-[11px] text-muted-foreground">
+                no link published — nothing to open
+              </span>
+            )}
+            {isListing && (
+              <span className="text-[11px] text-muted-foreground">
+                opens the funder's listing page — find the row there
+              </span>
+            )}
+            {isDirect && needsLogin && (
               <span className="text-[11px] text-muted-foreground">sign-in required</span>
             )}
           </div>
@@ -669,7 +700,11 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
                               rel="noreferrer"
                               className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
                             >
-                              {o.link_kind === "search" ? `Search ${o.source_website} for this` : "Open the original listing"} <ExternalLink className="h-3 w-3" />
+                              {o.link_kind === "search"
+                                ? `Search ${o.source_website} for this`
+                                : o.link_kind === "listing"
+                                  ? "Open the funder's listing page"
+                                  : "Open the original listing"} <ExternalLink className="h-3 w-3" />
                             </a>
                           )}
                         </div>

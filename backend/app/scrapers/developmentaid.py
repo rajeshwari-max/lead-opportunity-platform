@@ -162,6 +162,10 @@ def _page_url(base_url: str, page_nr: int) -> str:
 class DevelopmentAidScraper(BaseScraper):
     name = "developmentaid"
     display_name = "DevelopmentAid"
+    # Every row on this page is a published call/tender notice, so a row
+    # does not have to contain funding vocabulary to be an opportunity.
+    # See services/opportunity_gate.py.
+    curated = True
     website = "https://www.developmentaid.org"
     start_url = _SECTIONS[0][0]   # BaseScraper needs one; the real walk covers all sections
     requires_js = True   # Angular SPA — always rendered via Playwright

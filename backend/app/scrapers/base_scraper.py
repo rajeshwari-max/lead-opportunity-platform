@@ -109,6 +109,20 @@ class BaseScraper(ABC):
     # request per gap, so it's opt-in per source and only enabled where the
     # detail page is plain HTML and actually carries the missing fields.
     enrich_details: bool = False
+    # "The page I read contains opportunities and nothing else."
+    #
+    # Set True only for a dedicated call/tender/procurement board — UN Partner
+    # Portal's /cfei/open, ADB's tender search, UNDP's procurement notices.
+    # Those rows skip the vocabulary test in services/opportunity_gate.py,
+    # because they are opportunities by construction and their titles often say
+    # so nowhere: "Disability Inclusion Assessment" is a real UNPP call and
+    # contains not one funding word.
+    #
+    # Leave False (the default) for anything scraped by harvesting links off a
+    # general website, where a page mixes calls with news, programme pages and
+    # navigation. Claiming curated for one of those disables the only check
+    # that keeps those rows out.
+    curated: bool = False
 
     # For sources whose results arrive by XHR *after* the page loads. networkidle
     # is not enough on its own: a page with analytics beacons and a search API

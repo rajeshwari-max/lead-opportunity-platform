@@ -28,7 +28,8 @@ from bs4 import BeautifulSoup
 from app.database.models import Category
 from app.schemas.opportunity import RawOpportunity
 from app.scrapers.base_scraper import BaseScraper, PageRequest
-from app.scrapers.registry import register
+from app.scrapers.registry import SCRAPER_REGISTRY, register
+from app.services.links import is_furniture
 
 log = logging.getLogger("scraper")
 
@@ -66,13 +67,66 @@ _SECTION_TITLE = re.compile(
     r"guidance|documents?)?$|tenders?$|opportunit(y|ies)$|notices?$|"
     r"grants?$|about\b|browse\b|filter\b|sort\b|all\s+\w+$)",
     re.IGNORECASE)
+# Navigation paths. Each alternative must fill a WHOLE path segment — the
+# trailing (?=[/?#.]|$) is what makes that true, and it is not optional.
+#
+# Without it these matched as substrings, and the damage was invisible: "jobs?"
+# matched /jobdescription.aspx, so every DevNetJobsIndia per-item link
+# (/jobdescription.aspx?job_id=300671) was classified as site navigation and
+# dropped. What survived were the rows whose link was the listing page itself —
+# 86 different RFPs all pointing at rfp_assignments.aspx. The bug did not empty
+# the source, it inverted it: real links discarded, useless ones kept.
+# The same trap was waiting for /tagline, /teamwork, /mediation, /pressure and
+# /categories on any other site.
 _NAV_HREF = re.compile(
     r"/(about|contact|privacy|terms|cookie|login|signin|register|subscribe|careers?|"
     r"jobs?|press|media|team|faq|sitemap|accessibility|donate|newsletter|tag|category|"
-    r"author|feed|wp-|#)", re.IGNORECASE)
+    r"author|feed)(?=[-/?#.]|$)|/wp-|#$", re.IGNORECASE)
 
 # /page/2/, ?page=2, ?paged=2, ?p=2 — the number is group(2) so it can be bumped.
 _PAGE_IN_URL = re.compile(r"(/page/|[?&](?:page|paged|pg|p)=)(\d+)", re.IGNORECASE)
+
+# A bare date, for cells that hold nothing else. Group 1 matches the same shapes
+# _DEADLINE captures, so both feed deadline_raw identically.
+_DATE_ONLY = re.compile(
+    r"(\d{1,2}\s+\w{3,9}\s+\d{4}|\w{3,9}\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2}|"
+    r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4})"
+)
+
+
+def _same_page(url: str, page_url: str) -> bool:
+    """True when `url` is just the listing page again.
+
+    Compared on scheme+host+path only. Query and fragment are deliberately
+    ignored: ?page=2, ?sort=date and #results all still resolve to the index,
+    never to one opportunity.
+    """
+    a, b = urlparse(url), urlparse(page_url)
+    return (a.netloc.replace("www.", "") == b.netloc.replace("www.", "")
+            and a.path.rstrip("/") == b.path.rstrip("/"))
+
+
+# Field labels that get glued onto the value when a listing is a table and the
+# anchor text swallows the header cell. UNDP Procurement produced 1,274 rows
+# where the title read "Title RFP-074-IND-2026-Selection of a Service Provider…"
+# — and because the same notice also appeared without the prefix, one URL ended
+# up with three near-identical rows (1,274 rows over just 858 URLs).
+_FIELD_LABEL = re.compile(
+    r"^(title|subject|name|description|reference|ref\.?\s*no\.?|notice|"
+    r"tender|opportunity)\s*[:\-–]?\s+(?=\S)",
+    re.IGNORECASE,
+)
+
+
+def strip_field_label(title: str) -> str:
+    """Drop a leading table-header label from a scraped title.
+
+    Only strips when real text follows, so a listing genuinely called "Tender"
+    or "Notice" is left alone rather than being emptied.
+    """
+    out = _FIELD_LABEL.sub("", (title or "").strip(), count=1).strip()
+    return out or (title or "").strip()
+
 
 _DEADLINE = re.compile(
     r"(?:deadline|closing date|closes?|apply by|due|submission[s]? (?:by|due)|"
@@ -80,6 +134,71 @@ _DEADLINE = re.compile(
     r"(\d{1,2}\s+\w{3,9}\s+\d{4}|\w{3,9}\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2}|"
     r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4})",
     re.IGNORECASE)
+
+
+def _says_rolling(block_text: str) -> bool:
+    """True only when the page itself states there is no closing date.
+
+    Delegates to the same DeadlineParser.is_ongoing() the ingest pipeline uses,
+    so "rolling", "open-ended", "no fixed deadline" and "until filled" mean the
+    same thing at scrape time and at save time. Two independent notions of
+    "ongoing" is how a row ends up live in one layer and closed in the other.
+    """
+    from app.services.deadline_parser import DeadlineParser
+
+    return DeadlineParser.is_ongoing(block_text or "")
+
+
+# ---------------------------------------------------------------- positive test
+# The checks above are a BLOCKLIST: they reject navigation we have seen before.
+# That can only ever catch known junk, so every new funder site contributes its
+# own vocabulary of chrome — Clean Air Fund's "Our work" / "Insights" / "Funded
+# projects" sailed through and were stored as three opportunities on a page that
+# has no open calls at all.
+#
+# So a link must now also show POSITIVE evidence of being a funding call. Any
+# one of these is enough, which keeps it forgiving:
+#   * funding vocabulary in the title
+#   * a deadline in the surrounding block
+#   * a currency amount in the surrounding block
+#   * a URL path that names a funding record
+#
+# A page of pure navigation supplies none of them.
+_FUNDING_WORDS = re.compile(
+    r"\b(grant|grants|funding|fund|fellowship|scholarship|bursary|prize|award|"
+    r"call\s+for|request\s+for|rfp|rfq|rfa|eoi|expression\s+of\s+interest|"
+    r"tender|bid|proposal|solicitation|programme|program|scheme|"
+    r"applications?\s+(open|invited|are)|apply\s+(now|for|by)|"
+    r"invit\w+|open\s+call|competition|challenge|accelerator|incubator)\b",
+    re.IGNORECASE,
+)
+_FUNDING_HREF = re.compile(
+    r"/(grant|grants|funding|fund|opportunit|call|calls|tender|rfp|rfq|award|"
+    r"fellowship|scholarship|programme|program|apply|competition|challenge)s?[/\-_]",
+    re.IGNORECASE,
+)
+_AMOUNT_NEAR = re.compile(
+    r"(?:[$£€₹]|\bUSD\b|\bEUR\b|\bGBP\b|\bINR\b|\bAUD\b|\bCAD\b)\s?\d",
+    re.IGNORECASE,
+)
+
+
+def looks_like_funding(title: str, href: str, block_text: str) -> bool:
+    """Positive evidence that this link is a funding call, not site furniture."""
+    if _FUNDING_WORDS.search(title or ""):
+        return True
+    if _FUNDING_HREF.search(href or ""):
+        return True
+    if block_text:
+        if _DEADLINE.search(block_text):
+            return True
+        if _AMOUNT_NEAR.search(block_text):
+            return True
+        # The title may be bland ("Youth Resilience in Coastal Kenya") while the
+        # block around it is clearly a funding card.
+        if _FUNDING_WORDS.search(block_text):
+            return True
+    return False
 
 
 def clean_title(text: str) -> str:
@@ -127,6 +246,7 @@ class GenericListingScraper(BaseScraper):
 
         items: list[RawOpportunity] = []
         seen: set[str] = set()
+        rejected = 0          # links that looked like site furniture, not funding
         item_sel = self.config.get("item_selector")
         title_sel = self.config.get("title_selector")
 
@@ -138,20 +258,29 @@ class GenericListingScraper(BaseScraper):
                 href = a.get("href") or ""
                 if not href:
                     continue
-                title = clean_title(a.get_text(" ", strip=True))
+                title = strip_field_label(clean_title(a.get_text(" ", strip=True)))
                 if not _looks_like_opportunity(title, href):
                     # Very common card layout: the title lives in a heading and
                     # the link is a separate "Learn More" / image anchor, so the
                     # anchor's own text is useless. Fall back to the nearest
                     # heading in the same block. (Gates Grand Challenges lists
                     # its open calls exactly this way, and we saw none of them.)
-                    title = clean_title(self._heading_title(a))
+                    title = strip_field_label(clean_title(self._heading_title(a)))
                     if not title or _NAV_HREF.search(href):
                         continue
                 url = urljoin(page_url, href)
                 if urlparse(url).netloc.replace("www.", "") not in \
                         urlparse(self.website).netloc.replace("www.", ""):
                     continue          # off-site link (social, partner, funder logo)
+                # A link back to the page we are parsing is not a link to one
+                # opportunity — it is the "back to listings" / pagination /
+                # filter link. DevNetJobsIndia stored 86 different RFPs all
+                # pointing at rfp_assignments.aspx, the very page they were
+                # scraped from, so every one of those rows opened the index
+                # instead of the call.
+                if _same_page(url, page_url):
+                    rejected += 1
+                    continue
                 if url in seen:
                     continue
                 seen.add(url)
@@ -160,6 +289,44 @@ class GenericListingScraper(BaseScraper):
                 block = a.find_parent(["article", "li", "div", "tr"]) or a
                 text = block.get_text(" ", strip=True)[:1200]
                 m = _DEADLINE.search(text)
+
+                # Boards that put the closing date in its own cell rather than
+                # in prose ("Deadline: 12 Sep 2026") are invisible to the regex
+                # above, because there is no label next to the date. Every one
+                # of UNDP Procurement, World Bank, UN Partner Portal and ADB
+                # came out with 0% deadlines for exactly this reason — and a row
+                # with no deadline becomes a permanently-open "Ongoing" that
+                # nothing can ever expire. Point "deadline_selector" at the cell
+                # in sources.json and the date is read directly.
+                dl_sel = self.config.get("deadline_selector")
+                if dl_sel:
+                    cell = block.select_one(dl_sel)
+                    if cell is not None:
+                        raw = (cell.get("datetime") or cell.get("title")
+                               or cell.get_text(" ", strip=True) or "").strip()
+                        if raw:
+                            m = _DATE_ONLY.search(raw) or m
+
+                # Positive test, applied last because it needs the block text.
+                # Without it a page with no open calls still yields whatever
+                # links it happens to contain — which is how Clean Air Fund
+                # produced three navigation entries from a page with nothing on
+                # it. Set "require_funding_signal": false in sources.json for a
+                # source whose listings genuinely carry no funding vocabulary.
+                if self.config.get("require_funding_signal", True) and \
+                        not looks_like_funding(title, href, text):
+                    rejected += 1
+                    continue
+
+                # Navigation and boilerplate, rejected before it becomes a row.
+                # The funding-signal test above passes these, because the block
+                # text around them IS a funding page — which is exactly how
+                # "Skip to main content" (25 live rows under Pfizer Foundation
+                # alone) and Clean Air Fund's "Navigation breadcrumbs" /
+                # "Related case study" reached the dashboard as fundable calls.
+                if is_furniture(title, url):
+                    rejected += 1
+                    continue
 
                 items.append(RawOpportunity(
                     title=title[:500],
@@ -170,12 +337,32 @@ class GenericListingScraper(BaseScraper):
                     website=self.website,
                     source_website=self.display_name,
                     category_hint=Category.GRANT,     # hint only; classifier decides
-                    # These pages rarely state a deadline. Treating them as closed
-                    # would discard the entire source, so they are kept as ongoing
-                    # and the deadline is filled in by detail enrichment when found.
-                    assume_active=not bool(m),
+                    # assume_active means "the source SAYS this has no closing
+                    # date" — rolling, open-ended, until filled. It does NOT mean
+                    # "our regex failed to find one".
+                    #
+                    # This line used to read `assume_active=not bool(m)`, which
+                    # conflated the two, and it is why closed calls sat on the
+                    # dashboard as permanently "Ongoing". Every row whose
+                    # deadline the regex missed was flagged as a rolling call,
+                    # and _ingest treats a rolling call as never expiring — so
+                    # nothing downstream could ever close it. A call that shut in
+                    # March was still shown as open in August.
+                    #
+                    # Now only an explicit statement counts. A row we simply
+                    # could not read a date from is UNKNOWN: it stays live and is
+                    # retired by audit_deadlines() once its source stops listing
+                    # it (LOP_ONGOING_MAX_AGE_DAYS).
+                    assume_active=_says_rolling(text),
                 ))
         self._page_had_items = bool(items)
+        if rejected:
+            # Visible on purpose. A page that yields 0 kept and 40 rejected is a
+            # page with no open calls; 0 kept and 0 rejected means the parser
+            # found no links at all, which is a different problem. Reporting one
+            # number would conflate them.
+            log.info("[%s] kept %s, rejected %s link(s) with no funding signal",
+                     self.name, len(items), rejected)
         return items
 
     @staticmethod
@@ -271,12 +458,28 @@ def _load_config() -> list[dict]:
 
 
 def _build() -> list[type[GenericListingScraper]]:
-    """Create and register one scraper class per configured source."""
+    """Create and register one scraper class per configured source.
+
+    A name that already has a bespoke module wins and is skipped here.
+
+    This is not defensive tidiness, it is a bug fix. `register()` is a plain
+    dictionary assignment, and scrapers/__init__.py imports this module LAST —
+    so a sources.json entry sharing a name with a hand-written scraper silently
+    replaced it. The comment in __init__.py claimed the opposite was true.
+    UN Partner Portal is exactly that case: it had a config entry, so adding
+    unpp.py would have changed nothing at all and the generic HTML parser would
+    have kept running against a React app that renders no listings in its HTML.
+    """
     built = []
     for cfg in _load_config():
         name = cfg.get("name")
         url = cfg.get("url")
         if not name or not url:
+            continue
+        if name in SCRAPER_REGISTRY:
+            log.info("Source %r has a bespoke scraper (%s) — ignoring its "
+                     "sources.json entry", name,
+                     SCRAPER_REGISTRY[name].__module__)
             continue
         cls = type(
             f"Generic_{name}",
@@ -298,6 +501,11 @@ def _build() -> list[type[GenericListingScraper]]:
                 # Proof-of-render hooks for XHR-driven listings (see BaseScraper).
                 "render_wait_selector": cfg.get("render_wait_selector", ""),
                 "render_wait_text": cfg.get("render_wait_text", ""),
+                # "curated": true for a config source that is a dedicated
+                # call/tender board rather than a general website. Default
+                # False — these are exactly the link-harvested sources the
+                # opportunity gate exists to police.
+                "curated": bool(cfg.get("curated", False)),
             },
         )
         built.append(register(cls))

@@ -13,6 +13,7 @@ The profile (cookies included) lives in backend/data/devaid_profile/.
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 from app.core.config import settings
@@ -51,6 +52,138 @@ def has_profile() -> bool:
     return _CONNECTED_MARKER.exists() or has_session_file()
 
 
+def _own_chrome_dir() -> Path | None:
+    """The user's everyday Chrome profile directory, if they configured one.
+
+    Returns None when unset or missing. A configured-but-missing path is a
+    warning rather than an error: falling back to the dedicated profile still
+    scrapes, and a typo in a path should not take the whole source down.
+    """
+    raw = (settings.devaid_chrome_user_data_dir or "").strip().strip('"')
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_dir():
+        log.warning("[devaid] LOP_DEVAID_CHROME_USER_DATA_DIR points at %s, which does "
+                    "not exist — falling back to the dedicated profile", path)
+        return None
+    return path
+
+
+MIRROR_DIR = PROFILE_DIR.parent / "devaid_chrome_mirror"
+
+# The few files that carry a logged-in session. Everything else in a Chrome
+# profile is history, cache, extensions and site data — hundreds of megabytes
+# that would make this slow and would copy far more of your browsing than this
+# needs. Paths are relative to the profile directory, except "Local State",
+# which sits at the user-data root.
+_SESSION_FILES = (
+    "Network/Cookies",       # modern Chrome
+    "Cookies",               # older layout, harmless if absent
+    "Preferences",
+    "Secure Preferences",
+)
+
+
+def _mirror_own_chrome(root: Path, profile: str) -> Path:
+    """Copy just the session out of your real Chrome profile into a working dir.
+
+    Chrome 136 and later REFUSE to enable remote debugging against the default
+    user-data directory:
+
+        DevTools remote debugging requires a non-default data directory.
+        Specify this using --user-data-dir.
+
+    Playwright drives Chrome over CDP, so pointing it straight at your live
+    profile cannot work on any current Chrome — that is a deliberate security
+    change (it stopped malware attaching a debugger to a live profile and
+    reading its cookies), and no combination of flags gets around it.
+
+    What still works is a copy. Chrome objects to debugging the live profile,
+    not to the cookies themselves, and the cookie encryption key in "Local
+    State" is protected by Windows DPAPI bound to YOUR user account — so a copy
+    made by you, on your machine, decrypts normally and arrives signed in.
+
+    Refreshed on every launch so an expiring session is picked up rather than
+    going stale in the copy. Only the handful of files above are taken.
+    """
+    import shutil
+
+    MIRROR_DIR.mkdir(parents=True, exist_ok=True)
+    (MIRROR_DIR / profile).mkdir(parents=True, exist_ok=True)
+
+    copied, missing = [], []
+    # Local State holds the DPAPI-wrapped key the Cookies file is encrypted
+    # with. Without it the cookies copy over but cannot be decrypted, and the
+    # browser opens signed out — which looks exactly like an expired session.
+    src_state = root / "Local State"
+    if src_state.is_file():
+        shutil.copy2(src_state, MIRROR_DIR / "Local State")
+        copied.append("Local State")
+    else:
+        missing.append("Local State")
+
+    for rel in _SESSION_FILES:
+        src = root / profile / rel
+        if not src.is_file():
+            continue
+        dst = MIRROR_DIR / profile / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied.append(rel)
+
+    if not any(c.endswith("Cookies") for c in copied):
+        log.warning(
+            "[devaid] no cookie database found under %s — the mirrored profile "
+            "will not be signed in. Check LOP_DEVAID_CHROME_PROFILE_DIR names the "
+            "profile you actually use (chrome://version -> Profile Path).",
+            root / profile,
+        )
+    if missing:
+        log.warning("[devaid] could not copy %s from your Chrome profile; cookies "
+                    "may not decrypt", ", ".join(missing))
+    log.info("[devaid] mirrored %s from your Chrome profile", ", ".join(copied))
+    return MIRROR_DIR
+
+
+def _chrome_is_running(user_data_dir: Path) -> str:
+    """Non-empty reason string when Chrome currently holds this profile.
+
+    Chrome keeps an exclusive lock on its user-data directory. Launching a
+    second browser against it does not merely fail — it can leave the profile
+    inconsistent, and this is the user's real browser with all their other
+    sessions in it. So this refuses on any positive sign rather than trying and
+    hoping.
+
+    Windows: the lock file cannot be opened for writing while Chrome has it,
+    which is a more reliable signal than process names. POSIX: pgrep.
+    """
+    lock = user_data_dir / "lockfile"                 # Windows
+    if lock.exists():
+        try:
+            with open(lock, "a"):
+                pass
+        except OSError:
+            return "its lockfile is held"
+    singleton = user_data_dir / "SingletonLock"       # macOS / Linux
+    if singleton.exists() or singleton.is_symlink():
+        return "SingletonLock is present"
+    try:
+        import subprocess
+        if sys.platform.startswith("win"):
+            out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq chrome.exe"],
+                                 capture_output=True, text=True, timeout=10).stdout
+            if "chrome.exe" in out.lower():
+                return "chrome.exe is running"
+        else:
+            if subprocess.run(["pgrep", "-x", "chrome"],
+                              capture_output=True, timeout=10).returncode == 0:
+                return "a chrome process is running"
+    except Exception:
+        pass                       # can't tell — the lock checks above stand
+    return ""
+
+
 def open_persistent(pw, headless: bool = True):
     """Launch a browser bound to the saved DevelopmentAid profile.
 
@@ -76,6 +209,31 @@ def open_persistent(pw, headless: bool = True):
         # navigator.webdriver and marks the session as automated.
         ignore_default_args=["--enable-automation"],
     )
+
+    # Your everyday Chrome, when configured. Highest priority, because if you
+    # pointed us at it you are already signed in there and no other route is
+    # needed on this machine.
+    own = _own_chrome_dir()
+    if own:
+        blocker = _chrome_is_running(own)
+        if blocker:
+            raise RuntimeError(
+                f"Chrome is using your profile at {own}, so the session cannot be "
+                f"copied out of it ({blocker}). Close Chrome completely — including "
+                "any background instance in the system tray — and run again. Or "
+                "unset LOP_DEVAID_CHROME_USER_DATA_DIR to go back to the dedicated "
+                "profile, which needs no Chrome to be closed."
+            )
+        profile = settings.devaid_chrome_profile_dir.strip() or "Default"
+        mirror = _mirror_own_chrome(own, profile)
+        log.info("[devaid] using the session from your own Chrome profile "
+                 "%s (%s), mirrored to %s", own, profile, mirror)
+        ctx = pw.chromium.launch_persistent_context(
+            str(mirror), channel="chrome",
+            args=common["args"] + [f"--profile-directory={profile}"],
+            **{k: v for k, v in common.items() if k != "args"},
+        )
+        return _mask_headless(ctx)
 
     # An uploaded session takes priority over the local profile, but only when
     # this machine has no interactive login of its own. That ordering matters:
@@ -128,110 +286,9 @@ def open_persistent(pw, headless: bool = True):
         return _mask_headless(_launch())
 
 
-def _mask_headless(context):
-    """Present the same browser identity headless as headed.
-
-    Headless Chrome writes "HeadlessChrome/151.0.0.0" into its own user agent.
-    That single word is the difference between a session that works and a 403,
-    because Cloudflare issues cf_clearance against the identity it saw and
-    re-challenges anything that presents a different one.
-
-    The fix is deliberately minimal: take the browser's REAL user agent and
-    replace "HeadlessChrome" with "Chrome". Everything else — version, platform,
-    and the Sec-CH-UA client hints — is read back out of the browser itself and
-    passed through unchanged, so no two headers can contradict each other. That
-    is the failure mode this replaces; inventing a version string is what caused
-    it in the first place.
-
-    Applied through CDP rather than Playwright's user_agent option because only
-    CDP can set the client hints (userAgentMetadata) alongside the UA string.
-    Best-effort: any failure leaves the browser exactly as it was.
-    """
-    script = """async () => {
-        const ua = navigator.userAgent;
-        const d = navigator.userAgentData;
-        let meta = null;
-        if (d) {
-            const hi = await d.getHighEntropyValues([
-                'architecture', 'bitness', 'model', 'platformVersion',
-                'uaFullVersion', 'fullVersionList',
-            ]).catch(() => ({}));
-            meta = {
-                brands: d.brands.map(b => ({brand: b.brand, version: b.version})),
-                fullVersionList: (hi.fullVersionList || d.brands).map(
-                    b => ({brand: b.brand, version: b.version})),
-                platform: d.platform,
-                platformVersion: hi.platformVersion || '',
-                architecture: hi.architecture || 'x86',
-                bitness: hi.bitness || '64',
-                model: hi.model || '',
-                mobile: d.mobile,
-                fullVersion: hi.uaFullVersion || '',
-            };
-        }
-        return {ua, meta};
-    }"""
-
-    def _read_identity():
-        """The browser's own identity, read once from a throwaway page."""
-        borrowed = not context.pages
-        page = context.new_page() if borrowed else context.pages[0]
-        try:
-            return page.evaluate(script)
-        except Exception:
-            return None
-        finally:
-            if borrowed:
-                try:
-                    page.close()
-                except Exception:
-                    pass
-
-    try:
-        info = _read_identity()
-    except Exception:
-        info = None
-    ua = (info or {}).get("ua") or ""
-    if "Headless" not in ua:
-        return context                  # headed run — leave the identity alone
-
-    # userAgent ONLY. Setting acceptLanguage here too produced the malformed
-    # "en-US,en;q=0.9;q=0.9" — CDP appends its own q-value on top of the one the
-    # context's locale already generated, and a malformed header is a worse
-    # fingerprint than no override at all. Accept-Language comes from
-    # locale="en-US" on the context, which formats it correctly.
-    override = {"userAgent": ua.replace("HeadlessChrome", "Chrome")}
-    meta = (info or {}).get("meta")
-    if meta:
-        override["platform"] = meta.get("platform") or ""
-        override["userAgentMetadata"] = meta
-
-    # The override is computed ONCE, above, and each page handler only sends it.
-    # Reading navigator.userAgent inside the "page" event handler instead raced
-    # with page creation and silently left every page after the first
-    # unmasked — the sync API cannot re-enter the driver from an event callback.
-    def _apply(page) -> None:
-        try:
-            context.new_cdp_session(page).send(
-                "Emulation.setUserAgentOverride", override)
-        except Exception:
-            log.debug("[devaid] could not apply the user-agent override", exc_info=True)
-
-    try:
-        # navigator.webdriver is true whenever Playwright drives the browser and
-        # is checked by every commercial bot filter. Removing the flag is not
-        # evasion of the login (that stays human, see the module docstring) —
-        # it stops an ordinary signed-in session being refused at the door.
-        context.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-        )
-        for existing in context.pages:
-            _apply(existing)
-        context.on("page", _apply)
-        log.info("[devaid] headless browser presenting as %s", override["userAgent"])
-    except Exception:
-        log.debug("[devaid] headless masking unavailable", exc_info=True)
-    return context
+# The canonical implementation lives in site_auth, because every
+# JS-rendered source needs the same browser identity — not just this one.
+from app.scrapers.site_auth import mask_headless as _mask_headless  # noqa: E402
 
 
 def _clear_stale_profile_locks() -> None:

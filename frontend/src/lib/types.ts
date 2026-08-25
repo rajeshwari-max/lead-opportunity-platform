@@ -17,10 +17,17 @@ export interface Opportunity {
   deadline: string | null;
   website: string;
   opportunity_url: string;
-  /** Always-clickable destination. "direct" = the listing, "search" = a search
-   *  on the source site that will find it. Computed by the backend. */
+  /** Always-clickable destination, computed by the backend.
+   *  "direct"  = the opportunity's own page
+   *  "listing" = the funder's index/section page — the call is on it somewhere,
+   *              but the reader still has to find the row
+   *  "search"  = a search on the source site that will find it
+   *  "none"    = nothing to open; the source published no link for this row.
+   *              Such rows are no longer stored (backend
+   *              LOP_REQUIRE_USABLE_LINK) and existing ones are removed by
+   *              scripts/clean_dashboard.py. */
   link: string;
-  link_kind: "direct" | "search";
+  link_kind: "direct" | "listing" | "search" | "none";
   summary: string;
   location: string;
   eligibility: string;

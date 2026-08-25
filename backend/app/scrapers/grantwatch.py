@@ -30,6 +30,10 @@ _MAX_PAGES = 30
 class GrantWatchScraper(BaseScraper):
     name = "grantwatch"
     display_name = "GrantWatch Intl"
+    # Every row on this page is a published call/tender notice, so a row
+    # does not have to contain funding vocabulary to be an opportunity.
+    # See services/opportunity_gate.py.
+    curated = True
     website = "https://international.grantwatch.com"
     start_url = "https://international.grantwatch.com/new-grants.php"
     prefer_js = True   # pager is JS-only; plain HTTP still yields page 1 (~14 items)

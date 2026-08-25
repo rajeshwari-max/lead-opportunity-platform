@@ -42,16 +42,44 @@ def is_sentinel(value: date | None) -> bool:
 
 
 def audit_deadlines() -> dict:
-    """Fix sentinels and refresh stale Active/Expired status. Returns counts."""
+    """Fix sentinels, refresh stale Active/Expired status, retire stale Ongoing."""
+    from datetime import datetime, timezone
+
     from sqlalchemy import select
 
+    from app.core.config import settings
     from app.database.db import session_scope
-    from app.database.models import Opportunity, Status
+    from app.database.models import Opportunity, ScrapeRun, Status
 
-    stats = {"sentinels_cleared": 0, "expired": 0, "reactivated": 0}
+    stats = {"sentinels_cleared": 0, "expired": 0, "reactivated": 0, "stale_ongoing": 0}
     today = date.today()
+    # An undated row has no deadline to expire by, so the only evidence that it
+    # is over is that the source stopped listing it. That is what `last_seen`
+    # records and what this retires on.
+    #
+    # This is the fix for closed calls staying on the dashboard: every "Ongoing"
+    # row was immortal. A funder page that states no closing date produces
+    # assume_active=True in the generic scraper, and nothing downstream ever
+    # revisited it — so a call taken down in March was still shown in August.
+    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.ongoing_max_age_days)
 
     with session_scope() as db:
+        # A source only gets to retire its own undated rows if it has actually
+        # been working since the cutoff. Without this, a source that is DOWN
+        # deletes its whole catalogue from the live view: DevelopmentAid was
+        # blocked by Cloudflare from 18 Aug and returned 0 rows on every run, so
+        # an unguarded rule would have quietly retired all 3,125 of its ongoing
+        # listings and called it housekeeping. "We stopped seeing it" only means
+        # "it is gone" when we were genuinely looking.
+        healthy = {
+            src for (src,) in db.execute(
+                select(ScrapeRun.source_website)
+                .where(ScrapeRun.started_at >= cutoff, ScrapeRun.found > 0)
+                .group_by(ScrapeRun.source_website)
+            )
+        }
+        skipped_unhealthy = 0
+
         for opp in db.execute(select(Opportunity)).scalars():
             if is_sentinel(opp.deadline):
                 # NULL means "ongoing", which is what the source meant.
@@ -64,10 +92,39 @@ def audit_deadlines() -> dict:
                     opp.status = should_be
                     key = "expired" if should_be is Status.EXPIRED else "reactivated"
                     stats[key] += 1
+                continue
+
+            # Undated. last_seen can be NULL on rows written before the column
+            # existed; the migration backfills it from date_scraped, but guard
+            # anyway rather than retiring a row on a missing value.
+            if opp.status is not Status.ACTIVE:
+                continue
+            seen = getattr(opp, "last_seen", None) or opp.date_scraped
+            if seen is None:
+                continue
+            if seen.tzinfo is None:
+                seen = seen.replace(tzinfo=timezone.utc)
+            if seen >= cutoff:
+                continue
+            if opp.source_website not in healthy:
+                skipped_unhealthy += 1
+                continue
+            opp.status = Status.EXPIRED
+            stats["stale_ongoing"] += 1
+
+        if skipped_unhealthy:
+            log.warning(
+                "Deadline audit: left %s undated listing(s) live because their source "
+                "has not returned anything in %s days — fix the source rather than "
+                "letting its catalogue age out silently",
+                skipped_unhealthy, settings.ongoing_max_age_days,
+            )
 
     if any(stats.values()):
         log.info(
-            "Deadline audit: %s sentinel(s) cleared, %s expired, %s reactivated",
+            "Deadline audit: %s sentinel(s) cleared, %s expired, %s reactivated, "
+            "%s undated listing(s) retired after %s days unseen",
             stats["sentinels_cleared"], stats["expired"], stats["reactivated"],
+            stats["stale_ongoing"], settings.ongoing_max_age_days,
         )
     return stats

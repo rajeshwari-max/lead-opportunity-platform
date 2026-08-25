@@ -46,7 +46,16 @@ class FilterService:
 
         sort_col = _SORTABLE.get(f.sort_by, Opportunity.deadline)
         order = sort_col.desc() if f.sort_dir == "desc" else sort_col.asc()
-        stmt = stmt.order_by(order.nullslast())  # ongoing (no deadline) listed after dated ones
+        # `id` is the tiebreaker, and it is not optional. Every sortable column
+        # here is heavily non-unique — 9,261 live rows share a few hundred
+        # deadline values, and 6,222 have no deadline at all — so ORDER BY
+        # deadline alone leaves the order of tied rows undefined. SQLite is then
+        # free to order them differently between the query for page 2 and the
+        # query for page 3, and OFFSET slices whatever order it produced: rows
+        # get shown twice and others are never shown at all. That is invisible
+        # from any single page, which is why paging felt lossy.
+        stmt = stmt.order_by(order.nullslast(),   # ongoing (no deadline) after dated ones
+                             Opportunity.id.asc())
 
         page_size = max(1, min(f.page_size, 200))
         page = max(1, f.page)

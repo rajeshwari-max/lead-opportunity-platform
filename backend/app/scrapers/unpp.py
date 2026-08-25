@@ -1,0 +1,887 @@
+"""UN Partner Portal (unpartnerportal.org) — signed-in CFEI scraper.
+
+Why this is a module and not a sources.json entry
+-------------------------------------------------
+The evidence is in backend/data/debug/un_partner_portal_page1.html, saved by the
+last run of the generic scraper. Read it and the failure is unambiguous:
+
+  * the page IS signed in — the header carries "Nitin Editor - Swasti", the
+    notification count, Dashboard / Your Applications / Profile. So the Chrome
+    session mirror works and the login is NOT the problem;
+  * the results table rendered its headers — Project Title, Country, Sector &
+    Area of Specialization, UN Agency, Application Deadline, Estimated Start
+    Date — and then one cell reading "No data available";
+  * the pagination bar reads "0-0 of 0";
+  * and a Toastify error toast is sitting on the page saying "Unable to load
+    data".
+
+That last one is the whole story. This is a React SPA: the HTML it serves
+contains no opportunities at any time, and the table is filled by an XHR to the
+portal's own API after load. The toast means that XHR **failed**. The generic
+HTML scraper cannot see any of this — all it knows is "0 links that look like
+funding", so it reported an empty page and moved on. A source that is silently
+returning nothing while reporting success is worse than one that errors.
+
+So this module does three things the generic path cannot:
+
+  1. It talks to the API directly instead of scraping rendered HTML. The table
+     is the API's output; going to the source removes a whole layer that can
+     silently render nothing.
+  2. It never guesses the endpoint. It watches the app's own network traffic
+     and takes whichever request returns a paginated payload, and only falls
+     back to probing a short candidate list if the app's own call failed.
+  3. When something fails it says WHAT failed — the URL, the HTTP status and
+     the response body. "Unable to load data" cost a debugging session; a log
+     line reading `GET /api/projects/open/ -> 403 {"detail":"..."} ` does not.
+
+Authentication
+--------------
+Two routes, tried in this order:
+
+  1. LOP_UNPP_EMAIL / LOP_UNPP_PASSWORD from backend/.env — the scraper signs
+     itself in. This is the route that works headless and on EC2, where there
+     is no Chrome profile to borrow. It mirrors what LOP_DEVAID_EMAIL /
+     LOP_DEVAID_PASSWORD already do for DevelopmentAid.
+  2. Your everyday Chrome session, via site_auth.open_context — the existing
+     mechanism, which the debug page proves is working on this machine.
+
+If NEITHER produces a signed-in session, this scraper yields nothing and logs an
+error. It deliberately does not fall back to /landing/opportunities, the public
+teaser: half a listing scraped anonymously looks like success in the dashboard
+and is the reason a source can appear healthy for weeks while being wrong.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import threading
+from queue import Empty, Queue
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
+
+from bs4 import BeautifulSoup
+
+from app.core.config import settings
+from app.schemas.opportunity import RawOpportunity
+from app.scrapers.base_scraper import BaseScraper
+from app.scrapers.registry import register
+from app.services.geography import canonical_country
+
+log = logging.getLogger("scraper")
+
+BASE = "https://www.unpartnerportal.org"
+LOGIN_URL = f"{BASE}/login"
+
+# The signed-in list of open Calls for Expression of Interest. /landing/
+# opportunities is the public teaser and is NOT this.
+LISTING_URL = f"{BASE}/cfei/open"
+
+# The human page for one project. Chosen to match what services/links.py already
+# rewrites UNPP machine endpoints into, so a row scraped here and a row repaired
+# there end up on the same URL:
+#
+#     /api/public/projects/{id}  ->  /landing/opportunities/{id}/
+#
+# It is also the page a colleague without a UNPP account can actually open —
+# /cfei/open/{id}/overview requires a login and shows them a sign-in wall.
+DETAIL_URL_TEMPLATE = f"{BASE}/landing/opportunities/{{id}}/"
+# Where the same record lives for someone who IS signed in. Recorded in the
+# summary so the team can jump straight to the application view.
+INTERNAL_URL_TEMPLATE = f"{BASE}/cfei/open/{{id}}/overview"
+
+# Candidate list endpoints, used ONLY when the app's own request failed and
+# there is therefore nothing to observe. Ordered most- to least-likely. The
+# names come from the portal's own DOM: its filter controls are id'd
+# `table_filter_select_projects_list_open_*`, i.e. the table is "projects list,
+# open", which is what /api/projects/open/ serves.
+#
+# CONFIRMED LIVE 2026-08-25: the endpoint the portal itself calls is
+#     GET https://www.unpartnerportal.org/api/projects/open/?page=N&page_size=50
+# returning a DRF page — {"count": 61, "results": [...]} — with the fields
+# id / title / agency / country_code / specializations / deadline_date /
+# start_date. The first entry below is therefore fact, not a guess. The list is
+# kept anyway: discovery still runs first, so the day the portal moves this
+# endpoint the scraper follows it instead of failing on a hard-coded path.
+CANDIDATE_ENDPOINTS = (
+    "/api/projects/open/",
+    "/api/projects/",
+    "/api/projects/open",
+    "/api/public/projects/",
+)
+
+# A paginated DRF payload. Both spellings appear across the portal's endpoints.
+_COUNT_KEYS = ("count", "total", "total_count")
+_RESULTS_KEYS = ("results", "items", "data")
+
+
+def _first(d: dict, *names, default=""):
+    """First present, non-empty value among several possible key names.
+
+    The portal's serializers are not consistent between endpoints (deadline_date
+    vs application_deadline_date, agency vs agency_name), and a scraper that
+    hard-codes one spelling breaks silently on the day the other one ships —
+    producing rows with an empty deadline, which the pipeline then stores as
+    permanently open. Trying the known spellings costs nothing.
+    """
+    for n in names:
+        v = d.get(n)
+        if v not in (None, "", [], {}):
+            return v
+    return default
+
+
+def _as_name(value) -> str:
+    """Flatten the several shapes the API uses for a named thing.
+
+    Seen: "UNICEF" / {"name": "UNICEF"} / [{"name": ...}, ...].
+    """
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        return str(_first(value, "name", "title", "display_name", "label")).strip()
+    if isinstance(value, (list, tuple)):
+        parts = [_as_name(v) for v in value]
+        return ", ".join(p for p in parts if p)
+    return str(value or "").strip()
+
+
+# ISO 3166-1 alpha-2 -> the country name services/geography.py recognises.
+#
+# The portal returns country CODES ("SD", "RW", "IN"), and geography.py is a
+# deliberate whitelist of country NAMES: `canonical_country("SD")` returns "",
+# so every row lost its country AND its region on the way into the database.
+# The first live run scraped 61 rows carrying 15 different countries and stored
+# none of them.
+#
+# The fix belongs here rather than in geography.py. Adding two-letter aliases to
+# that module's global table would make every scraper treat a bare "IT", "IN",
+# "IS", "AT", "BE", "NO", "SO", "ME" or "OR" found anywhere on any page as a
+# country — and stopping exactly that kind of junk is why that whitelist exists.
+# Here the field is known to be an ISO code, so the mapping is safe.
+#
+# Every value below is verified against canonical_country() at import time.
+_ISO_ALPHA2: dict[str, str] = {
+    "AF": "Afghanistan", "AL": "Albania", "DZ": "Algeria", "AS": "American Samoa",
+    "AD": "Andorra", "AO": "Angola", "AI": "Anguilla", "AG": "Antigua and Barbuda",
+    "AR": "Argentina", "AM": "Armenia", "AW": "Aruba", "AU": "Australia",
+    "AT": "Austria", "AZ": "Azerbaijan", "BS": "Bahamas", "BH": "Bahrain",
+    "BD": "Bangladesh", "BB": "Barbados", "BY": "Belarus", "BE": "Belgium",
+    "BZ": "Belize", "BJ": "Benin", "BM": "Bermuda", "BT": "Bhutan",
+    "BO": "Bolivia", "BQ": "Caribbean Netherlands", "BA": "Bosnia and Herzegovina",
+    "BW": "Botswana", "BR": "Brazil", "VG": "British Virgin Islands",
+    "BN": "Brunei", "BG": "Bulgaria", "BF": "Burkina Faso", "BI": "Burundi",
+    "KH": "Cambodia", "CM": "Cameroon", "CA": "Canada", "CV": "Cape Verde",
+    "KY": "Cayman Islands", "CF": "Central African Republic", "TD": "Chad",
+    "CL": "Chile", "CN": "China", "CO": "Colombia", "KM": "Comoros",
+    "CG": "Congo", "CD": "DR Congo", "CK": "Cook Islands", "CR": "Costa Rica",
+    "HR": "Croatia", "CU": "Cuba", "CW": "Curaçao", "CY": "Cyprus",
+    "CZ": "Czech Republic", "CI": "Côte d’Ivoire", "DK": "Denmark",
+    "DJ": "Djibouti", "DM": "Dominica", "DO": "Dominican Republic",
+    "EC": "Ecuador", "EG": "Egypt", "SV": "El Salvador", "GQ": "Equatorial Guinea",
+    "ER": "Eritrea", "EE": "Estonia", "SZ": "Eswatini", "ET": "Ethiopia",
+    "FO": "Faroe Islands", "FJ": "Fiji", "FI": "Finland", "FR": "France",
+    "GF": "French Guiana", "PF": "French Polynesia", "GA": "Gabon",
+    "GM": "Gambia", "GE": "Georgia", "DE": "Germany", "GH": "Ghana",
+    "GI": "Gibraltar", "GR": "Greece", "GL": "Greenland", "GD": "Grenada",
+    "GP": "Guadeloupe", "GU": "Guam", "GT": "Guatemala", "GG": "Guernsey",
+    "GN": "Guinea", "GW": "Guinea-Bissau", "GY": "Guyana", "HT": "Haiti",
+    "HN": "Honduras", "HK": "Hong Kong", "HU": "Hungary", "IS": "Iceland",
+    "IN": "India", "ID": "Indonesia", "IR": "Iran", "IQ": "Iraq",
+    "IE": "Ireland", "IM": "Isle of Man", "IL": "Israel", "IT": "Italy",
+    "JM": "Jamaica", "JP": "Japan", "JE": "Jersey", "JO": "Jordan",
+    "KZ": "Kazakhstan", "KE": "Kenya", "KI": "Kiribati", "XK": "Kosovo",
+    "KW": "Kuwait", "KG": "Kyrgyzstan", "LA": "Laos", "LV": "Latvia",
+    "LB": "Lebanon", "LS": "Lesotho", "LR": "Liberia", "LY": "Libya",
+    "LI": "Liechtenstein", "LT": "Lithuania", "LU": "Luxembourg", "MO": "Macau",
+    "MG": "Madagascar", "MW": "Malawi", "MY": "Malaysia", "MV": "Maldives",
+    "ML": "Mali", "MT": "Malta", "MH": "Marshall Islands", "MQ": "Martinique",
+    "MR": "Mauritania", "MU": "Mauritius", "YT": "Mayotte", "MX": "Mexico",
+    "FM": "Micronesia", "MD": "Moldova", "MC": "Monaco", "MN": "Mongolia",
+    "ME": "Montenegro", "MS": "Montserrat", "MA": "Morocco", "MZ": "Mozambique",
+    "MM": "Myanmar", "NA": "Namibia", "NR": "Nauru", "NP": "Nepal",
+    "NL": "Netherlands", "NC": "New Caledonia", "NZ": "New Zealand",
+    "NI": "Nicaragua", "NE": "Niger", "NG": "Nigeria", "NU": "Niue",
+    "NF": "Norfolk Island", "KP": "North Korea", "MK": "North Macedonia",
+    "MP": "Northern Mariana Islands", "NO": "Norway", "OM": "Oman",
+    "PK": "Pakistan", "PW": "Palau", "PS": "Palestine", "PA": "Panama",
+    "PG": "Papua New Guinea", "PY": "Paraguay", "PE": "Peru",
+    "PH": "Philippines", "PN": "Pitcairn Islands", "PL": "Poland",
+    "PT": "Portugal", "PR": "Puerto Rico", "QA": "Qatar", "RO": "Romania",
+    "RU": "Russian Federation", "RW": "Rwanda", "RE": "Réunion",
+    "BL": "Saint Barthélemy", "SH": "Saint Helena", "KN": "Saint Kitts and Nevis",
+    "LC": "Saint Lucia", "MF": "Saint Martin",
+    "VC": "Saint Vincent and the Grenadines", "WS": "Samoa", "SM": "San Marino",
+    "ST": "Sao Tome and Principe", "SA": "Saudi Arabia", "SN": "Senegal",
+    "RS": "Serbia", "SC": "Seychelles", "SL": "Sierra Leone", "SG": "Singapore",
+    "SX": "Sint Maarten", "SK": "Slovakia", "SI": "Slovenia",
+    "SB": "Solomon Islands", "SO": "Somalia", "ZA": "South Africa",
+    "KR": "South Korea", "SS": "South Sudan", "ES": "Spain", "LK": "Sri Lanka",
+    "SD": "Sudan", "SR": "Suriname", "SE": "Sweden", "CH": "Switzerland",
+    "SY": "Syria", "TW": "Taiwan", "TJ": "Tajikistan", "TZ": "Tanzania",
+    "TH": "Thailand", "TL": "Timor-Leste", "TG": "Togo", "TK": "Tokelau",
+    "TO": "Tonga", "TT": "Trinidad and Tobago", "TN": "Tunisia", "TR": "Turkey",
+    "TM": "Turkmenistan", "TC": "Turks and Caicos Islands", "TV": "Tuvalu",
+    "VI": "U.S. Virgin Islands", "UG": "Uganda", "UA": "Ukraine",
+    "AE": "United Arab Emirates", "GB": "United Kingdom", "US": "United States",
+    "UY": "Uruguay", "UZ": "Uzbekistan", "VU": "Vanuatu", "VA": "Vatican City",
+    "VE": "Venezuela", "VN": "Vietnam", "WF": "Wallis and Futuna",
+    "EH": "Western Sahara", "YE": "Yemen", "ZM": "Zambia", "ZW": "Zimbabwe",
+    "AX": "Åland Islands",
+}
+
+
+def _check_iso_table() -> None:
+    """Warn if a name above stopped matching geography.py's spelling.
+
+    Cheap (238 dict lookups at import) and self-maintaining: the day that module
+    renames "Czech Republic" or "DR Congo", this says so instead of silently
+    dropping every row from that country again.
+    """
+    unknown = sorted(code for code, nm in _ISO_ALPHA2.items()
+                     if canonical_country(nm) != nm)
+    if unknown:
+        log.warning("[un_partner_portal] %s ISO name(s) no longer match "
+                    "services/geography.py and will be stored unnormalised: %s",
+                    len(unknown), ", ".join(unknown[:20]))
+
+
+_check_iso_table()
+
+
+def _country_name(value: str) -> str:
+    """Country codes and names in, names geography.py accepts out.
+
+    Anything that resolves to nothing is passed through unchanged rather than
+    dropped: a code this table has not met is still better in the field than an
+    empty string, and it shows up in the dashboard as something to look at.
+    """
+    out: list[str] = []
+    for token in re.split(r"[,;/|]", value or ""):
+        t = token.strip()
+        if not t:
+            continue
+        name = _ISO_ALPHA2.get(t.upper()) if len(t) == 2 else ""
+        name = name or canonical_country(t) or t
+        if name not in out:
+            out.append(name)
+    return ", ".join(out)
+
+
+def _agency_name(value: str) -> str:
+    """"UN_SECRETARIAT" -> "UN Secretariat"; "UNICEF" left exactly as it is.
+
+    The API returns an enum key for multi-word agencies. Only values containing
+    an underscore are touched, so a genuine acronym is never lower-cased into
+    "Unicef".
+    """
+    v = (value or "").strip()
+    if "_" not in v:
+        return v
+    return " ".join(w if (w.isupper() and len(w) <= 3) else w.capitalize()
+                    for w in v.split("_") if w)
+
+
+def _payload_rows(payload) -> list[dict] | None:
+    """The list of records inside a paginated API response, or None.
+
+    Returns None — not [] — when the payload is not a listing at all, so an
+    endpoint that answers 200 with a user profile is not mistaken for a listing
+    that happens to be empty.
+    """
+    if isinstance(payload, list):
+        return payload if all(isinstance(r, dict) for r in payload) else None
+    if not isinstance(payload, dict):
+        return None
+    for key in _RESULTS_KEYS:
+        rows = payload.get(key)
+        if isinstance(rows, list) and all(isinstance(r, dict) for r in rows):
+            return rows
+    return None
+
+
+def _payload_count(payload) -> int | None:
+    if isinstance(payload, dict):
+        for key in _COUNT_KEYS:
+            if isinstance(payload.get(key), int):
+                return payload[key]
+    return None
+
+
+def _with_page(url: str, page: int, page_size: int) -> str:
+    """Same URL with page/page_size replaced, every other filter preserved.
+
+    Rebuilding the query rather than appending is the point: the app's own
+    request carries the user's filters (country, agency, specialization), and
+    appending a second `page=` leaves the server free to honour either one.
+    """
+    parts = urlparse(url)
+    q = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+         if k.lower() not in ("page", "page_size", "limit", "offset")]
+    q.append(("page", str(page)))
+    q.append(("page_size", str(page_size)))
+    return urlunparse(parts._replace(query=urlencode(q)))
+
+
+# Read inside the browser so the request carries the session exactly as the app
+# would send it — cookies, and the Authorization header when the SPA uses one.
+# Doing this with httpx outside the browser means reproducing that by hand, and
+# getting it subtly wrong is how a scraper ends up reading the signed-out view.
+_FETCH_JS = """
+async ([url, headers]) => {
+    let status = 0, text = '';
+    try {
+        const r = await fetch(url, {credentials: 'include', headers: headers || {}});
+        status = r.status;
+        text = await r.text();
+    } catch (e) {
+        return {status: -1, error: String(e), json: null, body: ''};
+    }
+    let json = null;
+    try { json = JSON.parse(text); } catch (e) { /* not JSON */ }
+    return {status, json, body: json === null ? text.slice(0, 1500) : '', error: ''};
+}
+"""
+
+
+@register
+class UNPartnerPortalScraper(BaseScraper):
+    name = "un_partner_portal"
+    display_name = "UN Partner Portal"
+    # Every row on this page is a published call/tender notice, so a row
+    # does not have to contain funding vocabulary to be an opportunity.
+    # See services/opportunity_gate.py.
+    curated = True
+    website = BASE
+    start_url = f"{LISTING_URL}?page=1&page_size=50"
+    requires_js = True          # there is no server-rendered listing to read
+    enrich_details = False      # the list payload already carries every field
+
+    # The portal's own rows-per-page control offers 10 / 25 / 50 / 100.
+    page_size = 50
+    max_pages = 200             # 10,000 records; a safety net, not a target
+
+    # Walk to the end of the list rather than stopping after N pages that saved
+    # nothing new. The whole open-CFEI list was 61 records over 2 pages on
+    # 2026-08-25, so "the end" costs two requests — while the default streak of
+    # 3 would, once the list grows past three pages of already-stored calls,
+    # abandon the source before reaching pages holding calls never seen before.
+    # Cheap insurance against a failure that only appears months later.
+    stale_page_streak_override = 0
+
+    # ------------------------------------------------------------------ parse
+    def parse_listing(self, html: str, page_url: str) -> list[RawOpportunity]:
+        """DOM fallback: read the rendered MUI table.
+
+        Only used if the API path yields nothing at all. It is second choice on
+        purpose — the table shows one page, carries no project ids (the row
+        links are client-side routes), and its CSS classes are emotion-generated
+        hashes that change on every frontend deploy. The column HEADERS are the
+        stable part, so the columns are located by their header text rather than
+        by position or class.
+        """
+        soup = BeautifulSoup(html, "lxml")
+        table = None
+        for candidate in soup.select("table"):
+            headers = [th.get_text(" ", strip=True).lower()
+                       for th in candidate.select("thead th")]
+            if any("project title" in h for h in headers):
+                table = candidate
+                break
+        if table is None:
+            return []
+
+        headers = [th.get_text(" ", strip=True).lower()
+                   for th in table.select("thead th")]
+
+        def col(*wanted) -> int | None:
+            for i, h in enumerate(headers):
+                if any(w in h for w in wanted):
+                    return i
+            return None
+
+        i_title = col("project title", "title")
+        i_country = col("country")
+        i_sector = col("sector", "specialization")
+        i_agency = col("agency")
+        i_deadline = col("deadline")
+        i_start = col("start date")
+
+        items: list[RawOpportunity] = []
+        for tr in table.select("tbody tr"):
+            cells = tr.find_all("td")
+            if len(cells) < 2:
+                continue      # the "No data available" row spans the table
+            def cell(idx):
+                return cells[idx].get_text(" ", strip=True) if (
+                    idx is not None and idx < len(cells)) else ""
+
+            title = cell(i_title)
+            if len(title) < 8:
+                continue
+            href = ""
+            a = cells[i_title].find("a", href=True) if i_title is not None else None
+            if a:
+                href = urljoin(page_url, a["href"])
+            pid = self._id_from_url(href)
+            items.append(self._build(
+                pid=pid,
+                title=title,
+                country=_country_name(cell(i_country)),
+                sector=cell(i_sector),
+                agency=_agency_name(cell(i_agency)),
+                deadline=cell(i_deadline),
+                start=cell(i_start),
+                url=DETAIL_URL_TEMPLATE.format(id=pid) if pid else href,
+            ))
+        log.info("[%s] DOM fallback parsed %s row(s)", self.name, len(items))
+        return items
+
+    @staticmethod
+    def _id_from_url(url: str) -> str:
+        m = re.search(r"/(?:cfei/\w+|landing/opportunities|projects)/(\d+)", url or "")
+        return m.group(1) if m else ""
+
+    def _build(self, *, pid, title, country, sector, agency, deadline, start,
+               url, summary_extra="") -> RawOpportunity:
+        bits = [
+            f"UN Agency: {agency}" if agency else "",
+            f"Sector & area of specialization: {sector}" if sector else "",
+            f"Estimated start date: {start}" if start else "",
+            f"Signed-in view: {INTERNAL_URL_TEMPLATE.format(id=pid)}" if pid else "",
+            summary_extra,
+        ]
+        return RawOpportunity(
+            title=(title or "")[:500],
+            # The UN agency running the call is the funder — "UN Partner Portal"
+            # is only where it was found. Storing the portal as the organisation
+            # is what makes a dashboard full of rows that all look like the same
+            # funder.
+            organization=(agency or "UN Partner Portal")[:256],
+            country=(country or "")[:128],
+            location=(country or "")[:512],
+            vertical=(sector or "")[:256],
+            summary=" | ".join(b for b in bits if b)[:2000],
+            deadline_raw=(deadline or "")[:64],
+            opportunity_url=url or "",
+            website=self.website,
+            source_website=self.display_name,
+            # Every row here is an OPEN call — /cfei/open is already filtered
+            # to those — but a call with no published deadline must not be
+            # stored as permanently live.
+            assume_active=not bool(deadline),
+            # The API returns ISO dates (2026-09-12), which are unambiguous.
+            dayfirst=False,
+        )
+
+    def _rows_to_items(self, rows: list[dict]) -> list[RawOpportunity]:
+        """Map API records onto RawOpportunity, tolerating key-name drift."""
+        items: list[RawOpportunity] = []
+        for r in rows:
+            pid = str(_first(r, "id", "pk", "project_id", default="")).strip()
+            title = _as_name(_first(r, "title", "name", "project_title"))
+            if not title:
+                continue
+            country = _country_name(_as_name(_first(
+                r, "country_name", "country", "country_code", "countries",
+                "locations", "country_codes")))
+            sector = _as_name(_first(
+                r, "specializations", "specialization", "sectors", "sector",
+                "areas_of_specialization"))
+            agency = _agency_name(_as_name(
+                _first(r, "agency", "agency_name", "un_agency")))
+            deadline = str(_first(
+                r, "deadline_date", "application_deadline_date", "deadline",
+                "application_deadline", default=""))[:64]
+            start = str(_first(
+                r, "start_date", "estimated_start_date", "expected_start_date",
+                default=""))[:64]
+            url = DETAIL_URL_TEMPLATE.format(id=pid) if pid else ""
+            items.append(self._build(
+                pid=pid, title=title, country=country, sector=sector,
+                agency=agency, deadline=deadline, start=start, url=url,
+            ))
+        return items
+
+    def next_page(self, html, page_url, page_number):
+        """Unused — pagination happens against the API inside _walk()."""
+        return None
+
+    # ------------------------------------------------------------------ crawl
+    async def crawl(self, stop_event, pause_event, progress):
+        """Yield one batch per API page. The browser work runs in a thread.
+
+        Same shape as adb.py: Playwright's sync API cannot be driven from the
+        event loop, and on Windows uvicorn's selector loop cannot spawn the
+        browser subprocess at all, so the walk lives in its own thread and
+        hands batches back through a queue.
+        """
+        queue: Queue = Queue()
+        done = threading.Event()
+
+        def worker() -> None:
+            try:
+                self._walk(queue, stop_event, done)
+            except Exception:
+                log.exception("[%s] browser walk failed", self.name)
+            finally:
+                done.set()
+                queue.put(None)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        page_number = 0
+        while True:
+            if stop_event.is_set():
+                done.set()
+                break
+            await pause_event.wait()
+            try:
+                payload = await asyncio.to_thread(queue.get, True, 1.0)
+            except Empty:
+                if done.is_set():
+                    break
+                continue
+            if payload is None:
+                break
+            page_number += 1
+            await progress("page_start", {"source": self.name, "page": page_number,
+                                          "url": payload.get("url", LISTING_URL)})
+            if payload["kind"] == "api":
+                items = self._rows_to_items(payload["rows"])
+            else:
+                items = self.parse_listing(payload["html"], LISTING_URL)
+            if items:
+                yield items
+            await progress("page_done", {"source": self.name, "page": page_number,
+                                         "found": len(items)})
+        await progress("pages_end", {"source": self.name, "page": page_number})
+
+    # ------------------------------------------------------------- browser
+    def _walk(self, queue: Queue, stop_event, done) -> None:
+        from playwright.sync_api import sync_playwright
+
+        from app.scrapers import site_auth
+
+        headless = bool(getattr(settings, "unpp_headless", True))
+        seen: list[dict] = []          # every /api/ response the app made
+
+        with sync_playwright() as pw:
+            context = site_auth.open_context(pw, self.name, headless=headless)
+            try:
+                page = context.pages[0] if context.pages else context.new_page()
+
+                def on_response(resp) -> None:
+                    """Record the app's own API traffic — successes and failures.
+
+                    Failures matter more than successes here. The last run's
+                    saved page shows an "Unable to load data" toast and nothing
+                    else; with this listener that becomes a log line naming the
+                    URL and the status, which is the difference between a fix
+                    and another guess.
+                    """
+                    try:
+                        url = resp.url
+                        if "/api/" not in url:
+                            return
+                        entry = {"url": url, "status": resp.status,
+                                 "headers": dict(resp.request.headers)}
+                        seen.append(entry)
+                        if resp.status >= 400:
+                            body = ""
+                            try:
+                                body = resp.text()[:500]
+                            except Exception:
+                                pass
+                            log.error("[%s] the portal's own request failed: "
+                                      "%s %s -> %s %s", self.name,
+                                      resp.request.method, url, resp.status, body)
+                    except Exception:
+                        pass
+
+                page.on("response", on_response)
+
+                if not self._ensure_signed_in(page):
+                    log.error(
+                        "[%s] not signed in, so /cfei/open has nothing to show. "
+                        "Either set LOP_UNPP_EMAIL / LOP_UNPP_PASSWORD in "
+                        "backend/.env, or sign in to %s in the Chrome profile "
+                        "named by LOP_CHROME_USER_DATA_DIR / "
+                        "LOP_CHROME_PROFILE_DIR and close Chrome before the run. "
+                        "Refusing to scrape the public teaser instead — those "
+                        "rows are not the same listings.",
+                        self.name, LOGIN_URL,
+                    )
+                    self._dump(page, "unpp_signed_out")
+                    return
+
+                # Load the list once and let the app make its own API call. The
+                # request it produces carries the account's filters and whatever
+                # auth header the SPA uses, which is why it is worth observing
+                # rather than reconstructing.
+                start = _with_page(LISTING_URL, 1, self.page_size)
+                page.goto(start, timeout=90_000, wait_until="domcontentloaded")
+                try:
+                    page.wait_for_load_state("networkidle", timeout=20_000)
+                except Exception:
+                    pass
+                page.wait_for_timeout(3_000)   # the table XHR trails networkidle
+
+                endpoint, headers = self._discover_endpoint(page, seen)
+                if not endpoint:
+                    log.error(
+                        "[%s] could not identify the listing API. The portal's "
+                        "own requests were: %s", self.name,
+                        ", ".join(f"{e['status']} {e['url']}" for e in seen[-15:])
+                        or "(none seen at all)")
+                    # Last resort: whatever the table managed to render.
+                    html = page.content()
+                    self._dump(page, "unpp_no_endpoint")
+                    if self.parse_listing(html, LISTING_URL):
+                        queue.put({"kind": "html", "html": html, "url": start})
+                    return
+
+                log.info("[%s] listing API: %s", self.name, endpoint)
+                self._paginate(page, endpoint, headers, queue, stop_event, done)
+            finally:
+                try:
+                    context.close()
+                except Exception:
+                    pass
+
+    def _ensure_signed_in(self, page) -> bool:
+        """True once the browser holds a signed-in session.
+
+        Checked, never assumed. The whole failure this module replaces began
+        with a scraper that believed it was signed in.
+        """
+        page.goto(LISTING_URL, timeout=90_000, wait_until="domcontentloaded")
+        try:
+            page.wait_for_load_state("networkidle", timeout=20_000)
+        except Exception:
+            pass
+        if self._signed_in(page):
+            log.info("[%s] already signed in via the saved browser session",
+                     self.name)
+            return True
+
+        email = (getattr(settings, "unpp_email", "") or "").strip()
+        password = getattr(settings, "unpp_password", "") or ""
+        if not (email and password):
+            return False
+
+        log.info("[%s] signing in as %s", self.name, email)
+        try:
+            page.goto(LOGIN_URL, timeout=90_000, wait_until="domcontentloaded")
+            page.wait_for_timeout(2_000)
+            filled = self._fill_login(page, email, password)
+            if not filled:
+                log.error("[%s] the login form did not look the way this code "
+                          "expects — no email/password field found on %s. If "
+                          "the portal has moved to SSO, the credential route "
+                          "cannot work and the Chrome session is the only way "
+                          "in.", self.name, LOGIN_URL)
+                self._dump(page, "unpp_login_form")
+                return False
+            try:
+                page.wait_for_url(lambda u: "/login" not in u, timeout=45_000)
+            except Exception:
+                pass
+            page.wait_for_timeout(3_000)
+        except Exception as exc:                                # noqa: BLE001
+            log.error("[%s] sign-in attempt raised %s: %s",
+                      self.name, type(exc).__name__, exc)
+            return False
+
+        page.goto(LISTING_URL, timeout=90_000, wait_until="domcontentloaded")
+        try:
+            page.wait_for_load_state("networkidle", timeout=20_000)
+        except Exception:
+            pass
+        if self._signed_in(page):
+            log.info("[%s] signed in with the credentials from backend/.env",
+                     self.name)
+            return True
+        log.error("[%s] the credentials were submitted but the portal still "
+                  "shows a signed-out page. A wrong password, an expired "
+                  "account, or a CAPTCHA on the form all look like this — the "
+                  "saved page will say which.", self.name)
+        self._dump(page, "unpp_login_failed")
+        return False
+
+    @staticmethod
+    def _fill_login(page, email: str, password: str) -> bool:
+        """Fill and submit the sign-in form. False if it isn't there."""
+        email_sel = ("input[name='email']", "input[type='email']",
+                     "input[id*='email' i]", "input[name='username']")
+        pass_sel = ("input[name='password']", "input[type='password']",
+                    "input[id*='password' i]")
+        e = p = None
+        for sel in email_sel:
+            e = page.query_selector(sel)
+            if e:
+                break
+        for sel in pass_sel:
+            p = page.query_selector(sel)
+            if p:
+                break
+        if not (e and p):
+            return False
+        e.fill(email)
+        p.fill(password)
+        for sel in ("button[type='submit']", "input[type='submit']",
+                    "button:has-text('Log in')", "button:has-text('Login')",
+                    "button:has-text('Sign in')"):
+            btn = page.query_selector(sel)
+            if btn:
+                btn.click()
+                return True
+        p.press("Enter")
+        return True
+
+    @staticmethod
+    def _signed_in(page) -> bool:
+        """Evidence of a session, taken from the page the portal actually shows.
+
+        A signed-out visitor is bounced to /login or /landing; a signed-in one
+        keeps the /cfei/open route and gets the account chrome in the header.
+        Both are checked, because either alone has a false positive: the URL can
+        linger during a client-side redirect, and the words can appear in a
+        marketing footer.
+        """
+        try:
+            url = page.url or ""
+            if "/login" in url or "/landing" in url:
+                return False
+            body = (page.inner_text("body") or "").lower()
+        except Exception:
+            return False
+        if "log in" in body and "dashboard" not in body:
+            return False
+        signals = ("dashboard", "your applications", "notifications",
+                   "partnership opportunities", "log out", "logout")
+        return sum(1 for s in signals if s in body) >= 2
+
+    def _discover_endpoint(self, page, seen: list[dict]) -> tuple[str, dict]:
+        """The listing API URL + the headers to repeat it with.
+
+        Preference order, and the reason for it:
+          1. a 2xx response the app itself made that looks like a listing — the
+             ground truth, filters and all;
+          2. a FAILED app request that looks like a listing endpoint — the URL
+             is still correct even though that particular call errored, and
+             repeating it from here surfaces the real status and body;
+          3. probing CANDIDATE_ENDPOINTS, which is the only guessing this module
+             does, and it is verified before use rather than assumed.
+        """
+        for entry in reversed(seen):
+            if entry["status"] >= 400 or "/api/" not in entry["url"]:
+                continue
+            if not re.search(r"/projects?\b|/cfei\b", entry["url"], re.I):
+                continue
+            probe = self._fetch(page, _with_page(entry["url"], 1, self.page_size),
+                                self._auth_headers(entry["headers"]))
+            if probe["status"] == 200 and _payload_rows(probe["json"]) is not None:
+                return entry["url"], self._auth_headers(entry["headers"])
+
+        headers: dict = {}
+        for entry in seen:
+            headers = self._auth_headers(entry["headers"]) or headers
+
+        for entry in reversed(seen):
+            if entry["status"] < 400 or not re.search(
+                    r"/projects?\b|/cfei\b", entry["url"], re.I):
+                continue
+            probe = self._fetch(page, _with_page(entry["url"], 1, self.page_size),
+                                headers)
+            log.warning("[%s] retrying the app's failed request %s -> %s %s",
+                        self.name, entry["url"], probe["status"],
+                        probe["body"][:300])
+            if probe["status"] == 200 and _payload_rows(probe["json"]) is not None:
+                return entry["url"], headers
+
+        for path in CANDIDATE_ENDPOINTS:
+            url = _with_page(urljoin(BASE, path), 1, self.page_size)
+            probe = self._fetch(page, url, headers)
+            rows = _payload_rows(probe["json"])
+            log.info("[%s] probe %s -> %s%s", self.name, path, probe["status"],
+                     f" ({len(rows)} row(s))" if rows is not None
+                     else f" {probe['body'][:200]}")
+            if probe["status"] == 200 and rows is not None:
+                return urljoin(BASE, path), headers
+        return "", headers
+
+    @staticmethod
+    def _auth_headers(request_headers: dict) -> dict:
+        """Only the headers that carry identity, never the whole set.
+
+        Replaying every recorded header would also replay content-length,
+        cookie and sec-fetch-* values belonging to a different request, which
+        browsers reject or silently override. Authorization is the one the SPA
+        adds and fetch() would not.
+        """
+        out = {}
+        for key in ("authorization", "x-csrftoken", "x-requested-with"):
+            for k, v in (request_headers or {}).items():
+                if k.lower() == key and v:
+                    out[k] = v
+        return out
+
+    @staticmethod
+    def _fetch(page, url: str, headers: dict) -> dict:
+        try:
+            return page.evaluate(_FETCH_JS, [url, headers or {}])
+        except Exception as exc:                                # noqa: BLE001
+            return {"status": -1, "json": None, "body": f"{type(exc).__name__}: {exc}",
+                    "error": str(exc)}
+
+    def _paginate(self, page, endpoint: str, headers: dict, queue: Queue,
+                  stop_event, done) -> None:
+        """Walk the API page by page, pushing each batch to the crawl loop."""
+        total: int | None = None
+        pushed = 0
+        for n in range(1, self.max_pages + 1):
+            if stop_event.is_set() or done.is_set():
+                return
+            url = _with_page(endpoint, n, self.page_size)
+            resp = self._fetch(page, url, headers)
+            if resp["status"] != 200:
+                log.error("[%s] page %s: %s -> %s %s", self.name, n, url,
+                          resp["status"], resp["body"][:300])
+                return
+            rows = _payload_rows(resp["json"])
+            if rows is None:
+                log.error("[%s] page %s returned 200 but no recognisable list "
+                          "of records — the response shape has changed. Keys: %s",
+                          self.name, n,
+                          list(resp["json"])[:12] if isinstance(resp["json"], dict)
+                          else type(resp["json"]).__name__)
+                return
+            if not rows:
+                log.info("[%s] page %s is empty — %s record(s) in total",
+                         self.name, n, pushed)
+                return
+            if total is None:
+                total = _payload_count(resp["json"])
+                if total is not None:
+                    log.info("[%s] %s open call(s) to walk at %s per page",
+                             self.name, total, self.page_size)
+            pushed += len(rows)
+            queue.put({"kind": "api", "rows": rows, "url": url})
+            if total is not None and pushed >= total:
+                log.info("[%s] walked all %s record(s)", self.name, total)
+                return
+            page.wait_for_timeout(int(settings.rate_limit_delay * 1000))
+        log.warning("[%s] stopped at the %s-page safety cap", self.name, self.max_pages)
+
+    def _dump(self, page, stem: str) -> None:
+        """Save the page so a failure can be read rather than guessed at."""
+        try:
+            out = settings.log_dir.parent / "data" / "debug"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / f"{stem}.html").write_text(page.content(), encoding="utf-8")
+            log.info("[%s] saved the page to %s", self.name, out / f"{stem}.html")
+        except Exception:
+            pass
+
+
+__all__ = ["UNPartnerPortalScraper"]
