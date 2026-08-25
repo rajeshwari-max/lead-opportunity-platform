@@ -422,17 +422,6 @@
     "website": "https://coefficientgiving.org"
   },
   {
-    "name": "world_bank",
-    "display_name": "World Bank",
-    "url": "https://projects.worldbank.org/en/projects-operations/opportunities?lang=en",
-    "website": "https://projects.worldbank.org",
-    "page_url": "https://projects.worldbank.org/en/projects-operations/opportunities?lang=en&os={offset}",
-    "page_size": 20,
-    "stale_page_streak": 0,
-    "curated": true,
-    "_curated_note": "A dedicated notice board: every row is a published tender or procurement notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py."
-  },
-  {
     "name": "undp_procurement",
     "display_name": "UNDP Procurement",
     "url": "https://procurement-notices.undp.org/?lang=en",

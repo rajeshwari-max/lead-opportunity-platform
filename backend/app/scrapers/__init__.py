@@ -20,6 +20,7 @@ from app.scrapers.indevjobs import IndevJobsScraper
 from app.scrapers.ngobox import NGOBoxScraper
 from app.scrapers.phf import PHFScraper
 from app.scrapers.unpp import UNPartnerPortalScraper
+from app.scrapers.worldbank import WorldBankScraper
 from app.scrapers.registry import SCRAPER_REGISTRY, get_scrapers
 
 # Config-driven funder sites (backend/app/scrapers/sources.json). Imported last
@@ -36,5 +37,6 @@ __all__ = [
     "SCRAPER_REGISTRY", "get_scrapers", "NGOBoxScraper", "DevNetScraper",
     "FundsForNGOsScraper", "BondScraper", "DevelopmentAidScraper", "GrantWatchScraper",
     "IndevJobsScraper", "PHFScraper", "PackardScraper", "OpenSocietyScraper",
-    "BlueActionFundScraper", "UNPartnerPortalScraper", "generic_listing",
+    "BlueActionFundScraper", "UNPartnerPortalScraper", "WorldBankScraper",
+    "generic_listing",
 ]

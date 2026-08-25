@@ -5,6 +5,69 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-08-25 — World Bank moves to its API; UNDP needed nothing
+
+The probe's API observation paid for itself on the first run.
+
+### World Bank — new module `backend/app/scrapers/worldbank.py`
+
+```
+the page loads its listings from an API:
+  https://search.worldbank.org/api/v2/procnotices?format=json&fct=...
+=> SINGLE PAGE
+```
+
+The `os={offset}` template in `sources.json` was never part of that page's URL
+contract. The listing is rendered client-side from
+`search.worldbank.org/api/v2/procnotices`, and the paging lives in **that**
+request — so no query parameter on the page URL could ever have worked, and the
+source had been returning its first 34 rows while looking perfectly configured.
+
+Now it reads the API directly. Two consequences worth stating:
+
+- **No browser.** It is a plain JSON endpoint, so `requires_js = False` and the
+  JSON is parsed inside `parse_listing()`. That reuses every part of
+  `BaseScraper` — retries with backoff, rate limiting, the pagination loop, the
+  repeated-content guard — instead of reimplementing them in a custom `crawl()`.
+  The only unusual thing is that the "html" handed to the parser is JSON.
+- **It stops on the API's own `total`**, the same exactness that makes UN
+  Partner Portal's walk complete, rather than guessing when the list ended.
+
+Field names are read through candidate lists rather than hard-coded, and the
+first run logs the keys it actually saw — the endpoint could not be reached from
+where this was written, and guessing one spelling is how a scraper ends up
+storing rows with an empty deadline that the pipeline then treats as
+permanently open. One run turns the guess into a fact.
+
+`organization` is set to the **borrowing agency** (Ministry of Health,
+Nairobi Water Authority…), not "World Bank". The Bank finances the procurement;
+the agency runs it, and that is what a bidder needs to see.
+
+The dead `world_bank` entry is removed from `sources.json` (71 entries remain).
+
+### UNDP Procurement — nothing to fix
+
+I had this down as "the weakest of the five, most likely page 1 only". Wrong,
+and in the good direction: the probe reports **394 listings on page 1** and every
+candidate returning the same rows, with no API behind it. UNDP publishes its
+whole notice board on one page. `SINGLE PAGE` is the correct answer and needs no
+template — which is exactly the distinction that verdict was added for. Without
+it this source would have been "fixed" into a bug.
+
+### Verified
+
+`worldbank.py` against a realistic `v2/procnotices` payload carrying both field
+spellings (`bid_description`/`noticetitle`, `project_ctry_name`/`country_name`,
+`submission_date`/`submission_deadline_date`): both rows mapped correctly,
+ISO timestamps trimmed to dates, `organization` taken from the borrower,
+`opportunity_url` scoring `deep` and `is_usable_link` True, deadline parsing to
+a real date. Pagination steps `os=100`, `os=200`, then stops exactly on
+`total=250`. Hostile payloads — a 403 HTML body, a JSON object with no record
+list, a bare array, a response with no total — each produce a specific error or
+a correct stop rather than a silent empty page.
+
+---
+
 ## 2026-08-25 — Probe round 1: three blind spots, and a verdict of mine that was wrong
 
 First live run of `probe_pagination.py` on EC2. It worked — including by
