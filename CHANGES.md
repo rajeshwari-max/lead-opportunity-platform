@@ -5,6 +5,75 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-08-25 — UNPP sign-in is two-step; the API route was CSRF, not credentials
+
+The previous attempt still returned 0 rows, and its own diagnostics named both
+reasons in one screen.
+
+**1. The login form is two-step.** The improved error printed the field list:
+
+```
+no password field on https://www.unpartnerportal.org/login after 30s.
+title='UN Partner Portal' inputs=['email:email']
+```
+
+One field. An email box, no password. The page rendered perfectly — UNPP asks
+for the email, you advance, and *then* the password field appears. Code that
+navigates to `/login` and waits for `input[type=password]` waits forever on a
+page that is working exactly as designed. The 30-second timeout was reporting a
+real fact and drawing the wrong conclusion from it.
+
+`_form_login()` now: fills the email → looks for a password field for **2.5s**
+(the single-step case, deliberately short so the common two-step path is not
+delayed) → if absent, submits the email step and waits up to 30s for the
+password field → fills it and submits. Handles both form shapes without needing
+to know which it is.
+
+**2. Every API endpoint answered with Django's own 403 page**, not DRF's JSON:
+
+```
+POST https://www.unpartnerportal.org/api/login/ -> 403 <!DOCTYPE html>
+    <meta name="robots" content="NONE,NOARCHIVE"> <title>403 Forbidden</title>
+```
+
+That is `CsrfViewMiddleware` — the request never reached a view, so it says
+nothing about whether the credentials are right. `_api_login()` now lands on a
+portal page first so Django sets its `csrftoken` cookie (the fetch helper
+already forwards it as `X-CSRFToken`), and when a 403 does come back as HTML the
+log says *"Django's own 403 page — CSRF was rejected, so this never reached a
+view. Not a credentials problem"* rather than leaving it to be misread.
+
+**Order changed: form first, API second.** The server showed us which route the
+portal actually supports. The API stays as a fallback because when it does work
+it is cleaner, but it no longer costs 15 seconds of 403s before the real route
+is tried.
+
+**3. A token in browser storage now counts as a session.** A single-page app
+that authenticates by token keeps it in `localStorage`/`sessionStorage` and
+attaches it to its own requests — a plain `fetch` from this code would not, so a
+perfectly good sign-in could still look absent. `_token_from_storage()` scans
+both stores (including tokens nested inside JSON blobs), and verifies each
+candidate against `/api/accounts/me/` before using it. A long string under a key
+called "token" is a guess until the portal confirms it.
+
+**4. The failure message now distinguishes its cases.** `inputs=[]` → the page
+never rendered. `inputs=[...]` with no password → a multi-step sign-in that did
+not advance, most likely because the email step reported an error such as an
+unknown account. Off-domain redirect → sign-in moved to an external identity
+provider.
+
+### Verified
+
+Against a stub that behaves the way the server logs describe — email field
+first, password only after the step is submitted: sign-in succeeds via a session
+cookie, and separately via a token recovered from `localStorage` when no cookie
+is set. Regression: an already-valid browser session still short-circuits
+everything; the API fallback is still reachable when the form cannot be driven
+at all; registry, curated flag, ISO country mapping and the DOM fallback parser
+all unchanged.
+
+---
+
 ## 2026-08-25 — UNPP signs in through the API, not the form
 
 UN Partner Portal returned 0 rows on EC2 while working perfectly on the laptop.

@@ -36,23 +36,31 @@ So this module does three things the generic path cannot:
 
 Authentication
 --------------
-Two routes, tried in this order:
+Three routes, tried in this order:
 
-  1. LOP_UNPP_EMAIL / LOP_UNPP_PASSWORD from backend/.env — the scraper signs
-     itself in. This is the route that works headless and on EC2, where there
-     is no Chrome profile to borrow. It mirrors what LOP_DEVAID_EMAIL /
-     LOP_DEVAID_PASSWORD already do for DevelopmentAid.
-  2. Your everyday Chrome session, via site_auth.open_context — the existing
-     mechanism, which the debug page proves is working on this machine.
+  1. A session the browser already holds — your everyday Chrome profile on a
+     desktop (site_auth.open_context), or an imported session file. This is why
+     the scraper worked on the laptop from day one without ever using the
+     password.
+  2. The sign-in FORM, with LOP_UNPP_EMAIL / LOP_UNPP_PASSWORD from
+     backend/.env. This is the route a server needs, since EC2 has no Chrome
+     profile to borrow. UNPP's form is TWO-STEP: email, advance, then password.
+  3. The sign-in API, as a fallback.
 
-If NEITHER produces a signed-in session, this scraper yields nothing and logs an
-error. It deliberately does not fall back to /landing/opportunities, the public
-teaser: half a listing scraped anonymously looks like success in the dashboard
-and is the reason a source can appear healthy for weeks while being wrong.
+Every route ends the same way: a GET of /api/accounts/me/ must return 200. That
+is the portal's own answer to "who am I", and nothing short of it counts as
+signed in — reading the rendered page for the word "Dashboard" is a guess about
+a React app mid-render, and it guessed wrong.
+
+If NO route produces a session, this scraper yields nothing and logs an error.
+It deliberately does not fall back to /landing/opportunities, the public teaser:
+half a listing scraped anonymously looks like success in the dashboard and is
+the reason a source can appear healthy for weeks while being wrong.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import threading
@@ -692,22 +700,20 @@ class UNPartnerPortalScraper(BaseScraper):
 
           1. a session the browser already holds — your Chrome profile on a
              desktop, or an imported session file;
-          2. the portal's own sign-in API with the credentials from .env;
-          3. the sign-in FORM, as a last resort.
+          2. the sign-in FORM, driven properly;
+          3. the portal's own sign-in API, as a fallback.
 
-        Route 2 exists because route 3 failed on the server for a reason worth
-        recording. The portal is a React app: `/login` serves an empty shell and
-        renders the form afterwards. The first version of this code waited a
-        fixed 2 seconds and then used `query_selector`, which does not wait at
-        all — so on EC2 it looked for the password field ~2.5s after navigation,
-        found nothing, and reported "the login form did not look the way this
-        code expects", which reads like the portal had changed. It had not. The
-        form simply had not rendered yet.
+        The form comes before the API because the server told us it is the
+        supported route. Every candidate API endpoint answered with a Django
+        "403 Forbidden" HTML page — the CSRF middleware's response, not DRF's,
+        so those requests never reached a view. Meanwhile the login page itself
+        rendered and reported exactly one field: `inputs=['email:email']`.
 
-        The fix is not just a longer wait. Posting the credentials to the API is
-        strictly better than driving a form: no rendering to wait for, no button
-        to find, no CAPTCHA to trip over, and a definite answer — a token or an
-        HTTP status that says why not.
+        That single line is the whole diagnosis. UNPP's sign-in is a TWO-STEP
+        form: enter the email, advance, and only then does the password field
+        appear. Code that navigates to /login and waits for `input[type=
+        password]` waits forever on a page that is working perfectly — which is
+        precisely what the 30-second timeout was reporting.
         """
         page.goto(LISTING_URL, timeout=90_000, wait_until="domcontentloaded")
         try:
@@ -727,15 +733,30 @@ class UNPartnerPortalScraper(BaseScraper):
             return False, {}
 
         log.info("[%s] signing in as %s", self.name, email)
+        if self._form_login(page, email, password):
+            # The form having been submitted is not proof of a session, and the
+            # portal may authenticate by cookie OR by a token the app keeps in
+            # browser storage. Both are checked, and whichever answers
+            # /api/accounts/me/ with a 200 is what the rest of the run uses.
+            if self._whoami(page, {}):
+                log.info("[%s] signed in through the form (session cookie)",
+                         self.name)
+                return True, {}
+            headers = self._token_from_storage(page)
+            if headers:
+                log.info("[%s] signed in through the form (token from browser "
+                         "storage)", self.name)
+                return True, headers
+            log.error("[%s] the form was submitted but the portal still does "
+                      "not recognise the session — wrong password, an expired "
+                      "account, or a second factor.", self.name)
+            self._dump(page, "unpp_login_failed")
+
+        log.info("[%s] the form did not sign us in — trying the sign-in API",
+                 self.name)
         headers = self._api_login(page, email, password)
         if headers:
             return True, headers
-
-        log.info("[%s] no sign-in API accepted the credentials — trying the "
-                 "form", self.name)
-        if self._form_login(page, email, password) and self._whoami(page, {}):
-            log.info("[%s] signed in through the form", self.name)
-            return True, {}
         return False, {}
 
     def _whoami(self, page, headers: dict) -> bool:
@@ -757,6 +778,18 @@ class UNPartnerPortalScraper(BaseScraper):
         a token used with the wrong scheme fails silently as an empty listing,
         which is the failure mode this whole module exists to stop.
         """
+        # Land on a portal page first so Django can set its csrftoken cookie;
+        # the fetch helper reads that cookie and sends X-CSRFToken. Without it
+        # every POST came back as Django's own "403 Forbidden" HTML page — the
+        # CSRF middleware's response, which never reaches a view, and which is
+        # easy to misread as "wrong password".
+        try:
+            if "unpartnerportal.org" not in (page.url or ""):
+                page.goto(LOGIN_URL, timeout=90_000, wait_until="domcontentloaded")
+                page.wait_for_timeout(1_500)
+        except Exception:
+            pass
+
         for path in LOGIN_ENDPOINTS:
             url = urljoin(BASE, path)
             for user_field, pass_field in LOGIN_FIELDS:
@@ -765,9 +798,13 @@ class UNPartnerPortalScraper(BaseScraper):
                 if r["status"] in (404, 405):
                     break        # endpoint isn't there; field names won't help
                 if r["status"] not in (200, 201):
+                    body = (r["body"] or str(r["json"] or ""))[:200]
+                    if r["status"] == 403 and "<html" in (r["body"] or "").lower():
+                        body = ("Django's own 403 page — CSRF was rejected, so "
+                                "this never reached a view. Not a credentials "
+                                "problem.")
                     log.info("[%s] %s (%s) -> %s %s", self.name, path,
-                             user_field, r["status"],
-                             (r["body"] or str(r["json"] or ""))[:200])
+                             user_field, r["status"], body)
                     continue
                 payload = r["json"] if isinstance(r["json"], dict) else {}
                 token = ""
@@ -798,46 +835,57 @@ class UNPartnerPortalScraper(BaseScraper):
                          "/".join(TOKEN_SCHEMES))
         return {}
 
-    def _form_login(self, page, email: str, password: str) -> bool:
-        """Drive the sign-in form. Waits for it to render; says what it saw.
+    _EMAIL_SELECTORS = ("input[type='email']", "input[name='email']",
+                        "input[id*='email' i]", "input[name='username']",
+                        "input[type='text']")
+    _SUBMIT_SELECTORS = ("button[type='submit']", "input[type='submit']",
+                         "button:has-text('Continue')", "button:has-text('Next')",
+                         "button:has-text('Log in')", "button:has-text('Login')",
+                         "button:has-text('Sign in')", "button:has-text('Submit')")
 
-        `wait_for_selector`, not `query_selector`: the second does not wait, and
-        against a React app that is the difference between finding the form and
-        declaring it missing.
+    def _form_login(self, page, email: str, password: str) -> bool:
+        """Drive the sign-in form, including the two-step email→password flow.
+
+        The portal asks for the email first and only renders the password field
+        after that step is submitted. The previous version navigated to /login
+        and waited 30 seconds for `input[type=password]`, which on a two-step
+        form never appears — so a page that was working perfectly was reported
+        as broken. Its own diagnostic said so plainly once it printed the field
+        list: `inputs=['email:email']`, one field, no password.
+
+        Written to handle both shapes without knowing which it is: fill the
+        email, look briefly for a password field already on the page, and only
+        if there isn't one submit the email step and wait for it to appear.
         """
         try:
             page.goto(LOGIN_URL, timeout=90_000, wait_until="domcontentloaded")
             try:
-                page.wait_for_selector("input[type='password']", timeout=30_000)
+                page.wait_for_selector("input", timeout=30_000)
             except Exception:
-                self._report_login_page(page)
+                self._report_login_page(page)   # nothing rendered at all
                 return False
 
-            pw = page.query_selector("input[type='password']")
-            user = None
-            for sel in ("input[type='email']", "input[name='email']",
-                        "input[id*='email' i]", "input[name='username']",
-                        "input[type='text']"):
-                user = page.query_selector(sel)
-                if user:
-                    break
-            if not (user and pw):
+            user = self._first(page, self._EMAIL_SELECTORS)
+            if user is None:
                 self._report_login_page(page)
                 return False
-
             user.fill(email)
+
+            # Single-step form? Short wait — this is the "is the password field
+            # already here" question, not the "has the next step loaded" one, so
+            # it must not cost 30s on the two-step flow that is the common case.
+            pw = self._wait_password(page, 2_500)
+            if pw is None:
+                log.info("[%s] no password field yet — submitting the email "
+                         "step of a two-step sign-in", self.name)
+                self._submit(page, user)
+                pw = self._wait_password(page, 30_000)
+            if pw is None:
+                self._report_login_page(page)
+                return False
+
             pw.fill(password)
-            clicked = False
-            for sel in ("button[type='submit']", "input[type='submit']",
-                        "button:has-text('Log in')", "button:has-text('Login')",
-                        "button:has-text('Sign in')"):
-                btn = page.query_selector(sel)
-                if btn:
-                    btn.click()
-                    clicked = True
-                    break
-            if not clicked:
-                pw.press("Enter")
+            self._submit(page, pw)
             try:
                 page.wait_for_url(lambda u: "/login" not in u, timeout=45_000)
             except Exception:
@@ -848,6 +896,108 @@ class UNPartnerPortalScraper(BaseScraper):
             log.error("[%s] the form sign-in raised %s: %s",
                       self.name, type(exc).__name__, exc)
             return False
+
+    @staticmethod
+    def _first(page, selectors):
+        """First element matching any of these selectors, or None."""
+        for sel in selectors:
+            try:
+                el = page.query_selector(sel)
+            except Exception:
+                el = None
+            if el is not None:
+                return el
+        return None
+
+    @staticmethod
+    def _wait_password(page, timeout_ms: int):
+        """The password field once it exists, or None within the timeout."""
+        try:
+            page.wait_for_selector("input[type='password']", timeout=timeout_ms,
+                                   state="visible")
+        except Exception:
+            return None
+        return page.query_selector("input[type='password']")
+
+    def _submit(self, page, field) -> None:
+        """Advance the form: click its submit control, else press Enter.
+
+        Enter is the fallback rather than the default because a two-step form
+        sometimes binds Enter to nothing at all, and a click on the visible
+        button is what a person would do.
+        """
+        btn = self._first(page, self._SUBMIT_SELECTORS)
+        if btn is not None:
+            try:
+                btn.click()
+                return
+            except Exception:
+                pass
+        try:
+            field.press("Enter")
+        except Exception:
+            pass
+
+    def _token_from_storage(self, page) -> dict:
+        """An auth token the app left in localStorage/sessionStorage, verified.
+
+        A single-page app that authenticates by token keeps it in browser
+        storage and attaches it to its own requests; a plain `fetch` from this
+        code would not, so after a successful form sign-in the session can look
+        absent while being perfectly real. Every candidate is checked against
+        /api/accounts/me/ before it is used — a long string under a key called
+        "token" is a guess until the portal confirms it.
+        """
+        script = """() => {
+            const out = {};
+            for (const store of [localStorage, sessionStorage]) {
+                for (let i = 0; i < store.length; i++) {
+                    const k = store.key(i);
+                    try { out[k] = store.getItem(k); } catch (e) {}
+                }
+            }
+            return out;
+        }"""
+        try:
+            entries = page.evaluate(script) or {}
+        except Exception:
+            return {}
+
+        candidates: list[str] = []
+        for key, raw in entries.items():
+            if not isinstance(raw, str) or not raw:
+                continue
+            interesting = any(w in key.lower()
+                              for w in ("token", "auth", "jwt", "session", "key"))
+            # The value may be the token itself, or JSON holding it.
+            if raw.startswith("{"):
+                try:
+                    blob = json.loads(raw)
+                except ValueError:
+                    blob = None
+                if isinstance(blob, dict):
+                    for tk in TOKEN_KEYS:
+                        v = blob.get(tk)
+                        if isinstance(v, str) and len(v) >= 20:
+                            candidates.append(v)
+            elif interesting and 20 <= len(raw) <= 4096 and " " not in raw:
+                candidates.append(raw.strip('"'))
+
+        seen: set[str] = set()
+        for token in candidates:
+            if token in seen:
+                continue
+            seen.add(token)
+            for scheme in TOKEN_SCHEMES:
+                headers = {"Authorization": f"{scheme} {token}"}
+                if self._whoami(page, headers):
+                    log.info("[%s] browser storage held a working %s token",
+                             self.name, scheme)
+                    return headers
+        if candidates:
+            log.info("[%s] browser storage held %s token-like value(s), none of "
+                     "which authenticated", self.name, len(seen))
+        return {}
 
     def _report_login_page(self, page) -> None:
         """Say what the login page actually contained, not just that it failed.
@@ -874,10 +1024,17 @@ class UNPartnerPortalScraper(BaseScraper):
                       "credential route cannot work. Use an imported session "
                       "instead (site_auth.import_session).", self.name, host)
         else:
+            kinds = [i.split(":", 1)[0] for i in inputs]
+            hint = ""
+            if inputs and not any(k == "password" for k in kinds):
+                hint = (" The page rendered but shows no password field, which "
+                        "is the signature of a multi-step sign-in that did not "
+                        "advance — check whether the email step reported an "
+                        "error such as an unknown account.")
+            elif not inputs:
+                hint = " Nothing rendered at all — the page never loaded."
             log.error("[%s] no password field on %s after 30s. title=%r "
-                      "inputs=%s — if that list is empty the page never "
-                      "rendered; if it holds unfamiliar fields the form has "
-                      "been redesigned.", self.name, url, title, inputs[:12])
+                      "inputs=%s.%s", self.name, url, title, inputs[:12], hint)
         self._dump(page, "unpp_login_form")
 
     def _discover_endpoint(self, page, seen: list[dict],
