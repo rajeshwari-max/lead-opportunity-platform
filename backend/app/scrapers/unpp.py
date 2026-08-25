@@ -327,10 +327,23 @@ def _with_page(url: str, page: int, page_size: int) -> str:
 # Doing this with httpx outside the browser means reproducing that by hand, and
 # getting it subtly wrong is how a scraper ends up reading the signed-out view.
 _FETCH_JS = """
-async ([url, headers]) => {
+async ([url, headers, method, body]) => {
+    const opts = {
+        method: method || 'GET',
+        credentials: 'include',
+        headers: Object.assign({}, headers || {}),
+    };
+    if (body !== null && body !== undefined) {
+        opts.headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+        // Django refuses an unsafe method without this when the endpoint uses
+        // session authentication. Harmless when it doesn't.
+        const m = document.cookie.match(/(?:^|;\\s*)csrftoken=([^;]+)/);
+        if (m) { opts.headers['X-CSRFToken'] = decodeURIComponent(m[1]); }
+    }
     let status = 0, text = '';
     try {
-        const r = await fetch(url, {credentials: 'include', headers: headers || {}});
+        const r = await fetch(url, opts);
         status = r.status;
         text = await r.text();
     } catch (e) {
@@ -341,6 +354,29 @@ async ([url, headers]) => {
     return {status, json, body: json === null ? text.slice(0, 1500) : '', error: ''};
 }
 """
+
+# Where the portal says who you are. A 200 here is the only proof of a session
+# that cannot be faked by a page that merely looks signed in — and it is how the
+# scraper found out it was signed OUT on the server (401) while the same code
+# was signed in on a laptop.
+WHOAMI_URL = f"{BASE}/api/accounts/me/"
+
+# Sign-in endpoints to try, most likely first. The portal is Django REST
+# Framework (its list endpoint is a DRF page and /api/accounts/me/ answers 401),
+# so a token endpoint under /api/accounts/ is the expected shape.
+LOGIN_ENDPOINTS = (
+    "/api/accounts/login/",
+    "/api/accounts/login",
+    "/api/rest-auth/login/",
+    "/api/auth/login/",
+    "/api/login/",
+)
+# Field names DRF login serializers use, and the keys they return a token under.
+LOGIN_FIELDS = (("email", "password"), ("username", "password"))
+TOKEN_KEYS = ("token", "key", "access", "auth_token", "access_token", "access_key")
+# DRF's TokenAuthentication uses "Token"; SimpleJWT uses "Bearer". Both are
+# tried and the one that makes /api/accounts/me/ answer 200 is kept.
+TOKEN_SCHEMES = ("Token", "Bearer", "JWT")
 
 
 @register
@@ -600,7 +636,8 @@ class UNPartnerPortalScraper(BaseScraper):
 
                 page.on("response", on_response)
 
-                if not self._ensure_signed_in(page):
+                signed_in, auth = self._ensure_signed_in(page)
+                if not signed_in:
                     log.error(
                         "[%s] not signed in, so /cfei/open has nothing to show. "
                         "Either set LOP_UNPP_EMAIL / LOP_UNPP_PASSWORD in "
@@ -626,7 +663,7 @@ class UNPartnerPortalScraper(BaseScraper):
                     pass
                 page.wait_for_timeout(3_000)   # the table XHR trails networkidle
 
-                endpoint, headers = self._discover_endpoint(page, seen)
+                endpoint, headers = self._discover_endpoint(page, seen, auth)
                 if not endpoint:
                     log.error(
                         "[%s] could not identify the listing API. The portal's "
@@ -648,120 +685,203 @@ class UNPartnerPortalScraper(BaseScraper):
                 except Exception:
                     pass
 
-    def _ensure_signed_in(self, page) -> bool:
-        """True once the browser holds a signed-in session.
+    def _ensure_signed_in(self, page) -> tuple[bool, dict]:
+        """(signed_in, auth_headers). Checked against the API, never assumed.
 
-        Checked, never assumed. The whole failure this module replaces began
-        with a scraper that believed it was signed in.
+        Three routes, in this order:
+
+          1. a session the browser already holds — your Chrome profile on a
+             desktop, or an imported session file;
+          2. the portal's own sign-in API with the credentials from .env;
+          3. the sign-in FORM, as a last resort.
+
+        Route 2 exists because route 3 failed on the server for a reason worth
+        recording. The portal is a React app: `/login` serves an empty shell and
+        renders the form afterwards. The first version of this code waited a
+        fixed 2 seconds and then used `query_selector`, which does not wait at
+        all — so on EC2 it looked for the password field ~2.5s after navigation,
+        found nothing, and reported "the login form did not look the way this
+        code expects", which reads like the portal had changed. It had not. The
+        form simply had not rendered yet.
+
+        The fix is not just a longer wait. Posting the credentials to the API is
+        strictly better than driving a form: no rendering to wait for, no button
+        to find, no CAPTCHA to trip over, and a definite answer — a token or an
+        HTTP status that says why not.
         """
         page.goto(LISTING_URL, timeout=90_000, wait_until="domcontentloaded")
         try:
             page.wait_for_load_state("networkidle", timeout=20_000)
         except Exception:
             pass
-        if self._signed_in(page):
+        if self._whoami(page, {}):
             log.info("[%s] already signed in via the saved browser session",
                      self.name)
-            return True
+            return True, {}
 
         email = (getattr(settings, "unpp_email", "") or "").strip()
         password = getattr(settings, "unpp_password", "") or ""
         if not (email and password):
-            return False
+            log.error("[%s] no saved browser session and no LOP_UNPP_EMAIL / "
+                      "LOP_UNPP_PASSWORD in backend/.env", self.name)
+            return False, {}
 
         log.info("[%s] signing in as %s", self.name, email)
+        headers = self._api_login(page, email, password)
+        if headers:
+            return True, headers
+
+        log.info("[%s] no sign-in API accepted the credentials — trying the "
+                 "form", self.name)
+        if self._form_login(page, email, password) and self._whoami(page, {}):
+            log.info("[%s] signed in through the form", self.name)
+            return True, {}
+        return False, {}
+
+    def _whoami(self, page, headers: dict) -> bool:
+        """True when the portal says who we are — 200 from /api/accounts/me/.
+
+        This replaces reading the rendered page for words like "Dashboard".
+        Those are a guess about a React app mid-render; this is the portal's own
+        answer, and it is the check that correctly reported 401 on the server
+        while the same code was signed in on a laptop.
+        """
+        r = self._fetch(page, WHOAMI_URL, headers)
+        return r["status"] == 200 and isinstance(r["json"], dict)
+
+    def _api_login(self, page, email: str, password: str) -> dict:
+        """Sign in through the portal's API. Returns auth headers, or {}.
+
+        Every combination is *verified* against /api/accounts/me/ before being
+        returned — a 200 from a login endpoint is not proof the token works, and
+        a token used with the wrong scheme fails silently as an empty listing,
+        which is the failure mode this whole module exists to stop.
+        """
+        for path in LOGIN_ENDPOINTS:
+            url = urljoin(BASE, path)
+            for user_field, pass_field in LOGIN_FIELDS:
+                r = self._fetch(page, url, {}, method="POST",
+                                body={user_field: email, pass_field: password})
+                if r["status"] in (404, 405):
+                    break        # endpoint isn't there; field names won't help
+                if r["status"] not in (200, 201):
+                    log.info("[%s] %s (%s) -> %s %s", self.name, path,
+                             user_field, r["status"],
+                             (r["body"] or str(r["json"] or ""))[:200])
+                    continue
+                payload = r["json"] if isinstance(r["json"], dict) else {}
+                token = ""
+                for key in TOKEN_KEYS:
+                    if isinstance(payload.get(key), str) and payload[key]:
+                        token = payload[key]
+                        break
+                if not token:
+                    # Some deployments answer 200 and set a session cookie
+                    # instead of returning a token. The browser already holds
+                    # that cookie now, so test it as-is.
+                    if self._whoami(page, {}):
+                        log.info("[%s] signed in via %s (session cookie)",
+                                 self.name, path)
+                        return {}
+                    log.info("[%s] %s answered 200 but with no usable token "
+                             "(keys: %s)", self.name, path,
+                             list(payload)[:10])
+                    continue
+                for scheme in TOKEN_SCHEMES:
+                    headers = {"Authorization": f"{scheme} {token}"}
+                    if self._whoami(page, headers):
+                        log.info("[%s] signed in via %s using an %s token",
+                                 self.name, path, scheme)
+                        return headers
+                log.info("[%s] %s returned a token but none of %s "
+                         "authenticated it", self.name, path,
+                         "/".join(TOKEN_SCHEMES))
+        return {}
+
+    def _form_login(self, page, email: str, password: str) -> bool:
+        """Drive the sign-in form. Waits for it to render; says what it saw.
+
+        `wait_for_selector`, not `query_selector`: the second does not wait, and
+        against a React app that is the difference between finding the form and
+        declaring it missing.
+        """
         try:
             page.goto(LOGIN_URL, timeout=90_000, wait_until="domcontentloaded")
-            page.wait_for_timeout(2_000)
-            filled = self._fill_login(page, email, password)
-            if not filled:
-                log.error("[%s] the login form did not look the way this code "
-                          "expects — no email/password field found on %s. If "
-                          "the portal has moved to SSO, the credential route "
-                          "cannot work and the Chrome session is the only way "
-                          "in.", self.name, LOGIN_URL)
-                self._dump(page, "unpp_login_form")
+            try:
+                page.wait_for_selector("input[type='password']", timeout=30_000)
+            except Exception:
+                self._report_login_page(page)
                 return False
+
+            pw = page.query_selector("input[type='password']")
+            user = None
+            for sel in ("input[type='email']", "input[name='email']",
+                        "input[id*='email' i]", "input[name='username']",
+                        "input[type='text']"):
+                user = page.query_selector(sel)
+                if user:
+                    break
+            if not (user and pw):
+                self._report_login_page(page)
+                return False
+
+            user.fill(email)
+            pw.fill(password)
+            clicked = False
+            for sel in ("button[type='submit']", "input[type='submit']",
+                        "button:has-text('Log in')", "button:has-text('Login')",
+                        "button:has-text('Sign in')"):
+                btn = page.query_selector(sel)
+                if btn:
+                    btn.click()
+                    clicked = True
+                    break
+            if not clicked:
+                pw.press("Enter")
             try:
                 page.wait_for_url(lambda u: "/login" not in u, timeout=45_000)
             except Exception:
                 pass
             page.wait_for_timeout(3_000)
+            return True
         except Exception as exc:                                # noqa: BLE001
-            log.error("[%s] sign-in attempt raised %s: %s",
+            log.error("[%s] the form sign-in raised %s: %s",
                       self.name, type(exc).__name__, exc)
             return False
 
-        page.goto(LISTING_URL, timeout=90_000, wait_until="domcontentloaded")
-        try:
-            page.wait_for_load_state("networkidle", timeout=20_000)
-        except Exception:
-            pass
-        if self._signed_in(page):
-            log.info("[%s] signed in with the credentials from backend/.env",
-                     self.name)
-            return True
-        log.error("[%s] the credentials were submitted but the portal still "
-                  "shows a signed-out page. A wrong password, an expired "
-                  "account, or a CAPTCHA on the form all look like this — the "
-                  "saved page will say which.", self.name)
-        self._dump(page, "unpp_login_failed")
-        return False
+    def _report_login_page(self, page) -> None:
+        """Say what the login page actually contained, not just that it failed.
 
-    @staticmethod
-    def _fill_login(page, email: str, password: str) -> bool:
-        """Fill and submit the sign-in form. False if it isn't there."""
-        email_sel = ("input[name='email']", "input[type='email']",
-                     "input[id*='email' i]", "input[name='username']")
-        pass_sel = ("input[name='password']", "input[type='password']",
-                    "input[id*='password' i]")
-        e = p = None
-        for sel in email_sel:
-            e = page.query_selector(sel)
-            if e:
-                break
-        for sel in pass_sel:
-            p = page.query_selector(sel)
-            if p:
-                break
-        if not (e and p):
-            return False
-        e.fill(email)
-        p.fill(password)
-        for sel in ("button[type='submit']", "input[type='submit']",
-                    "button:has-text('Log in')", "button:has-text('Login')",
-                    "button:has-text('Sign in')"):
-            btn = page.query_selector(sel)
-            if btn:
-                btn.click()
-                return True
-        p.press("Enter")
-        return True
-
-    @staticmethod
-    def _signed_in(page) -> bool:
-        """Evidence of a session, taken from the page the portal actually shows.
-
-        A signed-out visitor is bounced to /login or /landing; a signed-in one
-        keeps the /cfei/open route and gets the account chrome in the header.
-        Both are checked, because either alone has a false positive: the URL can
-        linger during a client-side redirect, and the words can appear in a
-        marketing footer.
+        "No email/password field found" is true and useless — it cannot tell
+        apart a page that never rendered, a redirect to a corporate SSO host,
+        and a genuinely redesigned form. Printing the final URL, the title and
+        every input on the page separates all three in one line.
         """
         try:
             url = page.url or ""
-            if "/login" in url or "/landing" in url:
-                return False
-            body = (page.inner_text("body") or "").lower()
+            title = page.title() or ""
+            inputs = page.eval_on_selector_all(
+                "input",
+                "els => els.map(e => (e.type||'') + ':' + (e.name||e.id||'?'))",
+            )
         except Exception:
-            return False
-        if "log in" in body and "dashboard" not in body:
-            return False
-        signals = ("dashboard", "your applications", "notifications",
-                   "partnership opportunities", "log out", "logout")
-        return sum(1 for s in signals if s in body) >= 2
+            url = title = ""
+            inputs = []
+        host = urlparse(url).netloc
+        if host and "unpartnerportal.org" not in host:
+            log.error("[%s] the login page redirected to %s — the portal has "
+                      "moved sign-in to an external identity provider, so the "
+                      "credential route cannot work. Use an imported session "
+                      "instead (site_auth.import_session).", self.name, host)
+        else:
+            log.error("[%s] no password field on %s after 30s. title=%r "
+                      "inputs=%s — if that list is empty the page never "
+                      "rendered; if it holds unfamiliar fields the form has "
+                      "been redesigned.", self.name, url, title, inputs[:12])
+        self._dump(page, "unpp_login_form")
 
-    def _discover_endpoint(self, page, seen: list[dict]) -> tuple[str, dict]:
+    def _discover_endpoint(self, page, seen: list[dict],
+                           auth: dict | None = None) -> tuple[str, dict]:
         """The listing API URL + the headers to repeat it with.
 
         Preference order, and the reason for it:
@@ -773,19 +893,27 @@ class UNPartnerPortalScraper(BaseScraper):
           3. probing CANDIDATE_ENDPOINTS, which is the only guessing this module
              does, and it is verified before use rather than assumed.
         """
+        # `auth` is what the sign-in step proved works (a token header, or {}
+        # when a session cookie carries the identity). It takes precedence over
+        # anything scraped off the app's own requests: the app may not have made
+        # an authenticated call at all on a server where it started signed out,
+        # which is exactly the case this scraper has to handle.
+        auth = dict(auth or {})
+
         for entry in reversed(seen):
             if entry["status"] >= 400 or "/api/" not in entry["url"]:
                 continue
             if not re.search(r"/projects?\b|/cfei\b", entry["url"], re.I):
                 continue
+            headers = {**self._auth_headers(entry["headers"]), **auth}
             probe = self._fetch(page, _with_page(entry["url"], 1, self.page_size),
-                                self._auth_headers(entry["headers"]))
+                                headers)
             if probe["status"] == 200 and _payload_rows(probe["json"]) is not None:
-                return entry["url"], self._auth_headers(entry["headers"])
+                return entry["url"], headers
 
-        headers: dict = {}
+        headers = dict(auth)
         for entry in seen:
-            headers = self._auth_headers(entry["headers"]) or headers
+            headers = {**self._auth_headers(entry["headers"]), **auth} or headers
 
         for entry in reversed(seen):
             if entry["status"] < 400 or not re.search(
@@ -827,9 +955,10 @@ class UNPartnerPortalScraper(BaseScraper):
         return out
 
     @staticmethod
-    def _fetch(page, url: str, headers: dict) -> dict:
+    def _fetch(page, url: str, headers: dict, method: str = "GET",
+               body=None) -> dict:
         try:
-            return page.evaluate(_FETCH_JS, [url, headers or {}])
+            return page.evaluate(_FETCH_JS, [url, headers or {}, method, body])
         except Exception as exc:                                # noqa: BLE001
             return {"status": -1, "json": None, "body": f"{type(exc).__name__}: {exc}",
                     "error": str(exc)}

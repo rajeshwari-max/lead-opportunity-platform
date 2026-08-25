@@ -5,6 +5,90 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-08-25 — UNPP signs in through the API, not the form
+
+UN Partner Portal returned 0 rows on EC2 while working perfectly on the laptop.
+The server log named the cause exactly, which is what the logging was for:
+
+```
+[un_partner_portal] the portal's own request failed:
+    GET https://www.unpartnerportal.org/api/accounts/me/ -> 401
+[un_partner_portal] signing in as nitin@catalysts.org
+[un_partner_portal] the login form did not look the way this code expects —
+    no email/password field found on https://www.unpartnerportal.org/login
+```
+
+**Why the two machines differ.** The laptop never used the password: it copies
+your everyday Chrome profile, which is already signed in (`already signed in via
+the saved browser session`). EC2 has no Chrome, no mirrored profile and no
+session file, so it falls through to the credential route — the one the laptop
+had never exercised.
+
+**And that route had a bug of mine.** The portal is a React app: `/login` serves
+an empty shell and renders the form afterwards. My code waited a fixed
+`wait_for_timeout(2_000)` and then called `query_selector`, **which does not
+wait at all**. Look at the timestamps — 11:24:07.786 "signing in", 11:24:10.254
+"no email/password field": it gave up 2.5 seconds after navigation, before the
+form existed. The message reads like the portal had been redesigned. It had not.
+
+### Fixed — and not merely by waiting longer
+
+**1. Sign in through the API instead of driving the form.** Posting credentials
+to the portal's own sign-in endpoint is strictly better than filling a form:
+nothing to render, no button to locate, no CAPTCHA to trip over, and a definite
+answer — a token, or an HTTP status saying why not.
+
+`_api_login()` tries `/api/accounts/login/` and four other DRF-shaped paths,
+with both `email` and `username` field names, reads the token from any of six
+key spellings, and tries `Token` / `Bearer` / `JWT` as the scheme. **Every
+combination is verified against `/api/accounts/me/` before being used** — a 200
+from a login endpoint is not proof the token works, and a token sent with the
+wrong scheme fails silently as an empty listing, which is the exact failure this
+module exists to prevent. It stops probing field names on a 404/405 (the
+endpoint isn't there, so field names cannot help) and logs each rejection.
+
+**2. Session checks now ask the portal, not the page.** `_signed_in()` used to
+read the rendered DOM for words like "Dashboard" — a guess about a React app
+mid-render. It is now `_whoami()`: a 200 from `/api/accounts/me/`. That is the
+portal's own answer, and it is what correctly reported 401 on the server while
+the identical code was signed in on the laptop.
+
+**3. The form is still there as a last resort, and now actually works.**
+`wait_for_selector("input[type='password']", timeout=30_000)` instead of a fixed
+sleep plus a non-waiting query.
+
+**4. When it does fail, it says what it saw.** "No email/password field found"
+is true and useless — it cannot distinguish a page that never rendered, a
+redirect to a corporate SSO host, and a genuinely redesigned form.
+`_report_login_page()` now logs the final URL, the page title and every `input`
+on the page, and calls out an off-domain redirect explicitly:
+
+- `inputs=[]` → the page never rendered
+- `inputs=[password:pw, text:user]` → the form is there, selectors are wrong
+- redirected to another host → sign-in moved to an external identity provider,
+  the credential route cannot work, use an imported session
+
+Order of preference is unchanged and now enforced by working code: existing
+browser session → API credentials → form.
+
+### Verified
+
+Against a stub portal, all four paths: DRF `Token` at `/api/accounts/login/`;
+`Bearer` with an `access` key at `/api/auth/login/`; a `username` field instead
+of `email`; and no login API at all, which falls through to the form and then
+reports `inputs=[]` rather than blaming the portal. Plus the pre-existing route
+where the browser session is already valid and no header is needed, and a full
+discovery + pagination run confirming the token header is carried on every
+request. Registry, curated flag, ISO country mapping and the DOM fallback all
+still pass.
+
+**Not verified: the live endpoint.** `/api/accounts/login/` is the expected DRF
+shape and the first thing tried, but the portal has not confirmed it yet. If
+none of the five paths answers, the log now prints the status and body of each
+attempt, which names the real one.
+
+---
+
 ## 2026-08-25 — `deploy/update.sh` reported a false failure
 
 The first deploy of the changes below ended with:
