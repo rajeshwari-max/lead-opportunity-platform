@@ -59,7 +59,55 @@ sudo chmod -R 755 "$WEBROOT"
 # ------------------------------------------------------------- 4. backend
 say "Restarting $SERVICE"
 sudo supervisorctl restart "$SERVICE"
-sleep 8
+
+# Wait for the API to ANSWER, rather than sleeping a fixed 8 seconds and hoping.
+#
+# Startup runs the migrations, the FTS index check and the column backfills
+# against the whole database. On the production database (~176 MB) that takes
+# well over 8s, so the old `sleep 8` declared
+#
+#     FAILED: the API did not answer on http://127.0.0.1:8001
+#
+# on a deploy that had in fact worked perfectly: supervisor showed the service
+# RUNNING the entire time and the API answered correctly a minute later. A
+# false failure is worse than no check at all — it arrives exactly when someone
+# is deciding whether to roll back, and it argues for rolling back a good
+# deploy.
+#
+# So: poll every 3s up to BOOT_TIMEOUT, and abort EARLY if the process has died,
+# which is the case the check actually exists to catch. Slow and dead look
+# identical to a fixed sleep; they do not look identical to supervisor.
+BOOT_TIMEOUT=${BOOT_TIMEOUT:-180}
+say "Waiting for the API (up to ${BOOT_TIMEOUT}s — a large database is slow to migrate)"
+cfg=""
+waited=0
+while [ "$waited" -lt "$BOOT_TIMEOUT" ]; do
+  if cfg=$(curl -s --max-time 5 "$API/api/config") && [ -n "$cfg" ]; then
+    echo "    answered after ${waited}s"
+    break
+  fi
+  cfg=""
+  if ! sudo supervisorctl status "$SERVICE" | grep -q RUNNING; then
+    die "$SERVICE stopped. It did not just start slowly — it exited.
+       sudo supervisorctl status $SERVICE
+       tail -60 $REPO/logs/supervisor-err.log"
+  fi
+  sleep 3
+  waited=$((waited + 3))
+  # Written as a full `if`, not `[ ... ] && echo`. Under `set -e` an AND-list
+  # whose test fails is only exempt from aborting by a subtle rule about which
+  # command in the list failed — this loop should not depend on knowing that.
+  if [ $((waited % 30)) -eq 0 ]; then
+    echo "    still starting (${waited}s)..."
+  fi
+done
+[ -n "$cfg" ] || die "the API did not answer on $API within ${BOOT_TIMEOUT}s, but
+       $SERVICE is still RUNNING — so it is probably still working through
+       startup rather than broken. Check again in a minute with:
+         curl -s $API/api/config
+       and if it stays silent:
+         tail -60 $REPO/logs/supervisor-err.log
+       To allow longer next time:  BOOT_TIMEOUT=600 ./deploy/update.sh"
 
 # One worker only. Two means two schedulers, which means every automatic email
 # goes out twice.
@@ -68,14 +116,13 @@ workers=$(pgrep -fc gunicorn || true)
 
 # --------------------------------------------------------------- 5. verify
 say "Verifying"
-cfg=$(curl -s --max-time 15 "$API/api/config") || die "the API did not answer on $API"
 echo "    $cfg"
 
 case "$cfg" in
   *auth_required*) echo "    backend is running the new code" ;;
   *) die "the API answered with the old /api/config — it did not restart on the new code.
        Check: sudo supervisorctl status $SERVICE
-              tail -40 $REPO/backend/logs/app.log" ;;
+              tail -60 $REPO/logs/supervisor-err.log" ;;
 esac
 
 case "$cfg" in

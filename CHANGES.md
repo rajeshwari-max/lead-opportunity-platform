@@ -5,6 +5,45 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-08-25 — `deploy/update.sh` reported a false failure
+
+The first deploy of the changes below ended with:
+
+```
+FAILED: the API did not answer on http://127.0.0.1:8001
+```
+
+**The deploy had worked.** `supervisorctl status` showed the service RUNNING
+with three minutes of uptime, `python -c "import app.main"` imported cleanly,
+and `curl $API/api/config` returned the new payload. Nothing was broken.
+
+The script did `sudo supervisorctl restart` then `sleep 8`. Startup runs the
+migrations, the FTS index check and the column backfills against the whole
+database — on the production database (~176 MB) that takes well over eight
+seconds, so the check ran while the worker was still booting.
+
+A false failure is worse than no check at all: it arrives exactly when someone
+is deciding whether to roll back, and it argues for rolling back a good deploy.
+
+**Fixed:** the script now polls `/api/config` every 3s for up to `BOOT_TIMEOUT`
+(default 180s, override with `BOOT_TIMEOUT=600 ./deploy/update.sh`) and prints
+how long the API actually took. Crucially it also breaks out **early** if
+supervisor stops reporting RUNNING — slow and dead look identical to a fixed
+sleep, and the real failure is the one worth catching quickly. If it does time
+out while the service is still running, the message now says so and tells you to
+check again rather than implying the deploy failed.
+
+Also corrected: the two `die` messages pointed at `backend/logs/app.log`, which
+does not exist on the server. The real log is
+`<repo>/logs/supervisor-err.log`.
+
+Verified both paths against a stub server: a service that starts answering after
+7s is now reported as *"answered after 9s"* (the old script failed it at 8s),
+and a service that never answers produces the timeout message rather than a
+crash.
+
+---
+
 ## 2026-08-25 — Closed calls, wrong rows, dead links, duplicates
 
 Three complaints, three separate root causes. All three were found in the code,
