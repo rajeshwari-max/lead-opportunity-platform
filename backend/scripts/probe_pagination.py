@@ -107,6 +107,8 @@ class Probe:
         self.headless = headless
         self.timeout = timeout
         self.page = None
+        self.last_error = ""
+        self.api_calls: list[dict] = []
 
     # --------------------------------------------------------------- fetching
     def fetch(self, url: str) -> str:
@@ -120,6 +122,11 @@ class Probe:
             self.page.wait_for_timeout(1_500)
             return self.page.content()
         except Exception as exc:                                # noqa: BLE001
+            # Recorded, not swallowed. "page 1 never loaded" is exactly the
+            # kind of message this project keeps having to replace: a timeout,
+            # a DNS failure, a TLS error and a WAF block all produce it, and
+            # only one of them is worth retrying.
+            self.last_error = f"{type(exc).__name__}: {str(exc).splitlines()[0][:180]}"
             log.debug("fetch failed %s: %s", url, exc)
             return ""
 
@@ -193,17 +200,20 @@ class Probe:
         cfg = getattr(self.s, "config", {}) or {}
         result = {"name": name, "display": self.s.display_name, "start_url": base,
                   "existing": cfg.get("page_url", ""), "verdict": "NO CANDIDATE",
-                  "template": "", "page_size": 0, "how": "", "detail": ""}
+                  "template": "", "page_size": 0, "how": "", "detail": "",
+                  "api": []}
 
         with sync_playwright() as pw:
             context = site_auth.open_context(pw, name, headless=self.headless)
             try:
                 self.page = context.pages[0] if context.pages else context.new_page()
+                self.page.on("response", self._record_api)
 
                 first = self.listings(base)
                 if first is None:
                     result["verdict"] = "NO BASELINE"
-                    result["detail"] = "page 1 never loaded"
+                    result["detail"] = (f"page 1 never loaded — {self.last_error}"
+                                        if self.last_error else "page 1 never loaded")
                     return result
                 if not first:
                     result["verdict"] = "NO BASELINE"
@@ -246,12 +256,66 @@ class Probe:
                 if probe2 and overlap(sig1, signature(probe2)) > 0.8:
                     result["verdict"] = "SINGLE PAGE"
                     result["detail"] = "page 2 returns the same listings as page 1"
+
+                # Either way, show what the page's own JavaScript asked for.
+                # When a board renders its list from an API, the pagination
+                # lives in that request and NOT in the address bar — so no
+                # amount of guessing at query parameters can ever find it, and
+                # every candidate above comes back "same rows as page 1"
+                # because the URL genuinely changes nothing. Printing the API
+                # call is the difference between "we could not find it" and
+                # "here is where it actually is".
+                api = self.paginated_api()
+                if api:
+                    result["api"] = api
+                    print("    the page loads its listings from an API:")
+                    for u in api[:4]:
+                        print(f"      {u[:110]}")
+                    print("    ^ pagination lives in that request, not in the "
+                          "page URL — this source needs its own module, not a "
+                          "page_url template.")
+                    if result["verdict"] != "SINGLE PAGE":
+                        result["verdict"] = "API PAGINATED"
+                        result["detail"] = "listings come from an XHR"
                 return result
             finally:
                 try:
                     context.close()
                 except Exception:
                     pass
+
+    def _record_api(self, resp) -> None:
+        """Note every JSON-ish request the page makes, for the report below."""
+        try:
+            url = resp.url
+            ctype = (resp.headers or {}).get("content-type", "")
+            if "json" not in ctype.lower() and not re.search(
+                    r"/api/|/search|/solr|graphql|\.json\b", url, re.I):
+                return
+            if resp.status >= 400 or len(self.api_calls) > 200:
+                return
+            self.api_calls.append({"url": url, "status": resp.status})
+        except Exception:
+            pass
+
+    def paginated_api(self) -> list[str]:
+        """The captured API URLs that look like they carry a page/offset."""
+        wanted = {k.lower() for k in PAGE_PARAMS + OFFSET_PARAMS}
+        wanted |= {"size", "rows", "limit", "per_page", "pagesize", "count"}
+        hits, seen = [], set()
+        for call in self.api_calls:
+            keys = {k.lower() for k, _ in parse_qsl(urlparse(call["url"]).query)}
+            # Square-bracket parameter names (searchstax[page]) survive parse_qsl
+            # as literal keys, which is why this matches on substrings too.
+            joined = " ".join(keys)
+            if keys & wanted or re.search(r"\[(page|start|offset|rows)\]", joined):
+                base = call["url"].split("?")[0]
+                if base in seen:
+                    continue
+                seen.add(base)
+                hits.append(call["url"])
+        return hits
+
 
     def check(self, url: str, sig1: frozenset) -> tuple[bool, str]:
         """Does this URL return listings page 1 did not?"""
@@ -279,6 +343,19 @@ class Probe:
             return re.sub(r"/(page|p)/2(/?)$", r"/\1/{page}\2", url)
         return ""
 
+
+
+def is_bespoke(scraper) -> bool:
+    """True when this source paginates in its own module, not via a template.
+
+    Worth stating rather than probing: a hand-written scraper overrides
+    `crawl()` or `next_page()` and walks the site its own way — ADB drives the
+    SearchStax widget with `searchstax[page]=N`, which no generic parameter
+    guess will ever produce. Probing one and reporting NO CANDIDATE reads as
+    "this source is broken" when the truth is "this probe does not test it".
+    """
+    module = type(scraper).__module__.rsplit(".", 1)[-1]
+    return module not in ("generic_listing", "abc")
 
 def write_config(results: list[dict]) -> int:
     """Add the discovered templates to sources.json. Returns how many changed."""
@@ -352,6 +429,11 @@ def main() -> int:
     results = []
     for s in scrapers:
         print(f"\n{s.display_name}  ({s.name})\n    {s.start_url}")
+        if is_bespoke(s):
+            print(f"    NOTE: {type(s).__module__.rsplit('.', 1)[-1]}.py paginates "
+                  f"in its own code. What follows tests the GENERIC url shapes, "
+                  f"which this source does not use — read it as information "
+                  f"about the site, not a verdict on the scraper.")
         if (getattr(s, "config", {}) or {}).get("page_url"):
             print(f"    already configured: {s.config['page_url']}")
         try:
@@ -361,6 +443,10 @@ def main() -> int:
                  "detail": f"{type(exc).__name__}: {exc}", "template": "",
                  "page_size": 0, "how": "", "start_url": s.start_url,
                  "existing": ""}
+        if is_bespoke(s) and r["verdict"] in ("NO CANDIDATE", "SINGLE PAGE"):
+            r["verdict"] = "OWN CODE"
+            r["detail"] = ("paginates in its own module; the generic shapes "
+                           "tested here are not what it uses")
         results.append(r)
         print(f"    => {r['verdict']}"
               + (f": {r['template']}" if r.get("template") else "")

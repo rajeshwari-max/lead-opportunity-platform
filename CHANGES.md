@@ -5,6 +5,71 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-08-25 — Probe round 1: three blind spots, and a verdict of mine that was wrong
+
+First live run of `probe_pagination.py` on EC2. It worked — including by
+contradicting me.
+
+### UN Partner Portal now works on the server
+
+`VERDICT: LOOKS CORRECT`, 19.0s, countries resolving (Uzbekistan, Mali,
+Argentina, Ukraine, Burundi, Gambia, Senegal). The two-step form login carried
+on EC2, where there is no Chrome profile. That closes the item.
+
+### World Bank is **not** complete — my earlier verdict was wrong
+
+I called it "the only correctly configured source". The probe says otherwise:
+
+```
+World Bank — already configured: ...opportunities?lang=en&os={offset}
+page 1: 34 listing(s)
+[no] ?os=34   ...&os=34   same rows as page 1 (100% overlap)
+   ... all 18 candidates: same rows as page 1
+=> SINGLE PAGE
+```
+
+**The configured `os` parameter changes nothing.** The template is real, it is
+the right dialect, and the site ignores it — so World Bank has been returning
+its first 34 rows and nothing else, while looking correctly configured. A
+template that is present is not a template that works, which is the entire
+reason this probe compares listings rather than checking that a URL loads.
+
+Two loose ends it also exposes: the config says `page_size: 20` while page 1
+parses to 34 rows, so even the offset arithmetic was working from a wrong
+number.
+
+### Three fixes to the probe itself
+
+**1. "page 1 never loaded" now says why.** UNDP Procurement returned exactly
+that and nothing more — and a timeout, a DNS failure, a TLS error and a WAF
+block all produce it, only one of which is worth retrying. The exception is now
+captured and printed. This is the same class of unhelpful message this project
+keeps replacing; I wrote a fresh one.
+
+**2. It now watches the page's own API traffic.** When a board renders its list
+from an XHR, the pagination lives in that request and not in the address bar —
+so every URL guess correctly reports "same rows as page 1", because the URL
+genuinely changes nothing, and the probe concludes nothing when the answer was
+in plain sight. It now records JSON responses, picks out those carrying
+page/offset/rows parameters (including bracketed names like `searchstax[page]`),
+and prints them under *"the page loads its listings from an API — pagination
+lives in that request, not in the page URL"*. New verdict `API PAGINATED`.
+
+**3. Bespoke sources are no longer misreported.** ADB drives the SearchStax
+widget with `searchstax[page]=N`; no generic parameter guess will ever produce
+that, so probing it and printing `NO CANDIDATE` reads as "this source is broken"
+when the truth is "this probe does not test it". Hand-written modules are now
+labelled up front and their verdict is `OWN CODE`.
+
+### Verified
+
+Against a stub JS board whose URL parameters do nothing and whose listings come
+from `/api/opportunities/search?rows=20&os=0`: all 18 candidates correctly
+rejected, the API call correctly identified, and an analytics script correctly
+ignored.
+
+---
+
 ## 2026-08-25 — DevelopmentAid: say whether we were signed in, then blame the plan
 
 The pagination-restriction message asserted a subscription limit:
