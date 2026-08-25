@@ -158,8 +158,69 @@ def _page_url(base_url: str, page_nr: int) -> str:
     return urlunparse(parsed._replace(query=urlencode(qs, doseq=True)))
 
 
+
+def _membership_state(page) -> tuple[str, str]:
+    """('in' | 'out' | 'unknown', evidence) — the session state, stated not guessed.
+
+    The previous check was `not is_signed_in(page) and not <member chrome>`, and
+    it had a false negative that mattered: `is_signed_in` returns True when it
+    finds no visible "Sign in" control, and a blank page, a Cloudflare
+    interstitial or a failed load contains no such control either. So a broken
+    page read as SIGNED IN, and the run went on to blame the subscription for a
+    restriction it might never have hit as a member.
+
+    Three values, because there are three situations. "unknown" is not a
+    failure — it means the page could not answer the question, which is itself
+    worth logging rather than rounding to whichever answer is convenient.
+    """
+    try:
+        info = page.evaluate("""() => {
+            const vis = e => {
+                if (!e) return false;
+                const s = window.getComputedStyle(e);
+                return s.display !== 'none' && s.visibility !== 'hidden'
+                       && e.offsetParent !== null;
+            };
+            const signin = Array.from(document.querySelectorAll('a,button')).find(
+                e => ['sign in', 'log in', 'login'].includes(
+                    (e.textContent || '').trim().toLowerCase()));
+            const member = document.querySelector(
+                '[class*="avatar" i],[class*="user-menu" i],[class*="my-account" i],'
+                + 'a[href*="/dashboard"],a[href*="/profile"],a[href*="/membership"],'
+                + 'a[href*="/logout"],a[href*="/sign-out"]');
+            return {
+                signin: vis(signin),
+                member: !!member,
+                memberSel: member
+                    ? (member.tagName.toLowerCase() + '.'
+                       + (member.className || '').toString().slice(0, 40))
+                    : '',
+                title: (document.title || '').slice(0, 80),
+                bodyLen: document.body ? document.body.innerText.length : 0,
+            };
+        }""") or {}
+    except Exception as exc:                                    # noqa: BLE001
+        return "unknown", f"the page could not be inspected ({type(exc).__name__})"
+
+    if info.get("member"):
+        return "in", f"member chrome present ({info.get('memberSel') or '?'})"
+    if info.get("signin"):
+        return "out", "a visible Sign in control and no member chrome"
+    if (info.get("bodyLen") or 0) < 400:
+        return "unknown", (f"the page is nearly empty (title={info.get('title')!r}) "
+                           f"— a challenge or a failed load, not an answer about "
+                           f"the session")
+    return "unknown", (f"neither member chrome nor a Sign in control "
+                       f"(title={info.get('title')!r})")
+
+
 @register
 class DevelopmentAidScraper(BaseScraper):
+    # Set once per run by the session check in _walk_sections. Read by the
+    # pagination-restriction message, which means something completely
+    # different depending on whether we were a member at the time.
+    _session_state = "unknown"
+
     name = "developmentaid"
     display_name = "DevelopmentAid"
     # Every row on this page is a published call/tender notice, so a row
@@ -507,21 +568,32 @@ class DevelopmentAidScraper(BaseScraper):
                     if not session_checked:
                         session_checked = True
                         checked_this_section = True
-                        try:
-                            # Positive member signals decide this, not the mere
-                            # presence of a "Sign in" link — the site keeps one
-                            # in a collapsed menu even for signed-in members, and
-                            # trusting it made this wrongly declare a live
-                            # Premium session expired and delete its marker.
-                            from app.scrapers.devaid_auth import is_signed_in as _si
-                            signed_out_detected = not _si(page) and not page.evaluate(
-                                """() => !!document.querySelector(
-                                    '[class*="avatar" i],[class*="user-menu" i],'
-                                    + '[class*="my-account" i],a[href*="/dashboard"],'
-                                    + 'a[href*="/profile"],a[href*="/membership"]')"""
+                        # Positive member signals decide this, not the mere
+                        # presence of a "Sign in" link — the site keeps one in a
+                        # collapsed menu even for signed-in members, and trusting
+                        # it made this wrongly declare a live Premium session
+                        # expired and delete its marker.
+                        state, evidence = _membership_state(page)
+                        self._session_state = state
+                        signed_out_detected = (state == "out")
+                        log.info(
+                            "[developmentaid] %s: session check -> %s (%s)",
+                            slug,
+                            {"in": "SIGNED IN", "out": "SIGNED OUT",
+                             "unknown": "UNCLEAR"}[state],
+                            evidence,
+                        )
+                        if state == "unknown":
+                            # Deliberately loud. Every later verdict in this run
+                            # — including "the plan restricts pagination" —
+                            # depends on knowing whether we are a member, and
+                            # this is the one case where we do not.
+                            log.warning(
+                                "[developmentaid] %s: could not tell whether this "
+                                "run is signed in, so treat any pagination limit "
+                                "below as unattributed — it may be the plan, or "
+                                "it may be that the session is gone.", slug,
                             )
-                        except Exception:
-                            signed_out_detected = False
                         if signed_out_detected:
                             # Say it up front rather than after the walk: as a
                             # guest there is nothing beyond page 1 to walk.
@@ -1699,13 +1771,28 @@ class DevelopmentAidScraper(BaseScraper):
         except Exception:
             restricted = None
         if restricted is not None:
-            log.error(
-                "[developmentaid] %s: PAGINATION RESTRICTED BY PLAN — the site opened its "
-                "pagination-restriction dialog instead of page %s. Message: %r. This is a "
-                "subscription limit on how deep any single search can be read, so no "
-                "scraper change can reach the rest of the archive.",
-                slug, page_nr, restricted or "(no text)",
-            )
+            state = getattr(self, "_session_state", "unknown")
+            if state == "in":
+                log.error(
+                    "[developmentaid] %s: PAGINATION RESTRICTED BY PLAN — signed in "
+                    "as a member, and the site still opened its pagination-restriction "
+                    "dialog instead of page %s. Message: %r. This is a limit on the "
+                    "ACCOUNT'S TIER, not on the scraper and not on the session: no code "
+                    "change reaches the rest of the archive, only a higher plan or a "
+                    "data agreement with DevelopmentAid.",
+                    slug, page_nr, restricted or "(no text)",
+                )
+            else:
+                log.error(
+                    "[developmentaid] %s: pagination refused at page %s and this run "
+                    "is %s — Message: %r. Do NOT read this as a subscription limit "
+                    "yet. A logged-out visitor gets the same dialog. Restore the "
+                    "session (scripts/devaid_session.py push) and re-run; if it "
+                    "still appears while SIGNED IN, then it is the plan.",
+                    slug, page_nr,
+                    "NOT signed in" if state == "out" else "of unknown session state",
+                    restricted or "(no text)",
+                )
             return False
 
         if page_nr == 2:

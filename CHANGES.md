@@ -5,6 +5,151 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-08-25 — DevelopmentAid: say whether we were signed in, then blame the plan
+
+The pagination-restriction message asserted a subscription limit:
+
+> *"This is a subscription limit on how deep any single search can be read, so
+> no scraper change can reach the rest of the archive."*
+
+That conclusion was not supported by what the code actually knew, because the
+session check that should have established it had a false negative.
+
+**The bug.** The check was `not is_signed_in(page) and not <member chrome>`.
+`is_signed_in()` returns True when it finds no visible "Sign in" control — and a
+blank page, a Cloudflare interstitial or a failed load contains no such control
+either. So a broken page read as **SIGNED IN**, the "NOT LOGGED IN" error never
+fired, and the run went on to blame the subscription for a restriction it might
+never have hit as a member. A logged-out visitor gets the same dialog.
+
+**Fixed.** `_membership_state(page)` returns one of three values with the
+evidence for it, and the result is logged on **every** run rather than only on
+failure:
+
+| state | evidence |
+|---|---|
+| `SIGNED IN` | member chrome present (avatar / user menu / logout link) |
+| `SIGNED OUT` | a visible Sign in control and no member chrome |
+| `UNCLEAR` | neither — a near-empty page, a challenge, or an uninspectable one |
+
+`UNCLEAR` is not a failure, it is the honest third answer, and it is logged as a
+warning saying every later verdict in the run is unattributed.
+
+The restriction message now branches on it. Signed in, it says the account's
+**tier** is the limit and no code change reaches past it. Signed out or unclear,
+it says explicitly *"do not read this as a subscription limit yet"* and points
+at `scripts/devaid_session.py push`.
+
+**On credentials.** `scripts/devaid_session.py` already documents why an email
+and password cannot be used here: DevelopmentAid's login is behind reCAPTCHA, so
+a scripted sign-in is blocked by design and attempting it is what their terms
+restrict. `LOP_DEVAID_EMAIL` / `LOP_DEVAID_PASSWORD` exist in config but no code
+path types them into that form. The supported route is unchanged and is the
+right one: a human signs in once on a machine with a screen, and only the
+resulting session travels.
+
+### Verified
+
+`_membership_state` against five page shapes: member chrome → `in`; visible Sign
+in → `out`; a 120-character "Just a moment..." page → `unknown` (this is the
+case that previously reported `in`); a full page with neither signal →
+`unknown`; and an evaluate that raises → `unknown`.
+
+---
+
+## 2026-08-25 — Batch 1: the five big boards
+
+### New — `backend/scripts/probe_pagination.py`
+
+71 of 85 sources have no pagination configured. Writing a `page_url` template
+for each by reading its markup is 71 sites of manual work, and the answer is
+often wrong on the first try: **a URL that loads is not a URL that returns
+different listings.** Several boards answer an out-of-range page by re-serving
+page 1, and some accept `?page=2` and ignore it.
+
+So this probes rather than guesses. For every candidate it fetches the page,
+runs **the source's own parser** over it, and compares the set of opportunity
+URLs against page 1. A candidate only wins if it produces listings page 1 did
+not — the test a human would apply, applied consistently.
+
+```
+python scripts/probe_pagination.py undp_procurement
+python scripts/probe_pagination.py undp_procurement --write
+python scripts/probe_pagination.py --all --only-unconfigured
+```
+
+Candidates come from two places: the page's own controls (`rel=next`, a
+numbered "2" link, a next/older/load-more label) tried first because a URL the
+site offers cannot be an invented parameter, then 7 page-number parameters, 8
+row-offset parameters and 3 `/page/N/` path shapes.
+
+Five verdicts, and the distinctions matter:
+
+| verdict | meaning |
+|---|---|
+| `FOUND` | a template that works — `--write` puts it in `sources.json` |
+| `SINGLE PAGE` | page 2 exists but repeats page 1: the listing genuinely is one page, no fix needed |
+| `NO CANDIDATE` | nothing returned different rows — likely XHR or infinite scroll, needs its own module |
+| `NO BASELINE` | page 1 parsed to nothing, so there is nothing to compare; fix the source first |
+| `ERROR` | the probe itself failed |
+
+`SINGLE PAGE` versus `NO CANDIDATE` is the one worth having: the first needs no
+work at all, and without the distinction every small foundation site looks like
+a bug.
+
+Output templates keep literal `{page}` / `{offset}` braces — `urlencode` turns
+those into `%7Bpage%7D`, which is not a format placeholder, so the crawler would
+have asked each site for a page literally named `%7Bpage%7D`.
+
+### Changed — `backend/app/scrapers/adb.py`
+
+Two related corrections, both about the same misunderstanding.
+
+**The sort comment was backwards.** It read "the sort puts the soonest closing
+date first". The code asks for `ds_date_closing desc` — *latest* closing date
+first. The code is right and the comment was wrong, and the direction is
+load-bearing: a tender that is still open closes in the future, so
+descending puts open tenders at the FRONT and the 37,769 closed ones at the
+back where the walk never reaches. Flipped to ascending, the crawl would spend
+its entire page budget on records that get discarded on save.
+
+**The unfiltered warning overstated the damage, and the budget understated the
+need.** The old message said an unfiltered run sees "only the first 720 of
+51,013" and was therefore nearly useless. That ignored the sort. ADB's own facet
+counts are ~489 Active plus ~396 Advance Notice — roughly 885 records with a
+future closing date, about 74 pages at 12 per page. The 60-page cap stopped ~15
+pages short of that, so an unfiltered run really did drop live tenders — just
+for a different reason than the warning gave.
+
+Added `unfiltered_max_pages = 110` (1,320 records), used only when the Status
+facet fails to apply, and rewrote the warning to say what is actually true: the
+sort puts the open tenders at the front and they should all be inside the
+budget, but it is guesswork rather than a filter, so fix the facet if it
+recurs.
+
+### Verdicts for the other three
+
+- **UN Partner Portal** — complete. Stops on the API's own `count`, 61 of 61.
+  No change needed; EC2 is waiting on the two-step login fix.
+- **World Bank** — complete. The only source that already had a correct
+  `{offset}` template. No change.
+- **DevelopmentAid** — capped at 50 listings per section by the account's
+  subscription, which refuses page 2 with a dialog. `_MAX_PAGES` is 30,000; the
+  scraper never gets the chance. Nothing to fix in code. Worth noting the
+  default sort is Modified Date, so the 50 it does get are the freshest.
+
+### Verified
+
+`probe_pagination.py` against a stub site in three shapes: one that paginates
+with `?page=N` (→ `FOUND`, correct template, and the template proven to
+`.format()` into a real URL), one whose page 2 repeats page 1 (→ `SINGLE PAGE`,
+after correctly rejecting all 18 parameter candidates), and one whose page 1
+parses to nothing (→ `NO BASELINE`). `--write` confirmed to patch `sources.json`
+with literal braces and the right `page_size` for offset templates. ADB's page
+budgets checked against its published facet counts.
+
+---
+
 ## 2026-08-25 — UNPP sign-in is two-step; the API route was CSRF, not credentials
 
 The previous attempt still returned 0 rows, and its own diagnostics named both

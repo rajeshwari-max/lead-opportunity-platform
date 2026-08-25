@@ -46,8 +46,15 @@ log = logging.getLogger("scraper")
 LISTING_URL = "https://www.adb.org/projects/tenders"
 
 # The search ADB's own widget produces, confirmed opening in a signed-out
-# browser. {page} is substituted per page; the sort puts the soonest closing
-# date first, so the pages that matter are the ones we reach first.
+# browser. {page} is substituted per page.
+#
+# The sort is ds_date_closing DESC — latest closing date first, NOT soonest.
+# That is the right way round and it is load-bearing: a tender that is still
+# open closes in the future, so open tenders sort to the front and the 37,769
+# closed ones sit at the back. It is what makes an unfiltered walk (see
+# unfiltered_max_pages) still return live tenders rather than an archive.
+# Flipping it to ASC would put the oldest closed tenders first and the crawl
+# would spend its whole page budget on records that get discarded on save.
 #
 # The module docstring above says requesting these parameters is refused. That
 # was true of a COLD request — one arriving with no cookies, no referer, and a
@@ -115,10 +122,16 @@ class AdbTendersScraper(BaseScraper):
     requires_js = True
     enrich_details = False        # everything needed is on the listing row
 
-    # Safety net: 182 active consulting notices at 12/page is ~16 pages. The cap
-    # is generous but finite, so a pagination control that never disables itself
+    # Safety net: ~489 Active tenders at 12/page is ~41 pages. The cap is
+    # generous but finite, so a pagination control that never disables itself
     # cannot spin forever.
     max_pages = 60
+    # Used only when the Status facet failed to apply. Higher on purpose: with
+    # the closing-date-descending sort, every still-open tender sorts to the
+    # front, and ADB's own facet counts (~489 Active + ~396 Advance Notice)
+    # put that at ~74 pages. A 60-page budget would stop short of it and drop
+    # live tenders while reporting success.
+    unfiltered_max_pages = 110
 
     def parse_listing(self, html: str, page_url: str) -> list[RawOpportunity]:
         """Pull rows out of the rendered DOM.
@@ -320,16 +333,38 @@ class AdbTendersScraper(BaseScraper):
 
                 total = self._read_total(page)
                 per_page = len(page.query_selector_all("div.searchstax-search-result")) or 12
-                pages = min(self.max_pages, -(-total // per_page)) if total else self.max_pages
-                log.info("[adb] %s tender(s) to walk at %s per page -> %s page(s)",
-                         f"{total:,}" if total else "?", per_page, pages)
+                # Unfiltered runs get a bigger page budget, because the SORT is
+                # doing the filtering's job — see below.
+                budget = self.max_pages if filtered else self.unfiltered_max_pages
+                pages = min(budget, -(-total // per_page)) if total else budget
+                log.info("[adb] %s tender(s) to walk at %s per page -> %s page(s)%s",
+                         f"{total:,}" if total else "?", per_page, pages,
+                         "" if filtered else " (Status facet NOT applied)")
                 if total and not filtered:
+                    # This used to warn that an unfiltered run sees "only the
+                    # first 720 of 51,013" and was therefore nearly useless.
+                    # That reading ignored the sort order, and the sort is what
+                    # makes an unfiltered run survivable.
+                    #
+                    # SEARCH_URL asks for ds_date_closing DESC — closing date,
+                    # latest first. Every tender that is still open closes in
+                    # the future, so open tenders sort to the FRONT and the
+                    # 37,769 closed ones sit at the back where the walk never
+                    # reaches. ADB's own facet counts are ~489 Active plus ~396
+                    # Advance Notice, so roughly 885 records carry a future
+                    # closing date — about 74 pages at 12 per page.
+                    #
+                    # 60 pages (the filtered budget) would have stopped ~15
+                    # pages short of that and quietly missed live tenders. The
+                    # unfiltered budget is set past it deliberately.
                     log.warning(
-                        "[adb] walking UNFILTERED: %s records, capped at %s pages, so "
-                        "this run will see only the first %s. Fix the Status facet "
-                        "rather than raising max_pages — almost all of those records "
-                        "are closed tenders that get discarded on save.",
-                        f"{total:,}", self.max_pages, self.max_pages * per_page,
+                        "[adb] the Status facet did not apply, so this is an "
+                        "UNFILTERED walk of %s record(s), capped at %s pages "
+                        "(%s records). The sort is closing-date-descending, so "
+                        "the open tenders are at the front and should all be "
+                        "inside that — but it is guesswork rather than a "
+                        "filter, so fix the facet if this recurs.",
+                        f"{total:,}", pages, pages * per_page,
                     )
 
                 for n in range(1, pages + 1):
