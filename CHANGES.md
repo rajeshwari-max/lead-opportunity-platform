@@ -5,6 +5,49 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-08-26 — NGOBOX confirmed fixed; GrantWatch names its own blocker
+
+**NGOBOX: 0% → every row `[deep]`, `VERDICT: LOOKS CORRECT`, 8.5s.** The
+scraper was never broken; `link_kind` was calling its per-grant URLs index
+pages. Nothing in `ngobox.py` changed.
+
+**GrantWatch: the new diagnostic answered in one line.**
+
+```
+[grantwatch] the page is a bot wall, not a listing
+    (matched 'just a moment', title='Just a moment...').
+    A parser change cannot fix this.
+```
+
+Cloudflare's JS challenge — and this scraper was walking straight into it.
+
+`BaseScraper._fetch_rendered_sync` already waits out interstitials for every
+other JS source. GrantWatch **overrides that method**, and in doing so lost the
+behaviour: it navigated, waited 15s for networkidle, took a snapshot of the
+challenge page, and reported zero grants. A 22-second run spent entirely on a
+page that was asking to be waited for.
+
+`_wait_out_challenge()` polls the title until the challenge clears, up to 45s.
+This is not defeating a bot check — it is doing exactly what the check asks:
+load the page, run its JavaScript, wait. It polls rather than sleeping a fixed
+amount, so a page that clears in three seconds costs three seconds.
+
+If it does **not** clear, the log now says what that means rather than leaving
+it as a parser mystery: the challenge is not clearing for this client, most
+likely because the server's datacenter IP is refused outright, and the options
+are a different network, feed access from GrantWatch, or dropping the source.
+That is a decision for a person, and the log should hand it over rather than
+retry forever.
+
+### Verified
+
+`_wait_out_challenge` against three cases: a challenge that clears on the third
+poll (returns True and logs how long it took), one that never clears (returns
+False within the budget), and a page that was never challenged (returns True
+immediately, no wasted wait).
+
+---
+
 ## 2026-08-26 — `link_kind` was mislabelling deep links across every source
 
 The batch 2 verification run reported NGOBOX at **0% deep links** and flagged it

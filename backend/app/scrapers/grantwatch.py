@@ -24,6 +24,12 @@ log = logging.getLogger("scraper")
 _GRANT_LINK = re.compile(r"/grant/(\d+)/", re.IGNORECASE)
 _DEADLINE = re.compile(r"Deadline\s*:?\s*([0-9/]{6,10}|Ongoing)", re.IGNORECASE)
 _MAX_PAGES = 30
+# How long to let a JS challenge resolve before calling it a hard block.
+# Cloudflare's own interstitial advertises ~5s; 45 allows for a slow round trip
+# and a retry, and stops well short of hanging the run.
+_CHALLENGE_WAIT_S = 45
+_CHALLENGE_TITLES = ("just a moment", "attention required", "checking your browser",
+                     "verify you are human", "one moment", "please wait")
 
 
 @register
@@ -40,6 +46,32 @@ class GrantWatchScraper(BaseScraper):
 
     def next_page(self, html: str, page_url: str, page_number: int) -> None:
         return None    # all pages accumulated in one rendered session
+
+    @staticmethod
+    def _wait_out_challenge(page, seconds: int = _CHALLENGE_WAIT_S) -> bool:
+        """Let a JS interstitial resolve. True once the real page is showing.
+
+        Polls the title rather than sleeping a fixed amount, so a page that
+        clears in three seconds costs three seconds.
+        """
+        import time as _time
+
+        limit = _time.monotonic() + seconds
+        challenged = False
+        while _time.monotonic() < limit:
+            try:
+                title = (page.title() or "").lower()
+            except Exception:
+                title = ""
+            if not any(t in title for t in _CHALLENGE_TITLES):
+                if challenged:
+                    log.info("[grantwatch] the challenge cleared after %.0fs",
+                             seconds - (limit - _time.monotonic()))
+                return True
+            challenged = True
+            page.wait_for_timeout(2_000)
+        return False
+
 
     def _fetch_rendered_sync(self, url: str) -> str:
         """Render the listing and click through every pager page in one session."""
@@ -71,6 +103,28 @@ class GrantWatchScraper(BaseScraper):
                     page.wait_for_load_state("networkidle", timeout=15_000)
                 except Exception:
                     pass
+
+                # Cloudflare's JS challenge ("Just a moment...") clears itself
+                # in a real browser after a few seconds. Waiting for it is not
+                # defeating the check — it is doing exactly what the check asks:
+                # load the page, run its JavaScript, wait.
+                #
+                # BaseScraper._fetch_rendered_sync already does this for every
+                # other JS source. This scraper overrides that method and so
+                # lost the behaviour, which is why a 22-second run ended on the
+                # challenge page and reported zero grants.
+                if not self._wait_out_challenge(page):
+                    log.error(
+                        "[grantwatch] still on Cloudflare's challenge after "
+                        "%ss. This is not something a scraper change fixes: the "
+                        "challenge is not clearing for this client. Most likely "
+                        "the server's datacenter IP is refused outright — the "
+                        "same page opens normally in an ordinary browser. "
+                        "Options are to run this source from a different "
+                        "network, ask GrantWatch for feed access, or drop it.",
+                        _CHALLENGE_WAIT_S,
+                    )
+                    return page.content()   # let parse_listing report it too
 
                 chunks: list[str] = []
                 first_link_js = (
