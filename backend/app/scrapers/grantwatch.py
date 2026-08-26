@@ -111,8 +111,9 @@ class GrantWatchScraper(BaseScraper):
         soup = BeautifulSoup(html, "lxml")
         items: list[RawOpportunity] = []
         seen: set[str] = set()
+        anchors = soup.find_all("a", href=True)
 
-        for a in soup.find_all("a", href=True):
+        for a in anchors:
             m = _GRANT_LINK.search(a["href"])
             title = a.get_text(" ", strip=True)
             if not m or len(title) < 15 or title.lower() == "view grant":
@@ -157,4 +158,50 @@ class GrantWatchScraper(BaseScraper):
                     dayfirst=False,   # US site: 09/18/26 = September 18
                 )
             )
+
+        if not items:
+            # "0 items" is the least useful thing this could report. The page
+            # was rendered, the browser presented itself correctly, and 21
+            # seconds were spent — so the question is what the HTML actually
+            # contained, and only this function can answer it.
+            self._report_empty(soup, anchors, html)
         return items
+
+    def _report_empty(self, soup, anchors, html: str) -> None:
+        """Say what the page held instead of grants, in one log line.
+
+        Distinguishes the three things that all look like "0 items": the page
+        never rendered its listing, the listing is there but the /grant/<id>/
+        URL shape changed, or the site served a bot wall.
+        """
+        title = (soup.title.get_text(strip=True) if soup.title else "")[:80]
+        text = soup.get_text(" ", strip=True)
+        low = f"{title} {text[:400]}".lower()
+        wall = next((w for w in ("just a moment", "attention required",
+                                 "verify you are human", "access denied",
+                                 "enable javascript", "unusual traffic")
+                     if w in low), "")
+        if wall:
+            log.error("[grantwatch] the page is a bot wall, not a listing "
+                      "(matched %r, title=%r). A parser change cannot fix this.",
+                      wall, title)
+            return
+
+        # What link shapes ARE on the page? The most common second path segment
+        # is usually the answer — if grants moved to /grants/<slug>/ this names
+        # it immediately.
+        from collections import Counter
+        shapes = Counter()
+        for a in anchors:
+            href = a.get("href") or ""
+            parts = [p for p in href.split("?")[0].split("/") if p and ":" not in p]
+            if parts:
+                shapes["/" + parts[0]] += 1
+        log.error(
+            "[grantwatch] rendered %s characters and %s link(s), none matching "
+            "%s. Commonest link prefixes: %s. Page title: %r. If a prefix below "
+            "looks like the new home for grants, _GRANT_LINK needs updating; if "
+            "the list is all navigation, the listing never rendered.",
+            len(html), len(anchors), _GRANT_LINK.pattern,
+            shapes.most_common(8), title,
+        )

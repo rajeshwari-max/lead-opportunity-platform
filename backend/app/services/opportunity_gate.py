@@ -121,6 +121,52 @@ _HEADING_TITLE = re.compile(
 )
 
 
+# ---------------------------------------------------------------- past awards
+# A grant that has ALREADY been given is not an opportunity, and it is the
+# hardest kind of junk to reject: "$500,000 grant to the Clean Air Institute for
+# monitoring in Lagos" carries every funding word a real call carries, so both
+# the vocabulary test and the amount test pass it happily.
+#
+# Nine sources in the audit point at exactly these pages — "our grants",
+# "committed grants", "grantees", "grants database", "past calls" — so this is
+# not a rare edge case, it is a whole category of source.
+#
+# Matched on PAST-TENSE phrasing only. "Award" alone is not enough and never
+# will be: an award is also a thing you apply for ("Young Scientist Award 2026:
+# call for nominations"), and rejecting the word would delete real calls. What
+# gives a past award away is the grammar around it — awarded TO someone,
+# someone RECEIVES, we ANNOUNCE the recipients.
+_ALREADY_AWARDED = re.compile(
+    r"\b("
+    r"award(ed|s)\s+(to|\$|£|€|₹|a\s|the\s|over\s|more\s+than)|"
+    # Procurement's own name for a decision already taken. Explicit because it
+    # is followed by a colon, not by "to" — and because a tender board publishes
+    # these alongside its open notices, so a curated source needs it too.
+    r"contract\s+award|award\s+notice|notice\s+of\s+award|"
+    r"(has|have|were|was)\s+(been\s+)?(awarded|selected|granted|funded)|"
+    r"receiv(es|ed)\s+(a\s+|an\s+|\$|£|€|₹|funding|grant|award)|"
+    r"win(s|ner|ners)\b|"
+    # "Announcing our 2026 grantees" — the noun can sit several words after
+    # the verb ("our", a year, a count), so this spans up to 30 characters
+    # rather than trying to enumerate the determiners.
+    r"announc\w+[^.!?]{0,30}?"
+    r"(recipients?|grantees?|winners?|awardees?|fellows|cohort)|"
+    r"meet\s+(our|the)\s+(grantees?|winners?|recipients?)|"
+    r"grantees?\s+(announced|selected|named)|"
+    r"congratulat\w+|"
+    r"our\s+(latest\s+)?(grantees?|investments?|portfolio)|"
+    r"grant\s+to\s+\w+|"
+    r"funded\s+(projects?|organi[sz]ations?|partners?)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def is_already_awarded(title: str, summary: str = "") -> bool:
+    """True when this reads as a grant already given, not one being offered."""
+    return bool(_ALREADY_AWARDED.search(f"{title or ''} {(summary or '')[:400]}"))
+
+
 def _path(url: str) -> str:
     try:
         return (urlparse(url or "").path or "").rstrip("/")
@@ -154,6 +200,13 @@ def is_opportunity(
     if path and _NOT_AN_OPPORTUNITY_HREF.search(path) and \
             not _OPPORTUNITY_HREF.search(path):
         return False, "page type is never an opportunity"
+
+    # Also every source, curated included. A tender board publishes contract
+    # awards alongside its open notices — World Bank's feed is mostly awards —
+    # so "this page only contains opportunities" does not mean "and none of them
+    # have already been decided".
+    if is_already_awarded(t, summary):
+        return False, "a grant already awarded, not one being offered"
 
     if curated:
         # The source page contains opportunities and nothing else, so the row

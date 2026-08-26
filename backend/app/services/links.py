@@ -63,13 +63,44 @@ def is_usable_link(url: str, website: str = "") -> bool:
     return True
 
 
-_LISTING_PATH = re.compile(
-    r"/(funding|grants?|tenders?|opportunit(y|ies)|calls?(-for-[\w-]+)?|rfp\w*|"
-    r"programs?|programmes?|apply|how-to-apply|search|search-results|"
-    r"grants-funding|funding-opportunities|open-calls?)/?$",
-    re.IGNORECASE,
-)
+# The final path segment of an INDEX page, matched WHOLE. A set, not a regex
+# with an optional suffix, because the regex form had a bug that quietly
+# distorted every source's quality score:
+#
+#     calls?(-for-[\w-]+)?$
+#
+# `[\w-]+` is greedy, so it swallowed the entire slug. That made
+#     /community-development-2/call-for-proposals-biodiversity-fund-2026-ireland
+# match as a LISTING — a URL that names one specific call, in one specific
+# country, in one specific year. FundsForNGOs was scoring 83% deep when the
+# real figure is higher, and the dashboard was telling readers those rows open
+# an index when they open the call itself.
+_LISTING_SEGMENTS = frozenset({
+    "funding", "fund", "funds", "grant", "grants", "tender", "tenders",
+    "opportunity", "opportunities", "call", "calls", "call-for-proposals",
+    "calls-for-proposals", "rfp", "rfps", "rfq", "rfqs", "proposals",
+    "program", "programs", "programme", "programmes", "apply", "applications",
+    "how-to-apply", "search", "search-results", "grants-funding",
+    "funding-opportunities", "open-call", "open-calls", "notices", "listing",
+})
 _SEARCH_QUERY = re.compile(r"[?&](s|q|search|keyword)=", re.IGNORECASE)
+
+# A slug long or structured enough to name one particular thing.
+#
+# This exists for single-segment URLs. Treating every depth-1 path as an index
+# was wrong in the same direction: NGOBOX publishes each grant at
+#     /full_grant_announcement_Applications-Invited-for-2026-Civil-Society-…
+# which is one segment and unmistakably one grant, and the source scored 0%
+# deep links — reported as "more than half the links open a listing" when in
+# fact none of them did.
+def _looks_specific(segment: str) -> bool:
+    seg = (segment or "").strip().lower()
+    if not seg or seg in _LISTING_SEGMENTS:
+        return False
+    if seg.endswith((".php", ".aspx", ".html", ".htm")) and len(seg) < 30:
+        return False          # a bare script name: listing.php, index.aspx
+    # Either long, or built from several words — both mean "this names a thing".
+    return len(seg) >= 25 or (seg.count("-") + seg.count("_")) >= 3
 
 
 def link_kind(url: str) -> str:
@@ -92,10 +123,17 @@ def link_kind(url: str) -> str:
         return ""
     parsed = urlparse(u)
     path = (parsed.path or "").rstrip("/")
-    depth = len([seg for seg in path.split("/") if seg])
-    if _SEARCH_QUERY.search(u) or _LISTING_PATH.search(path):
+    segments = [seg for seg in path.split("/") if seg]
+    last = segments[-1] if segments else ""
+
+    if _SEARCH_QUERY.search(u):
         return "listing"
-    if depth <= 1 and not parsed.query:
+    # The last segment IS an index name ("/funding", "/grants", "/apply").
+    if last.lower() in _LISTING_SEGMENTS:
+        return "listing"
+    if not segments:
+        return "listing"          # bare domain
+    if len(segments) <= 1 and not parsed.query and not _looks_specific(last):
         return "listing"
     return "deep"
 

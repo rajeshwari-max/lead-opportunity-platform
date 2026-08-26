@@ -5,6 +5,170 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-08-26 — `link_kind` was mislabelling deep links across every source
+
+The batch 2 verification run reported NGOBOX at **0% deep links** and flagged it
+`NEEDS WORK`. Its URLs are per-grant. The scraper was fine; the measurement was
+wrong, and it has been wrong for every source.
+
+**Two defects in `services/links.py::link_kind`, both saying "index" about a
+page that names one specific call.**
+
+**1. A greedy regex swallowed the slug.** The listing test was:
+
+```
+calls?(-for-[\w-]+)?$
+```
+
+`[\w-]+` is greedy, so it consumed the whole slug. That made
+
+```
+/community-development-2/call-for-proposals-biodiversity-fund-2026-ireland
+```
+
+match as a LISTING — a URL naming one call, one country, one year. Replaced
+with a set of index segment names matched **whole**.
+
+**2. Every single-segment path was treated as an index.** NGOBOX publishes each
+grant at `/full_grant_announcement_Applications-Invited-for-2026-Civil-Society-…`
+— one segment, unmistakably one grant. `_looks_specific()` now asks whether the
+segment names a thing: 25+ characters, or built from three or more words. A bare
+script name (`listing.php`, `index.aspx`) still reads as an index.
+
+This is not cosmetic. `link_kind` decides what the dashboard **tells the reader**
+— "opens the funder's listing page, you'll need to find the row" versus a direct
+link — so readers were being warned off links that go straight to the call. It
+also feeds the `deep%` column that every quality verdict in this project has
+been judged on.
+
+Corrected by this: NGOBOX 0% → its real figure, FundsForNGOs 83% → higher, Bond
+42% → higher. Genuine index pages still read as listings: `/apply/`,
+`/funding/`, `/grants`, `/applyingforfunds/`, and DevNetJobsIndia's
+`rfp_assignments.aspx`, which really is the only route to some of its rows.
+
+### GrantWatch returned 0 items — now it will say why
+
+The run rendered for 21 seconds, presented a correct browser identity,
+accumulated one page snapshot and parsed nothing. "0 items" is the least useful
+thing that could be reported, because three different situations produce it: the
+listing never rendered, the `/grant/<id>/` URL shape changed, or the site served
+a bot wall.
+
+`_report_empty()` now separates them. A bot wall is named as one and says a
+parser change cannot fix it. Otherwise it logs the character count, the link
+count, and the **commonest link prefixes on the page** — if grants have moved to
+`/grants/<slug>/`, that line names the new shape immediately instead of leaving
+it to be guessed.
+
+### The rest of batch 2, confirmed working
+
+- **FundsForNGOs** — 100 items over 2 pages, 100% of deadlines parse. The
+  `blank organisation: 92` in the check output is expected: that column shows
+  the raw scrape, and `_ingest` fills the funder from the summary at save time.
+- **DevNetJobsIndia** — 35 items, and 14 rows dropped with
+  `no job_id recoverable … dropping the row rather than pointing it at the
+  index`. That is the batch 2 fix working, not a regression.
+- **Bond UK** — 448 items via 49 Load More clicks. Its 94 duplicate URLs are a
+  characteristic of the source, not a fault: one funder page often hosts several
+  distinct programmes, and the rows carry different titles, so dedup keeps them
+  apart. Left alone deliberately.
+
+### Verified
+
+18 URLs taken from the live run: every one previously mislabelled now reads
+`deep`, and every genuine index page still reads `listing`. Two cases I had
+expected to flip did not — `/applyingforfunds/` and `rfp_assignments.aspx` — and
+on inspection the code was right and my expectation was wrong; both really are
+index pages. GrantWatch's diagnostic exercised on a bot wall, a moved URL shape
+(correctly reporting `[('/grants', 12), ('/about', 1), ('/login', 1)]`), and a
+normal page that still parses.
+
+---
+
+## 2026-08-26 — Batch 3: the nine "awarded grants" sources
+
+Clean Air Fund, Rockefeller, Gates, Laudes and CJRF all point at a page listing
+money **already given**: "our grants", "committed grants", "grants database".
+Four more sources in the audit do the same. Whatever those pages yield, nobody
+can apply to it, and no parser change reaches that — the URL is aimed at the
+wrong page.
+
+Two things were needed, and neither is a guess.
+
+### 1. The gate could not tell a past award from a call
+
+This is the hardest junk to reject. *"$500,000 grant to the Clean Air Institute
+for monitoring in Lagos"* carries every funding word a real call carries — the
+vocabulary test passes it, the amount test passes it, and the URL is under
+`/grants/`, so the href test passes it too. All three of the gate's positive
+signals fire on a grant that closed years ago.
+
+`is_already_awarded()` matches **past-tense phrasing only**, and that
+restriction is the whole design. "Award" alone is not evidence and never can be
+— an award is also a thing you apply for. *"Young Scientist Award 2026: call for
+nominations"* must survive. What gives a past award away is the grammar around
+it: awarded **to** someone, someone **receives**, we **announce** the
+recipients, **congratulations** to our fellows, **funded projects** 2025.
+
+Plus procurement's own name for a decision already taken — `Contract Award`,
+`Notice of Award` — which is followed by a colon rather than by "to", so it
+needs naming explicitly.
+
+**This one applies to curated sources too.** A tender board publishes contract
+awards alongside its open notices — World Bank's feed is mostly awards — so
+"this page contains only opportunities" does not mean "and none of them have
+already been decided". It is a second line of defence behind
+`worldbank.py`'s `notice_type` filter.
+
+### 2. New — `backend/scripts/find_listing_url.py`
+
+Repointing five sources means finding each funder's real open-calls page. The
+tempting way is to guess `/funding-opportunities` and move on. That is exactly
+how World Bank ended up with a pagination template that had been doing nothing
+for months: **a URL that loads tells you nothing about whether it lists what you
+want.**
+
+So this measures. For every candidate it fetches the page, runs the source's own
+parser, puts every row through the opportunity gate, and scores what survives:
+
+```
+rows  40  open   0  dated   0  awarded  38   [configured] .../our-grants/
+rows   9  open   9  dated   7  awarded   0   [site navigation] .../funding-opportunities
+```
+
+The winner is the URL yielding the most rows that are real opportunities — not
+the most rows, and not the one that merely responds.
+
+Candidates come from the site's own navigation first (a path the site offers
+beats one invented here), filtered so a link saying "our grantees" is never
+followed, then a list of conventional paths tried on the same domain.
+
+**The `awarded` column is the point.** A page scoring `rows 40 / open 0 /
+awarded 38` is a grantee list, and saying so is more useful than any repointing:
+that funder may publish no open calls at all. The script reports `AWARDS ONLY`
+and recommends **removing the source** rather than leaving it to add noise every
+run. Deleting a source is a real answer, and one a URL guess would have hidden.
+
+`--write` applies the recommended URL to `sources.json`.
+
+### Verified
+
+The past-award rule against 18 cases: 11 rejections including
+`$500,000 grant to…`, `Announcing our 2026 grantees`, `Meet the grantees of…`,
+`Six organisations have been selected…`, `Congratulations to our 2026 Fellows`,
+`Contract Award:` and `Notice of Award —`; and 7 keepers including
+`Young Scientist Award 2026: call for nominations` and
+`Innovation Award — apply by 30 September`, which a naive "award" rule would
+have deleted. 18/18.
+
+The finder against a stub Clean Air Fund: the configured grantee page scores
+`rows 3 / open 0 / awarded 3`, a funding page scores `rows 2 / open 2 / dated
+2`, and the ranking picks the funding page. Nav-link filter confirmed to follow
+"Funding opportunities", "Apply for funding" and "Open calls" while skipping
+"Our grantees", "Past grants", "Committed grants", "News" and "Annual report".
+
+---
+
 ## 2026-08-26 — Batch 2: FundsForNGOs, NGOBOX, DevNetJobsIndia, GrantWatch, Bond UK
 
 All five are hand-written modules. Three carried real defects; NGOBOX was clean.
