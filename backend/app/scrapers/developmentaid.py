@@ -150,6 +150,35 @@ _ENTITYTYPE_CATEGORY = {
 }
 
 
+# The API's way of saying "no closing date". A row came back as
+# `deadline: 9999-12-31`, which parses perfectly as a real date 7,973 years
+# away — so it sails past every expiry check, sorts to the bottom of every
+# "closing soon" view, and shows a user a deadline that does not exist.
+#
+# This is the three-state deadline model doing its job: the row is not
+# dated, it is ROLLING, and the two have to be stored differently. Blanking
+# the string lets assume_active pick it up as ongoing, which is what the
+# source is actually saying.
+_SENTINEL_DEADLINES = frozenset({
+    "9999-12-31", "9999-12-31t00:00:00", "9999-12-31 00:00:00",
+    "0001-01-01", "1970-01-01", "2099-12-31", "3000-01-01",
+})
+
+
+def _clean_sentinel_deadline(value: str) -> str:
+    """'' for a placeholder date, the value unchanged otherwise."""
+    v = (value or "").strip().lower()
+    if not v:
+        return ""
+    # Compare on the date part alone so 9999-12-31T00:00:00.000Z matches too.
+    head = v.split("t")[0].split(" ")[0]
+    if v in _SENTINEL_DEADLINES or head in _SENTINEL_DEADLINES:
+        return ""
+    if head.startswith(("9999-", "0001-", "3000-")):
+        return ""
+    return value
+
+
 def _page_url(base_url: str, page_nr: int) -> str:
     """https://.../grants/search?pageNr=N — preserves any other query params."""
     parsed = urlparse(base_url)
@@ -160,114 +189,19 @@ def _page_url(base_url: str, page_nr: int) -> str:
 
 
 def _membership_state(page) -> tuple[str, str]:
-    """('in' | 'out' | 'unknown', evidence) — the session state, stated not guessed.
+    """('in' | 'out' | 'unknown', evidence). Delegates to devaid_auth.
 
-    The previous check was `not is_signed_in(page) and not <member chrome>`, and
-    it had a false negative that mattered: `is_signed_in` returns True when it
-    finds no visible "Sign in" control, and a blank page, a Cloudflare
-    interstitial or a failed load contains no such control either. So a broken
-    page read as SIGNED IN, and the run went on to blame the subscription for a
-    restriction it might never have hit as a member.
+    This used to be a second, separate implementation, and having two of them
+    is exactly how `devaid_session.py status` came to print "signed in: True"
+    in the same minute that `push` refused with "the saved session is no longer
+    signed in" — same machine, same profile, two detectors, two answers.
 
-    Three values, because there are three situations. "unknown" is not a
-    failure — it means the page could not answer the question, which is itself
-    worth logging rather than rounding to whichever answer is convenient.
-
-    Why the selector list is narrower than it looks
-    ----------------------------------------------
-    The first version of this accepted `a[href*="/membership"]` and
-    `[class*="avatar"]` as proof of membership, and on 2026-08-26 it reported
-
-        session check -> SIGNED IN (member chrome present (a.membership-card expert))
-
-    on a page that was simultaneously showing "Info available only for members".
-    `a.membership-card.expert` is the site's own UPSELL card — the tile that
-    advertises the Expert plan to people who do not have it. Marketing chrome
-    aimed at non-members was being read as evidence of membership, and the run
-    then used that to declare the 50-row cap a paid-plan limit that no code
-    change could reach. That verdict cost a real decision, so the bar is now:
-
-      - "in" requires a control that only exists once authenticated — a
-        log-out link, or a link into the signed-in account area. An upsell
-        card, a pricing link or a bare avatar-shaped div is not evidence.
-      - The members-only paywall text is treated as evidence AGAINST, because
-        it is the site stating its own answer rather than us inferring one.
+    One detector now, in devaid_auth, so the scraper and the session tooling
+    can never disagree about whether a run is signed in.
     """
-    try:
-        info = page.evaluate("""() => {
-            const vis = e => {
-                if (!e) return false;
-                const s = window.getComputedStyle(e);
-                return s.display !== 'none' && s.visibility !== 'hidden'
-                       && e.offsetParent !== null;
-            };
-            const norm = s => (s || '').toString()
-                .replace(/\\s+/g, ' ').trim().toLowerCase();
-            const path = a => {
-                try { return new URL(a.getAttribute('href') || '',
-                                     location.origin).pathname.toLowerCase(); }
-                catch (e) { return ''; }
-            };
-            // Marketing chrome. Present for members and non-members alike, so
-            // it can never settle the question either way.
-            const isPromo = e => /card|banner|promo|upsell|cta|pricing|plan/i
-                .test((e.className || '').toString());
+    from app.scrapers.devaid_auth import membership_state
 
-            const anchors = Array.from(document.querySelectorAll('a,button'));
-
-            // Only exists once authenticated.
-            const logout = anchors.find(e => {
-                const p = e.tagName === 'A' ? path(e) : '';
-                const t = norm(e.textContent).slice(0, 30);
-                return /(log-?out|sign-?out)/.test(p)
-                    || ['log out','logout','sign out','signout'].includes(t);
-            });
-            // The signed-in account area, as distinct from the public
-            // /membership marketing pages.
-            const account = anchors.find(e => e.tagName === 'A'
-                && !isPromo(e)
-                && /^\\/(my-account|my-profile|my-dashboard|my-|account|profile|dashboard)(\\/|$)/
-                    .test(path(e)));
-
-            const signin = anchors.find(
-                e => ['sign in', 'log in', 'login'].includes(norm(e.textContent)));
-
-            const body = document.body ? document.body.innerText : '';
-            const paywall = /info available only for members|available only for members|only for members/i
-                .test(body);
-
-            const describe = e => e
-                ? (e.tagName.toLowerCase() + '.'
-                   + (e.className || '').toString().slice(0, 40))
-                : '';
-            return {
-                logout: !!logout, logoutSel: describe(logout),
-                account: !!account, accountSel: describe(account),
-                signin: vis(signin),
-                paywall: paywall,
-                title: (document.title || '').slice(0, 80),
-                bodyLen: body.length,
-            };
-        }""") or {}
-    except Exception as exc:                                    # noqa: BLE001
-        return "unknown", f"the page could not be inspected ({type(exc).__name__})"
-
-    if info.get("logout"):
-        return "in", f"a log-out control ({info.get('logoutSel') or '?'})"
-    if info.get("account"):
-        return "in", f"a signed-in account link ({info.get('accountSel') or '?'})"
-    if info.get("paywall"):
-        return "out", ("the page is showing its members-only notice, which is the "
-                       "site's own answer: this session is not being treated as a "
-                       "member")
-    if info.get("signin"):
-        return "out", "a visible Sign in control and no signed-in controls"
-    if (info.get("bodyLen") or 0) < 400:
-        return "unknown", (f"the page is nearly empty (title={info.get('title')!r}) "
-                           f"— a challenge or a failed load, not an answer about "
-                           f"the session")
-    return "unknown", (f"no log-out or account control, and no Sign in control "
-                       f"(title={info.get('title')!r})")
+    return membership_state(page)
 
 
 class _ApiResp:
@@ -1076,7 +1010,8 @@ class DevelopmentAidScraper(BaseScraper):
         elif not url.startswith("http"):
             url = ""      # no usable id — better empty than a link that misleads
         status = self._pick(item, "status").lower()
-        deadline = self._pick(item, "deadline", "closing", "expir")
+        deadline = _clean_sentinel_deadline(
+            self._pick(item, "deadline", "closing", "expir"))
         where = self._pick(item, "location", "countr", "region")
         return RawOpportunity(
             title=title[:500],
@@ -1364,18 +1299,33 @@ class DevelopmentAidScraper(BaseScraper):
             else:
                 log.info("[developmentaid] %s: %s failed after %s probe pages",
                          slug, describe, len(seen))
-        if refused.get("status"):
-            # This is the difference between "the API does not paginate for this
-            # account" and "we never got an answer out of the API at all". The
-            # 2026-08-26 run reported the first and meant the second.
+        # Only meaningful when the API answered NOTHING all run. The first
+        # version of this fired on any refusal at all, and on 2026-08-26 it
+        # announced "the API was never reached" in a run where the taxonomies
+        # had just been fetched and a 100-item page had been accepted — the
+        # refusals were HTTP 400s from probe variants the API rejects by
+        # design (pageNr=0, an offset where a page number belongs). Warning
+        # about a normal negative result is how a diagnostic loses its
+        # credibility, so it now has to clear both bars.
+        last = refused.get("status") or 0
+        if last in (401, 403) and not getattr(self, "_api_reached", False):
             log.error(
                 "[developmentaid] %s: EVERY pagination probe was REFUSED (last "
-                "HTTP %s) — the API was never reached, so nothing above is a "
-                "measurement of what this account is allowed to page. Do not "
-                "read it as a plan limit. The site's own JavaScript calls this "
-                "same endpoint successfully, so the refusal is about how the "
-                "request was made, not who made it.",
-                slug, refused["status"],
+                "HTTP %s) and no API call succeeded this run, so nothing above "
+                "is a measurement of what this account is allowed to page. Do "
+                "not read it as a plan limit. The site's own JavaScript calls "
+                "this same endpoint successfully, so the refusal is about how "
+                "the request was made, not who made it.",
+                slug, last,
+            )
+        elif last:
+            log.info(
+                "[developmentaid] %s: no paging field found; last probe rejection "
+                "was HTTP %s. The API did answer this run, so this is a real "
+                "result — %s.", slug, last,
+                "400 means the probe payloads themselves were invalid, which is "
+                "expected for the variants this tries" if last == 400
+                else "the endpoint declined those payloads",
             )
         return None
 
@@ -1790,8 +1740,17 @@ class DevelopmentAidScraper(BaseScraper):
                         self._set_path(child, dpath, [value])
                     except Exception:
                         continue
+                    # lo/hi MUST be carried down. They were not, and the
+                    # defaults are 0/0, so every leaf reached through a
+                    # categorical split arrived with hi=0 — and the budget
+                    # bisection below is guarded by `hi > lo + 1`, which 0 > 1
+                    # never satisfies. The budget axis therefore existed, was
+                    # validated, and could never fire anywhere except the root.
+                    # That is the whole explanation for the four
+                    # "no split axis remains" leaks in the 2026-08-26 run.
                     cover(child, dim_idx + 1,
-                          f"{label}+{dname}={vname}" if label != "all" else f"{dname}={vname}")
+                          f"{label}+{dname}={vname}" if label != "all" else f"{dname}={vname}",
+                          lo, hi)
                 return
             if budget_path and hi > lo + 1:
                 mid = (lo + hi) // 2
@@ -1810,10 +1769,41 @@ class DevelopmentAidScraper(BaseScraper):
                         continue
                     cover(child, dim_idx, f"{label}+budget {a}-{b}", a, b)
                 return
-            # No axis left: take what this search can give and say so.
+            # No axis left. Before giving up, read the list from the other end.
+            #
+            # A truncated search always returns the FIRST `reachable` rows of
+            # some ordering. Reversing that ordering returns the LAST ones, and
+            # they are a different set — so one extra request roughly doubles
+            # what an unsplittable leaf yields, with no filter to discover and
+            # no assumption about what the server allows. On the 2026-08-26 run
+            # the four leaks held 838 listings between them and surrendered 348;
+            # reading both ends is the cheapest way to close most of that gap.
+            #
+            # It cannot recover a leaf holding more than 2x `reachable` — that
+            # needs a real axis — so the shortfall is still reported, now
+            # counting what both directions actually returned.
             gained = run_search(base, label)
-            log.warning("[developmentaid] %s: %s holds %s but no split axis remains — "
-                        "captured %s of them", slug, label, f"{total:,}", gained)
+            flipped = 0
+            sort_val = base.get("sort")
+            if isinstance(sort_val, str) and "." in sort_val and total > reachable:
+                field, _, direction = sort_val.rpartition(".")
+                other = "asc" if direction.lower() == "desc" else "desc"
+                mirror = _json.loads(_json.dumps(base))
+                mirror["sort"] = f"{field}.{other}"
+                flipped = run_search(mirror, f"{label} [reversed]")
+                budget_used += 1
+            if total > reachable * 2:
+                log.warning(
+                    "[developmentaid] %s: %s holds %s but no split axis remains — "
+                    "captured %s reading forward and %s reading backward, so about "
+                    "%s are unreachable without another filter axis.",
+                    slug, label, f"{total:,}", gained, flipped,
+                    f"{max(total - reachable * 2, 0):,}",
+                )
+            else:
+                log.info("[developmentaid] %s: %s holds %s, no split axis left — "
+                         "read both ends for %s + %s new",
+                         slug, label, f"{total:,}", gained, flipped)
 
         hi_budget = 0
         if budget_path:
@@ -2170,11 +2160,11 @@ class DevelopmentAidScraper(BaseScraper):
                 continue   # respect the site's own status label
 
             # With a membership login the deadline value is unlocked in the card
-            deadline_raw = fields.get("deadline", "")
+            deadline_raw = _clean_sentinel_deadline(fields.get("deadline", ""))
             if not deadline_raw:
                 m = _DEADLINE_NEAR.search(card.get_text(" ", strip=True))
                 if m:
-                    deadline_raw = m.group(2)
+                    deadline_raw = _clean_sentinel_deadline(m.group(2))
 
             # Grants label the issuer "Funding Agency"; tenders commonly use
             # "Contracting Authority" or "Client" instead — try all.

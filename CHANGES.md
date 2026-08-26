@@ -5,6 +5,189 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-08-26 — the login was never required: 50% of the archive, signed out
+
+A 17-minute signed-out run harvested **1,214 distinct grants of 2,422 (50%)**
+and was still climbing when the `--pages 150` cap stopped it — mid-way through
+sector 11 of 53.
+
+```
+items                           : 1534
+links to a specific opportunity : 1534/1534 (100%)
+carry a deadline string         : 1529/1534 (100%)
+  ... that actually parses      : 1529/1534 (100%)
+navigation furniture stored     : 0
+```
+
+The guest limit is **per search, not per account**. Signed out you cannot page
+*within* a search, but you can run a different one — and the adaptive
+partitioner turns 53 sectors x 190 donors x 2 purposes into as many searches as
+it needs. No account, nothing to expire, nothing to re-push.
+
+Coverage is non-linear in a good way: grants carry multiple sectors, so the
+first sectors covered pull in rows that later sectors would have repeated. 11
+sectors gave 50%; the remaining 42 add progressively fewer new rows.
+
+### The four leaks had one cause, and it is fixed
+
+```
+WARNING sector=Culture & Arts+donor=Government+purpose=Project Ideas
+        holds 291 but no split axis remains — captured 95 of them
+```
+
+Budget-range bisection exists precisely for this — an unlimited-depth numeric
+axis for when the categorical ones run out. It never fired. `cover()` recurses
+as `cover(child, dim_idx + 1, label)` on a categorical split and **drops `lo`
+and `hi`**, whose defaults are `0, 0`. The bisection below is guarded by
+`hi > lo + 1`, and `0 > 1` is never true. So the budget axis was discovered,
+validated against the server, and then made unreachable everywhere except the
+root of the recursion.
+
+Reproduced with the real recursion shape — the simulation produces exactly the
+four leaks the live run reported:
+
+```
+before (lo/hi dropped)     -> leaks: 4, rows stranded: 2420
+after  (lo/hi carried)     -> leaks: 0, rows stranded: 0
+```
+
+### Reading truncated leaves from both ends
+
+A leaf that still can't be split returns the first `reachable` rows of *some
+ordering*. Flipping `sort` from `.desc` to `.asc` returns the last ones — a
+different set, for one extra request, with no filter to discover and no
+assumption about what the server permits. Roughly doubles an unsplittable
+leaf's yield.
+
+The shortfall warning now fires only when a leaf holds more than `2 x
+reachable`, and reports what both directions actually returned instead of
+implying the rest was never there.
+
+### Still to push from the laptop
+
+The `9999-12-31` sentinel fix and the shared membership detector are committed
+locally but were not on the server for this run — `deadline: 9999-12-31` is
+still visible in row 8 of the output above, and the over-eager `EVERY
+pagination probe was REFUSED` still fires on an HTTP 400.
+
+---
+
+## 2026-08-26 (later still) — one membership detector, not three
+
+`devaid_session.py` contradicted itself on the same machine, same profile,
+seconds apart:
+
+```
+status : signed in  : True
+push   : The saved session is no longer signed in
+```
+
+Both were reading the same page. They disagreed because they asked different
+questions, and the one that said "True" was asking the wrong one.
+
+`export_session_state()` uses `is_signed_in()`: *is there a visible Sign in
+control?* It found one — the page was showing a Sign in button.
+
+`verify_session()` looked for positive member evidence and accepted
+`a[href*="/membership"]` as proof. That selector matches DevelopmentAid's
+**Expert-plan upsell tile** — the advert shown to people who are *not* members.
+It also counted `pagination > 0`, and guests are shown pagination controls too;
+they just re-serve page 1. So an advert plus some dead page links outvoted a
+Sign in button, and the machine reported a session it did not have.
+
+**This is the same bug, in a third place.** It has now been fixed in
+`developmentaid.py` (the scraper's session check) and in `verify_session()`,
+which is two fixes too many for one rule. So there is now exactly one:
+
+`devaid_auth.membership_state(page) -> ("in" | "out" | "unknown", evidence)`
+
+- proof of membership must be a control that only exists once authenticated —
+  a log-out link, or a link into the signed-in account area
+- promo / card / banner / cta / pricing classes are advertising and prove
+  nothing in either direction
+- **pagination proves nothing** — guests see it
+- a visible Sign in control, or the site's own members-only notice, is evidence
+  *against*; the site stating its answer beats us inferring one
+- `unknown` no longer returns `True`. The old code, on a page it could not
+  inspect, logged "assuming the session is usable" and returned success — which
+  is how the dashboard came to advertise a live account while every scrape
+  returned one page
+
+`developmentaid._membership_state()` is now a three-line delegate to it, so the
+scraper and the session tooling cannot disagree again.
+
+Verified against reconstructions of the real pages:
+
+```
+OUT     | THE LAPTOP RIGHT NOW: Sign in button + Expert upsell card
+OUT     | old verify_session would have said IN here (pagination present, guest)
+IN      | genuinely signed in
+UNKNOWN | Cloudflare interstitial
+```
+
+**What this means in practice:** the laptop is signed out too. `signed in:
+True` was the bug, and `push` was right to refuse. The account needs a fresh
+interactive login before any session is worth moving.
+
+---
+
+## 2026-08-26 (later) — DevelopmentAid: fix confirmed; session is the real blocker
+
+The in-page fetch landed and the API is answering. Measured, not inferred:
+
+| | before | after |
+|---|---|---|
+| page size | `300 not honoured (returned 0)` | `100 accepted (100 items in one request, was 50)` |
+| filter option lists | `could not fetch any` | `53 sectors, 190 donors, 2 purposes` |
+| total known | `? listings to cover` | `2,422 listings` |
+| **grant deadlines** | **0/150 (0%)** | **39/39 (100%)** |
+
+The grants deadline problem solved itself exactly as predicted: the listing
+cards don't carry a closing date, the JSON does. No parser change was needed.
+
+**And the session question finally has an honest answer:**
+
+```
+session check -> SIGNED OUT (a visible Sign in control and no signed-in controls)
+NOT LOGGED IN — the saved session has expired
+```
+
+It was never a subscription tier. The saved session on the server is expired,
+and the old detector was reading the Expert-plan advert as proof of membership.
+
+`pageNr (1-based) overlaps (100 unique of 200)` — pages 1 and 2 returned the
+*same* 100 rows. That is the documented signed-out behaviour: this site ignores
+`pageNr` for guests. So pagination is untested until the session is restored.
+
+### Two corrections in this commit
+
+**1. My own new diagnostic was crying wolf.** It printed
+
+> EVERY pagination probe was REFUSED (last HTTP 400) — the API was never reached
+
+in a run where the API had just returned 53 sectors, 190 donors and a 100-item
+page. The `refused` latch fired on *any* refusal, and the refusals were HTTP
+**400** — probe variants the API rejects by design (`pageNr=0`, an offset where
+a page number belongs). A warning that fires on a normal negative result is how
+a diagnostic loses its credibility. It now requires **both** a 401/403 **and**
+`_api_reached` still false; a 400 with a working API is logged as the ordinary
+result it is.
+
+**2. `deadline: 9999-12-31` is a placeholder, not a date.** It parses cleanly as
+a real date 7,973 years out, so it clears every expiry check and shows the user
+a deadline that does not exist. `_clean_sentinel_deadline()` blanks it (and
+`0001-01-01`, `1970-01-01`, `2099-12-31`, `3000-01-01`, with or without a time
+part) so the three-state model files the row as **rolling** rather than dated.
+Applied to both the API and the card path. Real dates pass through untouched —
+`2026-09-14` and `Sep 14, 2026` are unchanged.
+
+### Next
+
+Restore the session (`scripts/devaid_session.py push`, Chrome fully closed),
+then re-run. Only then is pagination measurable.
+
+---
+
 ## 2026-08-26 — DevelopmentAid: the "plan limit" was a self-inflicted 403
 
 **The verdict from the last run was wrong, and this entry retracts it.**

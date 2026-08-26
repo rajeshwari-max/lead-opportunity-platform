@@ -433,6 +433,107 @@ def is_signed_in(page) -> bool:
         return False
 
 
+# --------------------------------------------------------------- membership
+# One detector, used by verify_session() here and by the scraper, because two
+# detectors is how this project ended up with `status` reporting "signed in:
+# True" and `export` refusing in the same minute, on the same machine, against
+# the same profile:
+#
+#     status : signed in  : True
+#     push   : The saved session is no longer signed in
+#
+# They disagreed because they asked different questions. `is_signed_in()` asks
+# "is there a visible Sign in control?" and said yes — the page was showing one.
+# `verify_session()` asked for POSITIVE member evidence and accepted
+# `a[href*="/membership"]`, which matches DevelopmentAid's Expert-plan UPSELL
+# TILE — the advert shown to people who are not members. So an advert aimed at
+# logged-out visitors outvoted a Sign in button, and the machine reported a
+# working session it did not have.
+#
+# The rules below are what survives that:
+#   * proof of membership must be a control that only exists once authenticated
+#     — a log-out link, or a link into the signed-in account area;
+#   * promo / card / banner / cta / pricing classes are advertising and prove
+#     nothing either way;
+#   * pagination controls prove nothing: a guest is shown them too, they just
+#     re-serve page 1;
+#   * a visible Sign in control, or the site's own members-only notice, is
+#     evidence AGAINST — the site stating its answer beats us inferring one.
+_MEMBER_STATE_JS = """() => {
+    const vis = e => {
+        if (!e) return false;
+        const s = window.getComputedStyle(e);
+        return s.display !== 'none' && s.visibility !== 'hidden'
+               && e.offsetParent !== null;
+    };
+    const norm = s => (s || '').toString().replace(/\\s+/g, ' ').trim().toLowerCase();
+    const path = a => {
+        try { return new URL(a.getAttribute('href') || '', location.origin)
+                     .pathname.toLowerCase(); }
+        catch (e) { return ''; }
+    };
+    const isPromo = e => /card|banner|promo|upsell|cta|pricing|plan/i
+        .test((e.className || '').toString());
+
+    const anchors = Array.from(document.querySelectorAll('a,button'));
+    const logout = anchors.find(e => {
+        const p = e.tagName === 'A' ? path(e) : '';
+        const t = norm(e.textContent).slice(0, 30);
+        return /(log-?out|sign-?out)/.test(p)
+            || ['log out','logout','sign out','signout'].includes(t);
+    });
+    const account = anchors.find(e => e.tagName === 'A' && !isPromo(e)
+        && /^\\/(my-account|my-profile|my-dashboard|my-|account|profile|dashboard)(\\/|$)/
+            .test(path(e)));
+    const signin = anchors.find(
+        e => ['sign in','log in','login'].includes(norm(e.textContent)));
+
+    const body = document.body ? document.body.innerText : '';
+    const describe = e => e
+        ? (e.tagName.toLowerCase() + '.' + (e.className || '').toString().slice(0, 40))
+        : '';
+    return {
+        logout: !!logout, logoutSel: describe(logout),
+        account: !!account, accountSel: describe(account),
+        signin: vis(signin), signinSel: describe(signin),
+        paywall: /available only for members|only for members/i.test(body),
+        cards: document.querySelectorAll('da-search-card').length,
+        title: (document.title || '').slice(0, 80),
+        bodyLen: body.length,
+    };
+}"""
+
+
+def membership_state(page) -> tuple[str, str]:
+    """('in' | 'out' | 'unknown', evidence) — stated, not guessed.
+
+    "unknown" is a real answer, not a failure: it means the page could not
+    settle the question, which is worth saying rather than rounding to
+    whichever verdict is convenient.
+    """
+    try:
+        info = page.evaluate(_MEMBER_STATE_JS) or {}
+    except Exception as exc:                                    # noqa: BLE001
+        return "unknown", f"the page could not be inspected ({type(exc).__name__})"
+
+    if info.get("logout"):
+        return "in", f"a log-out control ({info.get('logoutSel') or '?'})"
+    if info.get("account"):
+        return "in", f"a signed-in account link ({info.get('accountSel') or '?'})"
+    if info.get("signin"):
+        return "out", (f"a visible Sign in control ({info.get('signinSel') or '?'}) "
+                       f"and no signed-in controls")
+    if info.get("paywall"):
+        return "out", ("the page is showing its members-only notice, which is the "
+                       "site's own answer about this session")
+    if (info.get("bodyLen") or 0) < 400:
+        return "unknown", (f"the page is nearly empty (title={info.get('title')!r}) "
+                           f"— a challenge or a failed load, not an answer")
+    return "unknown", (f"no log-out or account control, and no Sign in control "
+                       f"(title={info.get('title')!r}, "
+                       f"cards={info.get('cards')})")
+
+
 # Why the last verification came out the way it did. The connect flow reads
 # this so it can say what actually happened instead of guessing.
 LAST_VERIFY: dict[str, object] = {}
@@ -496,78 +597,34 @@ def verify_session() -> bool:
                 page.wait_for_selector("da-search-card", timeout=45_000)
             except Exception:
                 log.warning("[devaid] verify: no result cards rendered")
-            try:
-                detail = page.evaluate(
-                    """() => {
-                      const all = Array.from(document.querySelectorAll('a,button'));
-                      const vis = e => {
-                        const s = window.getComputedStyle(e);
-                        return s.display !== 'none' && s.visibility !== 'hidden'
-                               && e.offsetParent !== null;
-                      };
-                      const has = t => all.some(e =>
-                        (e.textContent||'').trim().toLowerCase() === t && vis(e));
-                      return {
-                        signIn:     has('sign in') || has('log in') || has('login'),
-                        logout:     has('log out') || has('logout') || has('sign out'),
-                        accountMenu: !!document.querySelector(
-                          '[class*="avatar" i],[class*="user-menu" i],[class*="my-account" i],'
-                          + 'a[href*="/dashboard"],a[href*="/profile"],a[href*="/membership"]'),
-                        cards: document.querySelectorAll('da-search-card').length,
-                        pagination: document.querySelectorAll(
-                          '.pagination a, a[aria-label^="Page"], [aria-label="Next page"],'
-                          + 'button.mat-paginator-navigate-next').length,
-                      };
-                    }"""
-                )
-            except Exception:
-                detail = {}
+            state, evidence = membership_state(page)
+            LAST_VERIFY.clear()
+            LAST_VERIFY.update({"reason": {"in": "ok", "out": "guest",
+                                           "unknown": "blank"}[state],
+                                "state": state, "evidence": evidence})
+            log.info("[devaid] verify: %s — %s",
+                     {"in": "SIGNED IN", "out": "SIGNED OUT",
+                      "unknown": "UNCLEAR"}[state], evidence)
 
-            # Judge on POSITIVE evidence of a member session. Relying on the
-            # absence of a "Sign in" link produced false negatives: this site
-            # keeps one in collapsed menus even when signed in, so a genuinely
-            # logged-in Premium account was being reported as not connected.
-            member_signals = (
-                bool(detail.get("logout"))
-                or bool(detail.get("accountMenu"))
-                or detail.get("pagination", 0) > 0
-            )
-            clearly_guest = bool(detail.get("signIn")) and not member_signals
-
-            # "Saw nothing at all" is not the same as "signed in". With no
-            # cards, no member signals and no Sign in link, the page simply
-            # never rendered — and treating that as success wrote the connected
-            # marker on zero evidence, so the dashboard reported a working
-            # account while every scrape came back empty.
-            nothing_rendered = (
-                not member_signals
-                and not detail.get("signIn")
-                and detail.get("cards", 0) == 0
-            )
-            if nothing_rendered:
-                LAST_VERIFY.clear()
-                LAST_VERIFY.update({"reason": "blank", "detail": detail})
+            if state == "out":
                 log.error(
-                    "[devaid] verify: the search page rendered nothing (no cards, no "
-                    "sign-in link, no account menu). The session cannot be confirmed "
-                    "— treating it as NOT connected rather than reporting a working "
-                    "account that returns no results."
+                    "[devaid] verify: this profile is NOT signed in — %s. Exporting "
+                    "or pushing it would just move an expired session. Click "
+                    "'Connect account' on the dashboard and finish signing in.",
+                    evidence,
                 )
                 return False
-
-            LAST_VERIFY.clear()
-            LAST_VERIFY.update({"reason": "guest" if clearly_guest else "ok",
-                                "detail": detail})
-            signed_in = not clearly_guest
-            log.info("[devaid] verify: signed_in=%s (member_signals=%s) details=%s",
-                     signed_in, member_signals, detail)
-            if not detail:
-                # Couldn't inspect the page at all — don't block the user on
-                # that; the scraper reports guest mode on its own if it applies.
-                log.warning("[devaid] verify: page could not be inspected — "
-                            "assuming the session is usable")
-                return True
-            return signed_in
+            if state == "unknown":
+                # Not treated as success. Reporting a working account on no
+                # evidence is what produced a dashboard that claimed a live
+                # session while every scrape came back with one page.
+                log.error(
+                    "[devaid] verify: the session could not be confirmed — %s. "
+                    "Treating it as NOT connected rather than reporting an "
+                    "account that returns no results.", evidence,
+                )
+                return False
+            return True
         finally:
             try:
                 context.close()
