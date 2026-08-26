@@ -172,6 +172,26 @@ def _membership_state(page) -> tuple[str, str]:
     Three values, because there are three situations. "unknown" is not a
     failure — it means the page could not answer the question, which is itself
     worth logging rather than rounding to whichever answer is convenient.
+
+    Why the selector list is narrower than it looks
+    ----------------------------------------------
+    The first version of this accepted `a[href*="/membership"]` and
+    `[class*="avatar"]` as proof of membership, and on 2026-08-26 it reported
+
+        session check -> SIGNED IN (member chrome present (a.membership-card expert))
+
+    on a page that was simultaneously showing "Info available only for members".
+    `a.membership-card.expert` is the site's own UPSELL card — the tile that
+    advertises the Expert plan to people who do not have it. Marketing chrome
+    aimed at non-members was being read as evidence of membership, and the run
+    then used that to declare the 50-row cap a paid-plan limit that no code
+    change could reach. That verdict cost a real decision, so the bar is now:
+
+      - "in" requires a control that only exists once authenticated — a
+        log-out link, or a link into the signed-in account area. An upsell
+        card, a pricing link or a bare avatar-shaped div is not evidence.
+      - The members-only paywall text is treated as evidence AGAINST, because
+        it is the site stating its own answer rather than us inferring one.
     """
     try:
         info = page.evaluate("""() => {
@@ -181,37 +201,102 @@ def _membership_state(page) -> tuple[str, str]:
                 return s.display !== 'none' && s.visibility !== 'hidden'
                        && e.offsetParent !== null;
             };
-            const signin = Array.from(document.querySelectorAll('a,button')).find(
-                e => ['sign in', 'log in', 'login'].includes(
-                    (e.textContent || '').trim().toLowerCase()));
-            const member = document.querySelector(
-                '[class*="avatar" i],[class*="user-menu" i],[class*="my-account" i],'
-                + 'a[href*="/dashboard"],a[href*="/profile"],a[href*="/membership"],'
-                + 'a[href*="/logout"],a[href*="/sign-out"]');
+            const norm = s => (s || '').toString()
+                .replace(/\\s+/g, ' ').trim().toLowerCase();
+            const path = a => {
+                try { return new URL(a.getAttribute('href') || '',
+                                     location.origin).pathname.toLowerCase(); }
+                catch (e) { return ''; }
+            };
+            // Marketing chrome. Present for members and non-members alike, so
+            // it can never settle the question either way.
+            const isPromo = e => /card|banner|promo|upsell|cta|pricing|plan/i
+                .test((e.className || '').toString());
+
+            const anchors = Array.from(document.querySelectorAll('a,button'));
+
+            // Only exists once authenticated.
+            const logout = anchors.find(e => {
+                const p = e.tagName === 'A' ? path(e) : '';
+                const t = norm(e.textContent).slice(0, 30);
+                return /(log-?out|sign-?out)/.test(p)
+                    || ['log out','logout','sign out','signout'].includes(t);
+            });
+            // The signed-in account area, as distinct from the public
+            // /membership marketing pages.
+            const account = anchors.find(e => e.tagName === 'A'
+                && !isPromo(e)
+                && /^\\/(my-account|my-profile|my-dashboard|my-|account|profile|dashboard)(\\/|$)/
+                    .test(path(e)));
+
+            const signin = anchors.find(
+                e => ['sign in', 'log in', 'login'].includes(norm(e.textContent)));
+
+            const body = document.body ? document.body.innerText : '';
+            const paywall = /info available only for members|available only for members|only for members/i
+                .test(body);
+
+            const describe = e => e
+                ? (e.tagName.toLowerCase() + '.'
+                   + (e.className || '').toString().slice(0, 40))
+                : '';
             return {
+                logout: !!logout, logoutSel: describe(logout),
+                account: !!account, accountSel: describe(account),
                 signin: vis(signin),
-                member: !!member,
-                memberSel: member
-                    ? (member.tagName.toLowerCase() + '.'
-                       + (member.className || '').toString().slice(0, 40))
-                    : '',
+                paywall: paywall,
                 title: (document.title || '').slice(0, 80),
-                bodyLen: document.body ? document.body.innerText.length : 0,
+                bodyLen: body.length,
             };
         }""") or {}
     except Exception as exc:                                    # noqa: BLE001
         return "unknown", f"the page could not be inspected ({type(exc).__name__})"
 
-    if info.get("member"):
-        return "in", f"member chrome present ({info.get('memberSel') or '?'})"
+    if info.get("logout"):
+        return "in", f"a log-out control ({info.get('logoutSel') or '?'})"
+    if info.get("account"):
+        return "in", f"a signed-in account link ({info.get('accountSel') or '?'})"
+    if info.get("paywall"):
+        return "out", ("the page is showing its members-only notice, which is the "
+                       "site's own answer: this session is not being treated as a "
+                       "member")
     if info.get("signin"):
-        return "out", "a visible Sign in control and no member chrome"
+        return "out", "a visible Sign in control and no signed-in controls"
     if (info.get("bodyLen") or 0) < 400:
         return "unknown", (f"the page is nearly empty (title={info.get('title')!r}) "
                            f"— a challenge or a failed load, not an answer about "
                            f"the session")
-    return "unknown", (f"neither member chrome nor a Sign in control "
+    return "unknown", (f"no log-out or account control, and no Sign in control "
                        f"(title={info.get('title')!r})")
+
+
+class _ApiResp:
+    """Just enough of Playwright's APIResponse for the call sites in this file.
+
+    Exists so the switch from `page.request.post` to an in-page fetch is a
+    one-line change at each call site instead of a rewrite of five of them.
+    """
+
+    __slots__ = ("ok", "status", "_body", "via")
+
+    def __init__(self, ok: bool, status: int, body, via: str = "page fetch"):
+        self.ok = bool(ok)
+        self.status = int(status or 0)
+        self._body = body
+        self.via = via
+
+    def json(self):
+        return self._body
+
+
+# Headers a browser sets for itself. Assigning them from fetch() is a no-op by
+# spec, so passing them through would be noise that reads like configuration.
+_FORBIDDEN_FETCH_HEADERS = frozenset({
+    "host", "connection", "content-length", "cookie", "cookie2", "origin",
+    "referer", "user-agent", "accept-encoding", "accept-charset", "date",
+    "dnt", "expect", "keep-alive", "te", "trailer", "transfer-encoding",
+    "upgrade", "via",
+})
 
 
 @register
@@ -220,6 +305,10 @@ class DevelopmentAidScraper(BaseScraper):
     # pagination-restriction message, which means something completely
     # different depending on whether we were a member at the time.
     _session_state = "unknown"
+    # True once any JSON API call has returned a usable body this run. A run
+    # where this stays False has measured nothing about what the account may
+    # read, so no message is allowed to describe its limits as a plan limit.
+    _api_reached = False
 
     name = "developmentaid"
     display_name = "DevelopmentAid"
@@ -1012,6 +1101,136 @@ class DevelopmentAidScraper(BaseScraper):
             assume_active=bool(status in ("", "open") and not deadline),
         )
 
+    def _api_json(self, page, url, slug, payload=None, headers=None, timeout_ms=None):
+        """Call the site's API from INSIDE the page, the way the site itself does.
+
+        Why this is not `page.request.post`
+        -----------------------------------
+        The 2026-08-26 run recorded both halves of the contradiction, four lines
+        apart, in one log:
+
+            search API seen: POST .../api/frontend/tender/search (200)
+            tenders: API page 1 -> HTTP 403, stopping
+
+        Same endpoint, same session, same browser, seconds apart. 200 when the
+        site's own JavaScript called it; 403 when we replayed it.
+
+        `page.request` shares the browser context's COOKIES but not its network
+        stack. It is Playwright's own HTTP client, with its own TLS handshake,
+        header order, HTTP/2 settings frame and client-hint set. Cloudflare
+        fingerprints precisely those. So the replay looked like a different
+        client presenting a valid session — which is the shape of a stolen
+        cookie, and it is answered with 403. Nothing was wrong with the session,
+        the account or the credentials.
+
+        `fetch()` evaluated in the page has no such gap: Chromium's own network
+        stack, same origin, same cookie jar, same client hints. The request is
+        indistinguishable from the SPA's because it *is* the SPA's.
+
+        This one fault produced five separate misleading findings downstream,
+        each of which read as a real measurement:
+
+            page size 300 not honoured (returned 0)     <- 403
+            pageSize (1-based) failed after 0 probe pages   <- 403
+            could not fetch any filter option lists        <- 403
+            no status taxonomy available                   <- 403
+            this account reads one page per search         <- inferred from the above
+
+        None of that was measured. It was one 403, reported five ways, and it is
+        what led to the conclusion that the subscription tier was the ceiling.
+        """
+        import json as _json
+
+        safe = {k: v for k, v in (headers or {}).items()
+                if k.lower() not in _FORBIDDEN_FETCH_HEADERS}
+        try:
+            res = page.evaluate(
+                """async ({url, payload, headers, hasBody}) => {
+                    const h = Object.assign({}, headers || {});
+                    const opts = {
+                        method: hasBody ? 'POST' : 'GET',
+                        credentials: 'include',
+                        // The SPA is same-origin, so this is the default the
+                        // browser would use anyway; stated so a redirect to a
+                        // login page surfaces as a status rather than silently
+                        // returning that page's HTML as if it were data.
+                        redirect: 'follow',
+                    };
+                    if (hasBody) {
+                        opts.body = JSON.stringify(payload);
+                        if (!h['content-type']) h['content-type'] = 'application/json';
+                    }
+                    if (!h['accept']) h['accept'] = 'application/json, text/plain, */*';
+                    opts.headers = h;
+                    let r;
+                    try { r = await fetch(url, opts); }
+                    catch (e) {
+                        return {ok: false, status: 0, text: '', err: String(e)};
+                    }
+                    let t = '';
+                    try { t = await r.text(); } catch (e) { t = ''; }
+                    return {ok: r.ok, status: r.status, text: t, err: ''};
+                }""",
+                {"url": url, "payload": payload, "headers": safe,
+                 "hasBody": payload is not None},
+            ) or {}
+        except Exception as exc:                                # noqa: BLE001
+            # The page can be closed, navigating, or blocked by a CSP that
+            # forbids evaluate. Falling back keeps the run alive; the log says
+            # which path answered so a 403 can be attributed correctly.
+            log.debug("[developmentaid] %s: in-page fetch unavailable (%s) — "
+                      "falling back to the out-of-page client",
+                      slug, type(exc).__name__)
+            return self._api_json_via_request(page, url, slug, payload, headers,
+                                              timeout_ms)
+
+        if res.get("err"):
+            log.debug("[developmentaid] %s: in-page fetch error: %s",
+                      slug, str(res["err"])[:200])
+            return _ApiResp(False, 0, None)
+
+        text = res.get("text") or ""
+        body = None
+        if text:
+            try:
+                body = _json.loads(text)
+            except ValueError:
+                # A 200 that is not JSON is the site answering with a page —
+                # a challenge or a login wall — not with data. Say so, because
+                # "ok but unparseable" and "refused" need different fixes.
+                log.debug("[developmentaid] %s: %s returned HTTP %s with "
+                          "non-JSON body (%s bytes, starts %r)",
+                          slug, url.rsplit("/", 1)[-1], res.get("status"),
+                          len(text), text[:80])
+                return _ApiResp(False, res.get("status") or 0, None)
+        if res.get("ok"):
+            # Latched for the whole run. Read by the pagination-restriction
+            # message, which must not blame the account's plan on a run where
+            # the API never answered at all.
+            self._api_reached = True
+        return _ApiResp(res.get("ok"), res.get("status") or 0, body)
+
+    def _api_json_via_request(self, page, url, slug, payload=None, headers=None,
+                              timeout_ms=None):
+        """The old out-of-page path. Kept only as a fallback — see _api_json."""
+        import json as _json
+
+        timeout = timeout_ms or int(settings.request_timeout * 1000)
+        try:
+            if payload is None:
+                resp = page.request.get(url, timeout=timeout)
+            else:
+                resp = page.request.post(
+                    url, data=_json.dumps(payload),
+                    headers=headers or {}, timeout=timeout,
+                )
+            if not resp.ok:
+                return _ApiResp(False, resp.status, None, via="out-of-page client")
+            self._api_reached = True
+            return _ApiResp(True, resp.status, resp.json(), via="out-of-page client")
+        except Exception:                                       # noqa: BLE001
+            return _ApiResp(False, 0, None, via="out-of-page client")
+
     def _count_items(self, page, captured, payload, slug) -> int:
         """How many listings one request returns — used to test a bigger page size."""
         import json as _json
@@ -1019,12 +1238,15 @@ class DevelopmentAidScraper(BaseScraper):
 
         _time.sleep(max(settings.rate_limit_delay * 0.5, 0.3))
         try:
-            resp = page.request.post(
-                captured["url"], data=_json.dumps(payload),
-                headers=self._api_headers(captured, slug),
-                timeout=int(settings.request_timeout * 1000),
-            )
+            resp = self._api_json(page, captured["url"], slug, payload=payload,
+                                  headers=self._api_headers(captured, slug))
             if not resp.ok:
+                # Distinguish "the server refused" from "the server honestly
+                # returned nothing", because the caller logs this as
+                # "page size N not honoured" — which is a lie if it was a 403.
+                log.info("[developmentaid] %s: page-size probe got HTTP %s "
+                         "(not a size limit — the request was refused)",
+                         slug, resp.status)
                 return 0
             return len(self._items_from_json(resp.json()))
         except Exception:      # noqa: BLE001
@@ -1058,6 +1280,11 @@ class DevelopmentAidScraper(BaseScraper):
 
         import time as _time
 
+        # If every probe came back refused rather than empty, the conclusion
+        # "this API cannot be paged" is unsupported — we never reached the API.
+        # Recorded here so the summary below can say which of the two happened.
+        refused: dict[str, int] = {}
+
         def fetch(candidate_payload):
             """Full id set for a probe page — a set, not the first few ids, so
             windows that overlap by all-but-one are recognised as overlapping."""
@@ -1066,12 +1293,11 @@ class DevelopmentAidScraper(BaseScraper):
             # page, which would look like "pagination doesn't work".
             _time.sleep(max(settings.rate_limit_delay, 0.8))
             try:
-                resp = page.request.post(
-                    captured["url"], data=_json.dumps(candidate_payload),
-                    headers=self._api_headers(captured, slug),
-                    timeout=int(settings.request_timeout * 1000),
-                )
+                resp = self._api_json(page, captured["url"], slug,
+                                      payload=candidate_payload,
+                                      headers=self._api_headers(captured, slug))
                 if not resp.ok:
+                    refused["status"] = resp.status
                     log.debug("[developmentaid] %s: probe HTTP %s", slug, resp.status)
                     return None
                 body = resp.json()
@@ -1138,6 +1364,19 @@ class DevelopmentAidScraper(BaseScraper):
             else:
                 log.info("[developmentaid] %s: %s failed after %s probe pages",
                          slug, describe, len(seen))
+        if refused.get("status"):
+            # This is the difference between "the API does not paginate for this
+            # account" and "we never got an answer out of the API at all". The
+            # 2026-08-26 run reported the first and meant the second.
+            log.error(
+                "[developmentaid] %s: EVERY pagination probe was REFUSED (last "
+                "HTTP %s) — the API was never reached, so nothing above is a "
+                "measurement of what this account is allowed to page. Do not "
+                "read it as a plan limit. The site's own JavaScript calls this "
+                "same endpoint successfully, so the refusal is about how the "
+                "request was made, not who made it.",
+                slug, refused["status"],
+            )
         return None
 
     @staticmethod
@@ -1182,7 +1421,7 @@ class DevelopmentAidScraper(BaseScraper):
         found: dict[str, list[dict]] = {}
         for url in candidates:
             try:
-                resp = page.request.get(url, timeout=15_000)
+                resp = self._api_json(page, url, slug, timeout_ms=15_000)
                 if not resp.ok:
                     continue
                 body = resp.json()
@@ -1208,11 +1447,8 @@ class DevelopmentAidScraper(BaseScraper):
 
         _time.sleep(max(settings.rate_limit_delay * 0.3, 0.2))
         try:
-            resp = page.request.post(
-                captured["url"], data=_json.dumps(payload),
-                headers=self._api_headers(captured, slug),
-                timeout=int(settings.request_timeout * 1000),
-            )
+            resp = self._api_json(page, captured["url"], slug, payload=payload,
+                                  headers=self._api_headers(captured, slug))
             if not resp.ok:
                 return -1
             body = resp.json()
@@ -1624,15 +1860,24 @@ class DevelopmentAidScraper(BaseScraper):
                 if page_nr > 1:
                     import time as _t
                     _t.sleep(max(settings.rate_limit_delay * 0.5, 0.3))
-                resp = page.request.post(
-                    captured["url"],
-                    data=_json.dumps(payload),
-                    headers=self._api_headers(captured, slug),
-                    timeout=int(settings.request_timeout * 1000),
-                )
+                resp = self._api_json(page, captured["url"], slug, payload=payload,
+                                      headers=self._api_headers(captured, slug))
                 if not resp.ok:
-                    log.info("[developmentaid] %s: API page %s -> HTTP %s, stopping",
-                             slug, page_nr, resp.status)
+                    if resp.status in (401, 403):
+                        # Named separately from a 5xx or a timeout: a refusal on
+                        # an endpoint the page itself calls successfully is a
+                        # statement about the REQUEST, not about the account.
+                        log.error(
+                            "[developmentaid] %s: API page %s REFUSED with HTTP %s "
+                            "even though this ran inside the page. The session or "
+                            "the challenge cookie has expired mid-run — reload the "
+                            "listing page and retry, or push a fresh session. This "
+                            "is not evidence of a subscription limit.",
+                            slug, page_nr, resp.status,
+                        )
+                    else:
+                        log.info("[developmentaid] %s: API page %s -> HTTP %s, stopping",
+                                 slug, page_nr, resp.status)
                     return False
                 data = resp.json()
             except Exception as exc:            # noqa: BLE001
@@ -1772,14 +2017,33 @@ class DevelopmentAidScraper(BaseScraper):
             restricted = None
         if restricted is not None:
             state = getattr(self, "_session_state", "unknown")
-            if state == "in":
+            api_ok = bool(getattr(self, "_api_reached", False))
+            if state == "in" and api_ok:
+                # Both conditions matter, and the 2026-08-26 run had neither
+                # while claiming the first. Declaring "your plan is the ceiling"
+                # sends the user to buy a subscription, so it now requires that
+                # (a) membership was proved by a signed-in-only control, and
+                # (b) the JSON API actually answered this run, so the DOM dialog
+                # is the only thing standing in the way rather than the visible
+                # symptom of a request that was refused everywhere.
                 log.error(
                     "[developmentaid] %s: PAGINATION RESTRICTED BY PLAN — signed in "
-                    "as a member, and the site still opened its pagination-restriction "
-                    "dialog instead of page %s. Message: %r. This is a limit on the "
-                    "ACCOUNT'S TIER, not on the scraper and not on the session: no code "
-                    "change reaches the rest of the archive, only a higher plan or a "
-                    "data agreement with DevelopmentAid.",
+                    "as a member, the API answered this run, and the site still "
+                    "opened its pagination-restriction dialog instead of page %s. "
+                    "Message: %r. This is a limit on the ACCOUNT'S TIER, not on the "
+                    "scraper and not on the session: no code change reaches the rest "
+                    "of the archive, only a higher plan or a data agreement with "
+                    "DevelopmentAid.",
+                    slug, page_nr, restricted or "(no text)",
+                )
+            elif state == "in" and not api_ok:
+                log.error(
+                    "[developmentaid] %s: pagination dialog at page %s while the "
+                    "session looks signed in — but NOT ONE API call succeeded this "
+                    "run, so the dialog is the visible half of a request that was "
+                    "refused, not proof of a plan limit. Message: %r. Fix the "
+                    "refusal first; only if paging still stops here once the API "
+                    "answers is the subscription the ceiling.",
                     slug, page_nr, restricted or "(no text)",
                 )
             else:

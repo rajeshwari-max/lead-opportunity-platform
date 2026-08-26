@@ -5,6 +5,110 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-08-26 — DevelopmentAid: the "plan limit" was a self-inflicted 403
+
+**The verdict from the last run was wrong, and this entry retracts it.**
+
+The 2026-08-26 check reported `session check -> SIGNED IN` and then
+`PAGINATION RESTRICTED BY PLAN — ... This is a limit on the ACCOUNT'S TIER`.
+Both halves were unfounded, and the same log contained the disproof of each.
+
+### 1. The API was never reached — `page.request` is a different client
+
+Four lines apart, the same run recorded:
+
+```
+search API seen: POST .../api/frontend/tender/search (200)
+tenders: API page 1 -> HTTP 403, stopping
+```
+
+Same endpoint, same session, same browser, seconds apart. **200** when the
+site's own JavaScript called it; **403** when the scraper replayed it.
+
+`page.request` shares the browser context's *cookies* but not its *network
+stack*. It is Playwright's own HTTP client — its own TLS handshake, header
+order, HTTP/2 settings frame and client-hint set. Cloudflare fingerprints
+exactly those. So the replay presented a valid session from a client that
+didn't match it, which is the shape of a stolen cookie, and got a 403.
+
+One fault, reported five different ways, every one of which read like a real
+measurement:
+
+| Line in the log | What it actually was |
+|---|---|
+| `page size 300 not honoured (returned 0)` | 403 |
+| `pageSize (1-based) failed after 0 probe pages` | 403 |
+| `could not fetch any filter option lists` | 403 |
+| `no status taxonomy available` | 403 |
+| `this account reads one page per search` | inferred from the four above |
+
+**Fix:** every API call now runs *inside* the page via `fetch(…, {credentials:
+'include'})` evaluated in the document, instead of `page.request.post`. That is
+Chromium's own network stack, same origin, same cookie jar, same client hints
+— indistinguishable from the SPA's request because it *is* the SPA's request.
+`page.request` is kept only as a fallback for when `evaluate` is unavailable,
+and the log says which path answered.
+
+New `_api_json()` / `_api_json_via_request()` in `developmentaid.py`; all five
+call sites converted (`_count_items`, `_probe_pagination`, `_fetch_taxonomies`,
+`_probe_total`, `_api_page`).
+
+### 2. `session check -> SIGNED IN` was reading an advert
+
+The evidence string gave it away: `member chrome present (a.membership-card
+expert)`. `a.membership-card.expert` is the site's **upsell tile** — the thing
+that advertises the Expert plan to people who don't have it. The old selector
+list accepted `a[href*="/membership"]` and `[class*="avatar"]` as proof of
+membership, so marketing aimed at non-members was read as evidence of
+membership. On a page that was simultaneously displaying *"Info available only
+for members"*.
+
+`_membership_state()` now requires a control that only exists once
+authenticated — a log-out link, or a link into the signed-in account area with
+promo/card/banner/cta classes excluded. And the members-only paywall text is
+now read as evidence **against**, because it is the site stating its own answer
+rather than us inferring one.
+
+Verified against a reconstruction of the observed DOM:
+
+```
+OUT  | the 2026-08-26 page: upsell card + members-only notice
+IN   | genuinely signed in: log-out control present
+IN   | signed-in account link, no logout in DOM
+OUT  | plainly logged out
+```
+
+### 3. The plan-limit verdict now has to earn itself
+
+"Your subscription is the ceiling" sends someone to spend money, so it now
+requires **both** that membership was proved by a signed-in-only control **and**
+that at least one API call succeeded this run (`_api_reached`). A run where the
+API never answered has measured nothing about what the account may read, and
+now says so instead:
+
+> pagination dialog at page N while the session looks signed in — but NOT ONE
+> API call succeeded this run, so the dialog is the visible half of a request
+> that was refused, not proof of a plan limit.
+
+`_probe_pagination` likewise now distinguishes "the API does not paginate for
+this account" from "we never got an answer out of the API at all".
+
+### Verify
+
+```bash
+python scripts/check_scraper.py developmentaid --pages 3
+```
+
+Look for `API page 1` no longer returning 403, and for the page-size probes
+returning real counts rather than 0.
+
+### Still open
+
+`LOP_DEVAID_SECTIONS` in `backend/.env` is set to tenders only, so **grants are
+not being scraped at all** — unrelated to the above, and a one-line fix.
+
+---
+
 ## 2026-08-26 — NGOBOX confirmed fixed; GrantWatch names its own blocker
 
 **NGOBOX: 0% → every row `[deep]`, `VERDICT: LOOKS CORRECT`, 8.5s.** The
