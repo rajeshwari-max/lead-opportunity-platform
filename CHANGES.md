@@ -5,6 +5,144 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-08-26 — Batch 2: FundsForNGOs, NGOBOX, DevNetJobsIndia, GrantWatch, Bond UK
+
+All five are hand-written modules. Three carried real defects; NGOBOX was clean.
+
+### 1. GrantWatch and Bond UK were building the browser the wrong way
+
+Both had their own `_fetch_rendered_sync` doing:
+
+```python
+browser = pw.chromium.launch(headless=True)
+page = browser.new_page(user_agent=settings.user_agent)
+```
+
+That is the exact pattern `site_auth.py` was written to eliminate, and its
+docstring explains why: `settings.user_agent` hard-codes `Chrome/126.0.0.0`,
+but a browser also announces its version in the **Sec-CH-UA client hints**,
+which come from the real build and cannot be overridden that way. So every
+request said "I am Chrome 126" in one header and something else in the next —
+a stock bot signature, and the documented cause of ADB being refused by
+Cloudflare for two days.
+
+Both now use `site_auth.open_context(...)`, which keeps the browser's own
+identity, removes only the word "Headless" from it, drops
+`navigator.webdriver`, and prefers real Chrome over bundled Chromium. Neither
+site is known to be blocking today — this is removing a signature that has
+already cost this project once.
+
+### 2. Rows that open the index instead of the opportunity
+
+Your original complaint, still alive in two modules.
+
+**DevNetJobsIndia** — `_detail_url()` ended `return self.start_url`. That is
+literally the bug `services/links.py` documents: *"86 different RFPs all
+pointing at rfp_assignments.aspx"*. Every one opened the index it was scraped
+from, and every one shared a URL, which also defeats deduplication. It now
+returns `""` and logs the title it dropped: `ScraperManager` refuses to store a
+row with no link to the call, so the row goes rather than shipping as a lead
+that goes nowhere. Losing a row beats publishing one that wastes a click — and
+unlike a bad link, a missing one shows up in the counts.
+
+**Bond UK** — `opportunity_url=apply_url or self.start_url` had the same
+fallback; the bare index form is gone. The anchored form (`start_url` plus the
+post's own `#id`) is kept, because that one does scroll the reader to the card.
+
+### 3. FundsForNGOs walked past the end of its own data
+
+`next_page()` never returned `None`. It relied on the *next* request failing —
+spending one guaranteed-failed request per run and logging a fetch error that
+reads like a fault. Worse, the stop test was:
+
+```python
+if isinstance(posts, list) and len(posts) < PER_PAGE: return None
+```
+
+The API answers past-the-end with `{"code": "rest_post_invalid_page_number"}` —
+a **dict**, so `isinstance(..., list)` is `False`, the whole condition is
+`False`, and it asked for the page after that too. Walking past the end of the
+data asking for more of it.
+
+Now: not-a-list stops, a short page stops, invalid JSON stops, and `MAX_PAGES =
+400` is a runaway ceiling rather than a target. Also removed a dead
+`... if False else ...` expression left in the pagination line.
+
+### NGOBOX — no change
+
+Its parser reads NGOBOX's real captured markup, its `next_page` prefers an
+explicit Next link and otherwise takes the smallest numbered page above the
+current one (never hard-coded), and `parse_detail` enriches from the detail
+page. Nothing to fix.
+
+### Verified
+
+FundsForNGOs pagination across five payload shapes — full page, short page, the
+API's error dict, an empty list, and non-JSON — each stopping or continuing
+correctly, plus the cap. DevNet returning `""` for an unrecoverable id and a
+real `job_id=300671` URL when one is present. Both browser modules confirmed to
+route through `site_auth.open_context`. All five import and register; the
+registry still reports 85.
+
+---
+
+## 2026-08-26 — World Bank: three faults only the live data could show
+
+The API module works — 300 rows over 3 pages, 100% deep links, 100% parseable
+deadlines, 0 junk, 0 duplicates, 2.7s. Up from 34 rows. But the run also
+exposed three faults, and each was invisible until real records arrived.
+
+**1. The deadline was the wrong field.** All 300 rows came back with the same
+date: yesterday. `submission_date` is when the notice was **published**;
+`submission_deadline_date` is the deadline. My candidate list had them the wrong
+way round. A uniform value across hundreds of rows is the shape of a wrong
+field, not of a real coincidence — and every one of those rows would have been
+stored as already-closed.
+
+**2. Most records are Contract Awards.** `notice_type: Contract Award`
+dominated the sample — contracts already given to someone. Not opportunities,
+nobody can bid on them, and they would have flooded the dashboard with the same
+"awarded, not open" noise the audit flagged on nine other sources.
+
+`is_open_notice()` keeps Invitations for Bids, Requests for
+Expressions of Interest / Proposals / Quotations, procurement and
+prequalification notices, and drops awards, cancellations and annulments.
+Matched as case-insensitive substrings because the API spells these out in
+prose. Closed types are checked **first**, so "Contract Award Notice" cannot
+match "procurement notice". A blank type is kept — unlabelled is not the same
+as closed, and the deadline decides it downstream.
+
+The kept/skipped counts are logged per page, and a page where *everything* was
+filtered logs the `notice_type` values it saw — if the vocabulary ever changes,
+that line says so instead of the source quietly going to zero.
+
+**3. The total is 416,361 — the entire historical archive.** At 100 per page
+that is 4,164 pages, and `stale_page_streak_override = 0` ("walk to the end")
+plus the platform's 2,000-page cap would have walked 200,000 records of mostly
+closed history on every run.
+
+The API returns newest-first, so `max_pages = 60` walks the 6,000 most recently
+published notices, which is where every open one lives. The comment says the
+part that matters: **raising this does not find more open tenders, it finds
+older closed ones.** If open notices are being missed, the fix is a server-side
+filter on `notice_type`, not a bigger number.
+
+**Also:** `procurement_group` arrives as a two-letter code. "CW" in the sector
+column is not information; `PROCUREMENT_GROUPS` maps it to "Civil Works",
+"Goods", "Consultant Services" and the rest, falling back to the raw value for
+anything unmapped.
+
+### Verified
+
+`is_open_notice` across nine notice types including the "Contract Award Notice"
+trap. A page shaped like the live one — two awards, one Invitation for Bids, one
+Request for EOI — keeps exactly the two open records, reads their deadlines from
+`submission_deadline_date`, and renders `CW`/`CS` as Civil Works / Consultant
+Services. Pagination steps to `os=5900` and stops at page 60 with the window
+explained. A page of nothing but awards returns empty and logs the types it saw.
+
+---
+
 ## 2026-08-25 — World Bank moves to its API; UNDP needed nothing
 
 The probe's API observation paid for itself on the first run.

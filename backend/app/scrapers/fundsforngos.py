@@ -34,6 +34,12 @@ _NOT_A_COUNTRY = re.compile(
 )
 _PAGE_PARAM = re.compile(r"[?&]page=(\d+)")
 
+PER_PAGE = 50
+# A ceiling, not a target. Posts are newest-first and the walk normally ends on
+# a short page long before this; the cap only stops a runaway if the API ever
+# starts answering out-of-range pages with content instead of an error.
+MAX_PAGES = 400
+
 _VERTICAL_MAP = {
     "agriculture-food-nutrition": "Agriculture", "animals-wildlife": "Environment",
     "arts-culture": "Arts & Culture", "arts-culture-2": "Arts & Culture",
@@ -125,7 +131,28 @@ class FundsForNGOsScraper(BaseScraper):
         error past the end) or the stale-page streak (only old posts left)."""
         m = _PAGE_PARAM.search(page_url)
         current = int(m.group(1)) if m else 1
-        nxt = _PAGE_PARAM.sub(f"?page={current + 1}", page_url) if False else re.sub(
-            r"([?&])page=\d+", rf"\g<1>page={current + 1}", page_url
-        )
-        return PageRequest(nxt)
+
+        # A short page is the end of the data, and saying so here is better than
+        # relying on the NEXT request failing. The API answers past-the-end with
+        # {"code": "rest_post_invalid_page_number"}, which parse_listing turns
+        # into an empty page and BaseScraper reads as "end of listings" — that
+        # works, but it spends one guaranteed-failed request per run and logs a
+        # fetch error that looks like a fault.
+        try:
+            posts = json.loads(raw)
+        except ValueError:
+            return None
+        if not isinstance(posts, list):
+            # {"code": "rest_post_invalid_page_number"} — a dict, not a list.
+            # The first version tested `isinstance(posts, list) and len(...)`,
+            # which is False for the error payload and therefore fell through to
+            # requesting the NEXT page as well. Walking past the end of the data
+            # asking for more of it.
+            return None
+        if len(posts) < PER_PAGE:
+            return None
+
+        if current >= MAX_PAGES:
+            return None
+        return PageRequest(re.sub(r"([?&])page=\d+", rf"\g<1>page={current + 1}",
+                                  page_url))

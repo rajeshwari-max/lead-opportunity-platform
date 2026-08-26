@@ -35,11 +35,36 @@ Two things follow, and the second is the reason this module is short.
 
 Field names are not hard-coded
 ------------------------------
-The exact keys this API returns could not be checked from where this was
-written, and guessing one spelling is how a scraper ends up storing rows with
-an empty deadline that the pipeline then treats as permanently open. So every
-field is read through a list of candidate names, and the first run LOGS the
-keys it actually saw. One run turns the guess into a fact.
+Every field is read through a list of candidate names, and the first run LOGS
+the keys it actually saw. The first live run turned the guess into a fact:
+
+    bid_description · bid_reference_no · contact_* · id · notice_lang_name
+    notice_status · notice_text · notice_type · noticedate · procurement_group
+    procurement_method_code · procurement_method_name · project_ctry_name
+    project_id · project_name · submission_date · submission_deadline_date
+    submission_deadline_time
+
+...and it also exposed three faults that only real data could show. See
+DEADLINE, AWARDS and SCALE below.
+
+DEADLINE — the first version read `submission_date` before
+`submission_deadline_date`, and every one of 300 rows came back with the same
+date: yesterday. `submission_date` is when the notice was PUBLISHED. The
+deadline is `submission_deadline_date`, and the priority is now that way round.
+A uniform value across hundreds of rows is the shape of a wrong field, not of a
+real coincidence.
+
+AWARDS — most records are `notice_type: Contract Award`: contracts already
+given to someone. They are not opportunities, nobody can bid on them, and they
+would have flooded the dashboard. Open notice types are kept and the rest are
+dropped, with the counts logged so the filter can be checked rather than
+trusted.
+
+SCALE — the API reports **416,361** notices. That is the entire historical
+archive, not the open ones: at 100 per page it is 4,164 pages, and the platform
+default cap of 2,000 pages would have walked 200,000 records of mostly closed
+history. The API returns newest-first, so this walks a bounded recent window
+instead.
 """
 from __future__ import annotations
 
@@ -70,8 +95,46 @@ ROWS = 100
 _ROW_KEYS = ("procnotices", "documents", "results", "rows_data", "data")
 _TOTAL_KEYS = ("total", "totalRecords", "numFound", "count")
 
+# Notice types that are still open to bid on. Anything else — above all
+# "Contract Award" — is a record of a decision already taken.
+#
+# Matched as a substring, case-insensitively, because the API spells these out
+# in prose ("Request for Expressions of Interest", "Invitation for Bids") and a
+# whole-string list would miss every variant.
+OPEN_NOTICE_TYPES = (
+    "invitation for bid", "invitation to bid", "request for bid",
+    "request for expressions of interest", "expression of interest",
+    "request for proposal", "request for quotation",
+    "general procurement notice", "specific procurement notice",
+    "prequalification", "invitation for prequalification",
+    "consultant", "procurement notice", "invitation",
+)
+# Notice types that are definitively finished, checked first so a string like
+# "Contract Award Notice" cannot match "procurement notice" above.
+CLOSED_NOTICE_TYPES = (
+    "award", "cancel", "annul", "abandon",
+)
+
+# procurement_group arrives as a two-letter code. "CW" in the sector column is
+# not information; "Civil Works" is.
+PROCUREMENT_GROUPS = {
+    "CW": "Civil Works", "GO": "Goods", "CS": "Consultant Services",
+    "NC": "Non-Consulting Services", "CQ": "Consultant Qualification",
+    "IC": "Individual Consultant", "SE": "Services", "TR": "Training",
+}
+
 # One log line per run, so the real schema is recorded rather than assumed.
 _SCHEMA_LOGGED = False
+
+
+def is_open_notice(notice_type: str) -> bool:
+    """True when this notice is something a bidder can still respond to."""
+    t = (notice_type or "").strip().lower()
+    if not t:
+        return True          # unlabelled: keep it and let the deadline decide
+    if any(w in t for w in CLOSED_NOTICE_TYPES):
+        return False
+    return any(w in t for w in OPEN_NOTICE_TYPES)
 
 
 def _first(record: dict, *names, default=""):
@@ -149,8 +212,15 @@ class WorldBankScraper(BaseScraper):
     # A procurement notice board: every record is an opportunity by
     # construction, so rows skip the vocabulary test in opportunity_gate.py.
     curated = True
-    # Walk to the end rather than stopping after N pages that saved nothing
-    # new — the API reports a total and the walk stops on it.
+    # NOT "walk to the end": the end is 416,361 notices, nearly all of them
+    # closed history. The API returns newest-first, so a bounded window of the
+    # most recent notices is where every open one lives. 60 pages x 100 = the
+    # 6,000 most recently published notices.
+    #
+    # Raising this does not find more OPEN tenders, it finds older closed ones.
+    # If open notices are being missed, the fix is a server-side filter on
+    # notice_type, not a bigger number here.
+    max_pages = 60
     stale_page_streak_override = 0
 
     # ------------------------------------------------------------------ parse
@@ -180,7 +250,17 @@ class WorldBankScraper(BaseScraper):
                      _total(payload))
 
         items: list[RawOpportunity] = []
+        skipped_closed = 0
+        types: dict[str, int] = {}
         for r in records:
+            notice_type_raw = _text(_first(r, "notice_type", "noticetype",
+                                           "procurement_type"))
+            types[notice_type_raw or "(none)"] = types.get(notice_type_raw or "(none)", 0) + 1
+            # Contract Awards are decisions already taken. They dominate this
+            # feed and nobody can bid on them.
+            if not is_open_notice(notice_type_raw):
+                skipped_closed += 1
+                continue
             title = _text(_first(
                 r, "bid_description", "noticetitle", "notice_title", "title",
                 "project_name", "bid_reference_no"))
@@ -193,22 +273,27 @@ class WorldBankScraper(BaseScraper):
             country = _text(_first(
                 r, "project_ctry_name", "country_name", "countryname",
                 "ctry_name", "country"))
+            # submission_deadline_date FIRST. submission_date is the date the
+            # notice was published, and reading it as a deadline gave 300 rows
+            # the same date — see DEADLINE in the module docstring.
             deadline = _date(_first(
-                r, "submission_date", "submission_deadline_date",
-                "bid_deadline_date", "deadline_date", "closing_date", "deadline"))
-            notice_type = _text(_first(r, "notice_type", "noticetype",
-                                       "procurement_type"))
+                r, "submission_deadline_date", "bid_deadline_date",
+                "deadline_date", "closing_date", "deadline"))
+            notice_type = notice_type_raw
             borrower = _text(_first(r, "borrower", "agency", "implementing_agency",
                                     "project_name"))
             posted = _date(_first(r, "noticedate", "notice_date", "publish_date",
                                   "submitdate"))
-            sector = _text(_first(r, "procurement_group", "sector", "major_sector",
+            group = _text(_first(r, "procurement_group", "sector", "major_sector"))
+            sector = PROCUREMENT_GROUPS.get(group.upper(), group)
+            method = _text(_first(r, "procurement_method_name",
                                   "procurement_method"))
 
             bits = [
                 f"Notice type: {notice_type}" if notice_type else "",
                 f"Borrower/agency: {borrower}" if borrower else "",
                 f"Procurement group: {sector}" if sector else "",
+                f"Method: {method}" if method else "",
                 f"Published: {posted}" if posted else "",
                 f"Reference: {_text(r.get('bid_reference_no'))}"
                 if r.get("bid_reference_no") else "",
@@ -234,6 +319,18 @@ class WorldBankScraper(BaseScraper):
                 assume_active=False,
                 dayfirst=False,          # the API returns ISO dates
             ))
+
+        if skipped_closed:
+            # Reported, not silent. A filter you cannot see is a filter you
+            # cannot check — and if the ratio ever inverts, that is the signal
+            # that the notice_type vocabulary changed.
+            log.info("[%s] kept %s open notice(s), skipped %s already-decided "
+                     "one(s) on this page", self.name, len(items), skipped_closed)
+        if types and not items:
+            log.warning("[%s] every record on this page was filtered out. "
+                        "notice_type values seen: %s — if these look like open "
+                        "calls, OPEN_NOTICE_TYPES needs the new wording.",
+                        self.name, sorted(types.items(), key=lambda kv: -kv[1])[:8])
         return items
 
     # ------------------------------------------------------------- pagination
@@ -249,6 +346,13 @@ class WorldBankScraper(BaseScraper):
             return None
         total = _total(payload)
         seen_so_far = page_number * ROWS
+        if page_number >= self.max_pages:
+            log.info("[%s] stopping at the %s-page window (%s most recent "
+                     "notices). The API's %s total is the full historical "
+                     "archive, not open tenders.", self.name, self.max_pages,
+                     f"{self.max_pages * ROWS:,}",
+                     f"{total:,}" if total else "?")
+            return None
         if total is None:
             # No total published: keep going while a full page comes back, and
             # stop on the first short one. BaseScraper's repeated-content guard

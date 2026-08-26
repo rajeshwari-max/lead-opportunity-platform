@@ -48,10 +48,27 @@ class BondScraper(BaseScraper):
         """Render the page, then click Load More until all results are loaded."""
         from playwright.sync_api import sync_playwright
 
+        from app.scrapers import site_auth
+
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
+            # site_auth.open_context, NOT pw.chromium.launch + a hard-coded
+            # user_agent. This used to be:
+            #
+            #     browser = pw.chromium.launch(headless=True)
+            #     page = browser.new_page(user_agent=settings.user_agent)
+            #
+            # settings.user_agent hard-codes "Chrome/126.0.0.0", but a browser
+            # also announces its version in the Sec-CH-UA client hints, which
+            # come from the real build and cannot be overridden that way. So
+            # every request said "I am Chrome 126" in one header and something
+            # else in the next — a stock bot signature, and the documented cause
+            # of ADB being refused by Cloudflare for two days (see site_auth.py).
+            #
+            # open_context keeps the browser's own identity, removes only the
+            # word "Headless" from it, and drops navigator.webdriver.
+            context = site_auth.open_context(pw, self.name, headless=True)
             try:
-                page = browser.new_page(user_agent=settings.user_agent)
+                page = context.pages[0] if context.pages else context.new_page()
                 page.goto(url, timeout=int(settings.request_timeout * 1000))
                 try:
                     page.wait_for_load_state("networkidle", timeout=15_000)
@@ -93,7 +110,7 @@ class BondScraper(BaseScraper):
                          clicks, prev_count, total or "?")
                 return page.content()
             finally:
-                browser.close()
+                context.close()
 
     # ------------------------------------------------------------------ parse
     def parse_listing(self, html: str, page_url: str) -> list[RawOpportunity]:
@@ -181,7 +198,11 @@ class BondScraper(BaseScraper):
                 location=location,
                 country="Global" if location.lower().startswith("worldwide") else "",
                 region="Global" if location.lower().startswith("worldwide") else "",
-                opportunity_url=apply_url or self.start_url,
+                # Same rule as devnet: a row whose only link is the index
+                # page is not a lead. The anchored form above (start_url plus
+                # the post's own #id) does at least scroll the reader to the
+                # card, so that one is kept; a bare index URL is not.
+                opportunity_url=apply_url,
                 website=self.website,
                 source_website=self.display_name,
                 category_hint=Category.GRANT,

@@ -7,6 +7,7 @@ filenames (joblogos/<job_id>.jpg) and postback control references.
 """
 from __future__ import annotations
 
+import logging
 import re
 
 import httpx
@@ -18,6 +19,8 @@ from app.scrapers.base_scraper import BaseScraper, PageRequest
 from app.scrapers.registry import register
 from app.services.amounts import extract_amount
 from app.services.organization import extract_organization
+
+log = logging.getLogger("scraper")
 
 _JOB_ID = re.compile(r"joblogos/(\d+)\.\w{3,4}", re.IGNORECASE)
 _JOB_ID_HREF = re.compile(r"job_id=(\d+)", re.IGNORECASE)
@@ -160,4 +163,17 @@ class DevNetScraper(BaseScraper):
         for label, job_id in title_to_id.items():
             if low.startswith(label[:40]) or label.startswith(low[:40]):
                 return f"{self.website}/jobdescription.aspx?job_id={job_id}"
-        return self.start_url
+
+        # No id recovered. Returning start_url here is what produced "86
+        # different RFPs all pointing at rfp_assignments.aspx" — every one of
+        # them opening the index the row was scraped from, and every one
+        # sharing a URL, which also defeats deduplication.
+        #
+        # "" instead: ScraperManager refuses to store a row with no link to the
+        # call itself (LOP_REQUIRE_USABLE_LINK), so the row is dropped rather
+        # than shipped as a lead that goes nowhere. Losing a row is better than
+        # publishing one that wastes the reader's click — and unlike a bad link,
+        # a missing one is visible in the counts.
+        log.info("[%s] no job_id recoverable for %r — dropping the row rather "
+                 "than pointing it at the index", self.name, title[:60])
+        return ""
