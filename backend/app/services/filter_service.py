@@ -19,6 +19,7 @@ from app.schemas.opportunity import (
     PaginatedOpportunities,
     StatsOut,
 )
+from app.services.actionable import actionable_clause, expired_clause
 from app.services.verticals import VERTICALS
 
 _SORTABLE = {
@@ -73,25 +74,31 @@ class FilterService:
 
     def _base_statement(self, f: OpportunityFilters) -> Select:
         if getattr(f, "approved", False):
-            # The approved set is a curated hand-off to the retrieval layer, not
-            # a view of what's currently biddable, so it deliberately ignores the
-            # live/archived split. Filtering it to open deadlines would make the
-            # list silently empty itself as those deadlines passed — the one
-            # place where a row disappearing is most alarming. Every other
-            # filter below still applies, so it composes with country, vertical
-            # and search as usual.
+            # The approved set used to skip the deadline predicate entirely.
+            # The reasoning was that a curated hand-off should not "silently
+            # empty itself" as deadlines pass — which is a real concern, and the
+            # wrong fix. What it produced was the one view in the product that
+            # showed closed calls as current, and it is where the 1,481 ACTIVE
+            # rows with a passed deadline were visible.
+            #
+            # A row leaving the working view is not data loss: nothing is
+            # deleted, and `include_expired` brings the full history straight
+            # back. The default answers "what can we still respond to", which is
+            # what someone opening a working view is asking.
             stmt = select(Opportunity).where(Opportunity.approved.is_(True))
+            if not getattr(f, "include_expired", False):
+                stmt = stmt.where(actionable_clause())
         elif getattr(f, "archived", False):
             # Explicit opt-in to the historical archive. It holds tens of
             # thousands of closed calls, so it stays out of the default view and
             # out of the stat cards unless asked for.
             stmt = select(Opportunity).where(Opportunity.status == Status.EXPIRED)
         else:
-            stmt = select(Opportunity).where(
-                Opportunity.status == Status.ACTIVE,
-                # active = deadline still open, or explicitly ongoing (NULL deadline)
-                or_(Opportunity.deadline >= date.today(), Opportunity.deadline.is_(None)),
-            )
+            # One definition, in services/actionable.py, rather than a copy
+            # here and another in matching_service. The old inline version read
+            # `deadline IS NULL` as "ongoing", which also swept up every row
+            # whose date simply could not be parsed.
+            stmt = select(Opportunity).where(actionable_clause())
         if getattr(f, "new_today", False):
             # Matches the "New Today" stat card. Clicking it used to only change
             # the sort order, so the table looked identical and the card seemed

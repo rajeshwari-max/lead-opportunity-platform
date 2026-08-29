@@ -217,6 +217,70 @@ FURNITURE_TITLES = frozenset({
 
 _EMAIL_TITLE = re.compile(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$", re.IGNORECASE)
 
+# Structural furniture, matched by SHAPE rather than by exact string.
+#
+# FURNITURE_TITLES above is an exact-match English set, and an exact-match set
+# can only ever catch furniture it has already met. The 2026-08-29 database had
+# 98 rows it had not met:
+#
+#     53  "Overslaan en naar inhoud gaan"        Dutch "skip to main content"
+#     20  'Search results for: "grants" Clear Search'
+#     15  "(E: 404) Content Not Found"
+#      5  "Increase Font Size"
+#      5  "Browse by Focus Area"
+#
+# Each is an instance of a class — a translated skip link, a search-result
+# header, an error page, an accessibility control, a nav label — and the class
+# is what these patterns match. Anchored deliberately: a real call named
+# "Increasing Font Accessibility in Rural Schools" must survive, so nothing here
+# matches a bare substring.
+_FURNITURE_PATTERNS = (
+    # Error and empty-state pages. Any source can serve one, and it will be
+    # scraped with whatever the template's heading happens to be.
+    re.compile(r"^\(?\s*(e[:\s-]*)?\b(400|401|403|404|410|500|502|503)\b.*"
+               r"(not found|error|forbidden|unavailable|denied)", re.I),
+    re.compile(r"^(page|content|file|document)\s+not\s+found\b", re.I),
+    re.compile(r"^(oops|sorry)[!,.\s]", re.I),
+    re.compile(r"^access\s+denied\b", re.I),
+    # Search-result headers, which are a description of a query, not a call.
+    re.compile(r"^search\s+results?\b", re.I),
+    re.compile(r"^showing\s+\d+", re.I),
+    re.compile(r"^\d+\s+results?\s+(found|for)\b", re.I),
+    re.compile(r"\bclear\s+(search|filters?|all)\s*$", re.I),
+    # Anchored to the WHOLE title. Unanchored, "^no results" ate
+    # "No Results Left Behind: Evaluation Capacity Grant" — a real grant.
+    re.compile(r"^no\s+results?(\s+(found|match\w*))?\s*[.!]?$", re.I),
+    # Accessibility and display controls.
+    re.compile(r"^(increase|decrease|reset|change)\s+(the\s+)?"
+               r"(font|text)\s*size\b", re.I),
+    re.compile(r"^(font|text)\s*size\b", re.I),
+    re.compile(r"^(high|low)\s+contrast\b", re.I),
+    re.compile(r"^(dark|light)\s+mode\b", re.I),
+    # Faceting and sorting labels.
+    re.compile(r"^(browse|filter|sort|search|view|explore)\s+by\b", re.I),
+    # Same: unanchored, this ate "Show More Women in STEM — Innovation
+    # Challenge". A pagination control IS the entire title; a call is not.
+    re.compile(r"^(load|show)\s+more(\s+(results?|items?))?\s*[.!]?$", re.I),
+    re.compile(r"^page\s+\d+(\s+of\s+\d+)?$", re.I),
+    # Cookie and consent banners.
+    re.compile(r"^(accept|reject|manage)\s+(all\s+)?cookies?\b", re.I),
+    re.compile(r"^cookie\s+(settings|preferences|consent)\b", re.I),
+)
+
+# Skip links in the languages these sources actually publish in. A blocklist
+# can only catch what it has met, so this is the honest scope: the five
+# European languages present in the current source list, not a claim to
+# handle every language.
+_SKIP_LINK_TITLES = frozenset({
+    "overslaan en naar inhoud gaan",        # nl — 53 rows in the 2026-08-29 db
+    "naar de inhoud",
+    "aller au contenu principal", "aller au contenu",       # fr
+    "zum hauptinhalt springen", "zum inhalt springen",      # de
+    "saltar al contenido principal", "ir al contenido",     # es
+    "salta al contenuto principale",                        # it
+    "pular para o conteudo principal",                      # pt
+})
+
 # Anchors that jump within a page rather than to an opportunity.
 _SKIP_FRAGMENTS = {"main-content", "content", "main", "top", "skip", "nav"}
 
@@ -230,7 +294,9 @@ def is_furniture(title: str, url: str = "") -> bool:
     t = " ".join((title or "").split()).strip().lower().strip(":-–—|")
     if not t or len(t) < 8:
         return True
-    if t in FURNITURE_TITLES or _EMAIL_TITLE.match(t):
+    if t in FURNITURE_TITLES or t in _SKIP_LINK_TITLES or _EMAIL_TITLE.match(t):
+        return True
+    if any(p.search(t) for p in _FURNITURE_PATTERNS):
         return True
     # "Skip to main content" scraped with the page's own skip-link href.
     if url and "#" in url and url.rsplit("#", 1)[-1].lower() in _SKIP_FRAGMENTS:

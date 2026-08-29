@@ -16,6 +16,8 @@ from sqlalchemy import select, update
 from app.core.config import settings
 from app.database.db import session_scope
 from app.database.models import Opportunity, ScrapeRun, Status
+from app.services import run_lock
+from app.services.scrape_outcome import Evidence, Outcome, classify
 from app.schemas.opportunity import RawOpportunity
 from app.scrapers.base_scraper import BaseScraper
 from app.scrapers.registry import get_scrapers
@@ -25,7 +27,12 @@ from app.services.deduplication import make_unique_id
 from app.services.amounts import clean_amount, extract_amount
 from app.services.geography import normalize_geo
 from app.services.links import canonical_link, is_usable_link
+from app.services.actionable import (
+    DeadlineState,
+    classify_deadline,
+)
 from app.services.opportunity_gate import is_opportunity
+from app.services.source_manifest import contract_for, record_is_in_scope
 from app.services.deadline_audit import is_sentinel
 from app.services.spam import is_spam
 from app.services.organization import extract_organization, tidy_organization
@@ -58,7 +65,17 @@ class ScraperManager:
         self._pause.set()  # set == running, cleared == paused
         self._lock = threading.Lock()
 
-        self.state: str = "idle"  # idle | running | paused | stopping
+        # idle | running | paused | stopping | finalizing
+        #
+        # "finalizing" is new and it is not cosmetic. _run() used to hold
+        # state == "running" through _maintenance(), which is a full-database
+        # deadline audit, link repair and junk purge. On a 177 MB database that
+        # is minutes of work AFTER every source has finished, during which the
+        # dashboard said "scraping" and the scheduler's completion poll
+        # (`while manager.state != "idle"`) kept waiting. Two different things
+        # were sharing one word.
+        self.state: str = "idle"
+        self._lease: str | None = None       # worker_id while we hold the lease
         self.vertical_filter: set[str] = set()  # vertical-aware scraping (empty = keep all)
         self.on_complete = None   # optional async callback (set at app startup)
         self.logs: deque[str] = deque(maxlen=500)
@@ -71,7 +88,19 @@ class ScraperManager:
     ) -> None:
         if self._task and not self._task.done():
             raise RuntimeError("A scrape job is already running")
+
+        # The in-process guard above only sees THIS process. Manual starts and
+        # scheduled starts both come through here, so this is the one place a
+        # cross-process lease has to be taken — see services/run_lock.py for
+        # why max_instances=1 is not sufficient.
         scrapers = get_scrapers(sources or None)
+        try:
+            self._lease = run_lock.acquire(
+                label=f"{len(scrapers)} source(s)"
+            )
+        except run_lock.LeaseNotAcquired as exc:
+            self._log(f"Scrape refused — {exc}")
+            raise RuntimeError(str(exc)) from exc
         # Vertical-aware scraping: when set, only opportunities classified into a
         # selected vertical are persisted (everything else is filtered in-pipeline,
         # reducing unnecessary storage and downstream noise).
@@ -126,14 +155,25 @@ class ScraperManager:
                     return
                 await self._run_source(scraper)
 
+        heart = asyncio.create_task(self._heartbeat_loop())
         try:
             await asyncio.gather(*(_guarded(s) for s in scrapers))
         finally:
+            heart.cancel()
             if settings.run_maintenance_after_scrape:
+                # Distinct from "running": every source is done and no page is
+                # being fetched. What remains is whole-database maintenance, and
+                # calling that "scraping" is what made the dashboard sit on
+                # "running" for minutes after the work finished.
+                self.state = "finalizing"
+                self._log("All sources finished — running post-scrape maintenance")
                 try:
                     await asyncio.to_thread(self._maintenance)
                 except Exception:
                     log.exception("post-scrape maintenance failed")
+            if self._lease:
+                run_lock.release(self._lease)
+                self._lease = None
             self.state = "idle"
             self._log("Scrape job completed")
             if self.on_complete is not None and not self._stop.is_set():
@@ -141,6 +181,33 @@ class ScraperManager:
                     await self.on_complete()
                 except Exception:
                     log.exception("post-scrape hook failed")
+
+    async def _heartbeat_loop(self) -> None:
+        """Keep the lease alive, and stop if we ever lose it.
+
+        Losing the lease means something concluded this run was dead and gave it
+        to another process. Carrying on would produce exactly the concurrent
+        scrape the lease exists to prevent, so this stops the run rather than
+        logging and hoping.
+        """
+        while True:
+            await asyncio.sleep(run_lock.HEARTBEAT_S)
+            if not self._lease:
+                return
+            try:
+                alive = await asyncio.to_thread(run_lock.heartbeat, self._lease)
+            except Exception:                                   # noqa: BLE001
+                log.exception("[run-lock] heartbeat failed")
+                continue        # a transient DB error is not proof we lost it
+            if not alive:
+                self._log(
+                    "Lost the scrape lease — another process has taken it over. "
+                    "Stopping this run to avoid two scrapes on one database."
+                )
+                self._lease = None
+                self._stop.set()
+                self._pause.set()
+                return
 
     def _maintenance(self) -> None:
         """Repair passes that run after every scrape.
@@ -178,7 +245,7 @@ class ScraperManager:
     async def _run_source(self, scraper: BaseScraper) -> None:
         prog = self.progress[scraper.name]
         prog["status"] = "running"
-        run_id = self._open_run(scraper.display_name)
+        run_id = self._open_run(scraper.display_name, scraper.name)
 
         # Per-source stop: lets one source finish early (stale pages) without
         # stopping the others. Mirrors the global stop event.
@@ -205,6 +272,7 @@ class ScraperManager:
                 prog["errors"] += 1
                 self._log(f"[{scraper.display_name}] page {payload['page']} failed — skipped")
 
+        crash = ""
         stale_streak = 0
         # None = use the global default; 0 = never stop early (walk to the end
         # of pagination). `or` would have treated 0 as "unset", so test for None.
@@ -219,7 +287,7 @@ class ScraperManager:
             async for batch in scraper.crawl(source_stop, self._pause, on_progress):
                 prog["found"] += len(batch)
                 saved, expired, dupes, spam, rejected = await asyncio.to_thread(
-                    self._ingest, batch, scraper.curated)
+                    self._ingest, batch, scraper.curated, scraper.name)
                 prog["saved"] += saved
                 prog["skipped_expired"] += expired
                 prog["duplicates"] += dupes
@@ -256,13 +324,43 @@ class ScraperManager:
                     )
                     source_stop.set()
             prog["status"] = "stopped" if self._stop.is_set() else "completed"
-        except Exception:
+        except Exception as exc:                                # noqa: BLE001
             log.exception("[%s] source crashed", scraper.name)
             prog["status"] = "failed"
             prog["errors"] += 1
+            crash = f"{type(exc).__name__}: {exc}"
         finally:
             mirror.cancel()
-            self._close_run(run_id, prog)
+            # What the run actually observed. Scrapers that record transport
+            # detail expose it as `last_probe`; the ones that do not yet leave
+            # those fields None, and the classifier degrades to the page/extract
+            # counts rather than inventing a status code.
+            probe = getattr(scraper, "last_probe", None) or {}
+            evidence = Evidence(
+                pages_fetched=prog["pages"],
+                extracted=prog["found"],
+                saved=prog["saved"],
+                duplicates=prog.get("duplicates", 0),
+                rejected=prog.get("rejected", 0),
+                expired=prog["skipped_expired"],
+                first_http_status=probe.get("first_http_status"),
+                last_http_status=probe.get("last_http_status"),
+                final_url=probe.get("final_url", ""),
+                page_title=probe.get("page_title", ""),
+                response_bytes=probe.get("response_bytes", 0),
+                body_sample=probe.get("body_sample", ""),
+                attempts=probe.get("attempts", 0),
+                fetch_mode=probe.get("fetch_mode",
+                                     "browser" if scraper.requires_js else "http"),
+                empty_proof=probe.get("empty_proof", ""),
+                all_notices_closed=probe.get("all_notices_closed", False),
+                structure_signature=probe.get("structure_signature", ""),
+                last_good_signature=self._last_good_signature(scraper),
+                expected_container_present=probe.get("expected_container_present"),
+                cancelled=self._stop.is_set() or source_stop.is_set() and not prog["found"],
+                exception=crash,
+            )
+            self._close_run(run_id, prog, evidence)
             # When closed listings are archived they are *included* in `saved`,
             # so reporting them as a separate addend made the totals look wrong
             # ("3536 found = 3024 saved + 3277 expired + 512 dupes").
@@ -279,7 +377,8 @@ class ScraperManager:
 
     # -------------------------------------------------------------- pipeline
     def _ingest(self, batch: list[RawOpportunity],
-                curated: bool = False) -> tuple[int, int, int, int, int]:
+                curated: bool = False,
+                source_key: str = "") -> tuple[int, int, int, int, int]:
         """One page of scraped rows -> rows in the database.
 
         normalise deadline -> mark expired -> classify (category, verticals,
@@ -296,12 +395,19 @@ class ScraperManager:
         this source's page contains opportunities and nothing else. It relaxes
         the vocabulary half of the opportunity gate, never the furniture or
         page-type half.
+
+        `source_key` is the registry name. It selects this source's contract,
+        which is what lets a record be judged on the source's OWN fields
+        (record_type, source_status) before any of its prose is read.
         """
         saved = expired = dupes = spam = rejected = 0
-        undated = rolling_rows = 0
+        undated = rolling_rows = unassessed = 0
+        out_of_scope = 0
         expired_samples: list[str] = []
         today = date.today()
         batch_uids: set[str] = set()  # catch duplicates within the same batch too
+        contract = contract_for(source_key or "",
+                                batch[0].source_website if batch else "")
         with session_scope() as db:
             for raw in batch:
                 deadline = self.deadline_parser.parse(raw.deadline_raw, dayfirst=raw.dayfirst)
@@ -332,9 +438,22 @@ class ScraperManager:
                 rolling = deadline is None and (
                     self.deadline_parser.is_ongoing(raw.deadline_raw) or raw.assume_active
                 )
-                if deadline is None:
-                    undated += 1
-                    rolling_rows += 1 if rolling else 0
+                # Undated rows are tallied at INSERT, below — see the note
+                # there. Counting them at this point included rows the gates
+                # went on to drop, so the log reported "kept live" about rows
+                # that were never written.
+                # Record the state as evidence, not as a guess. "the source
+                # said rolling" and "we could not read a date" are different
+                # claims and get different confidence markers, so a later audit
+                # can tell which rows rest on the source's word and which rest
+                # on our parser giving up.
+                #
+                # classify_deadline lives in services/actionable.py alongside
+                # the rule that READS these values. Writing a second copy here
+                # is how the two drift until a row is stored in a state the
+                # rule does not expect.
+                d_state, d_confidence = classify_deadline(
+                    raw.deadline_raw, deadline, rolling)
                 is_expired = deadline is not None and deadline < today
                 if is_expired:
                     expired += 1
@@ -392,6 +511,29 @@ class ScraperManager:
                               raw.source_website, (raw.title or "")[:60])
                     continue
 
+                # What does the SOURCE say this record is?
+                #
+                # This runs before the prose gate below because it is the check
+                # that gate structurally cannot make. World Bank's feed is
+                # mostly contract awards, and an award reads exactly like an
+                # open tender — "Award of Contract for Supervision Services" is
+                # a real notice title on both. No amount of title reading
+                # separates them; the record's own notice_type does, instantly.
+                #
+                # It is a no-op unless the scraper supplied record_type or
+                # source_status, and an unrecognised status is UNKNOWN rather
+                # than closed. A source that says nothing must not have silence
+                # read as a reason to discard its rows. See
+                # services/source_manifest.py.
+                keep_scope, scope_why = record_is_in_scope(
+                    contract, raw.record_type, raw.source_status)
+                if not keep_scope:
+                    out_of_scope += 1
+                    rejected += 1
+                    log.debug("[%s] out of scope (%s): %s", raw.source_website,
+                              scope_why, (raw.title or "")[:60])
+                    continue
+
                 # Is this actually an opportunity? Most sources are scraped by
                 # harvesting every link on a page, so without this a funder's
                 # news post, programme page or "our grantees" card is stored as
@@ -446,6 +588,25 @@ class ScraperManager:
                     study_type=classify_study_type(raw.title, vertical_body),
                     category=category,
                     deadline=deadline,
+                    # Phase 4 added these columns and backfilled the existing
+                    # rows, but nothing wrote them on INSERT — so every row
+                    # scraped since then stored deadline_state NULL. For a row
+                    # WITH a date that is harmless (the rule infers DATED from
+                    # the date). For an undated row it is not: NULL state plus
+                    # NULL deadline reads as UNKNOWN, which is not actionable,
+                    # and the row vanishes from every dashboard view. New
+                    # rolling rows were being hidden by the fix meant to stop
+                    # closed rows being shown.
+                    deadline_state=d_state.value,
+                    # The source's own words, kept verbatim. This is what makes
+                    # a confirmed day/month inversion re-parseable instead of
+                    # re-scrapeable — see scripts/deadline_convention_audit.py.
+                    deadline_raw=(raw.deadline_raw or "")[:256],
+                    deadline_confidence=d_confidence,
+                    # Which convention the parser was told to use. Without it,
+                    # a later correction cannot tell which rows were affected.
+                    deadline_convention="dayfirst" if raw.dayfirst else "monthfirst",
+                    deadline_checked_at=datetime.now(timezone.utc),
                     website=raw.website,
                     # Store a link only if it actually points at this call. A
                     # bare slug, a mailto:, or a bare domain sends the reader to
@@ -462,6 +623,17 @@ class ScraperManager:
                     source_website=raw.source_website,
                 ))
                 saved += 1
+                # Counted HERE, not where the state is computed. A row rejected
+                # by the scope check or the opportunity gate never reaches the
+                # database, and reporting it as "stored as unassessed" sends
+                # someone looking for rows that were never written. The same
+                # applies to the undated tallies: every one of these describes
+                # what is now IN the database.
+                if deadline is None:
+                    undated += 1
+                    rolling_rows += 1 if rolling else 0
+                if d_state is DeadlineState.UNKNOWN:
+                    unassessed += 1
         if expired_samples:
             self._log(f"  ↳ expired examples: {'; '.join(expired_samples)}")
         if undated:
@@ -470,10 +642,29 @@ class ScraperManager:
             # the permanent-Ongoing bug stayed invisible for so long — the fix is
             # only trustworthy if the split can be watched.
             self._log(
-                f"  ↳ {undated} undated row(s): {rolling_rows} state no closing "
-                f"date, {undated - rolling_rows} we could not read one from "
-                f"(kept live, retired after {settings.ongoing_max_age_days} "
-                f"days unseen)"
+                f"  ↳ {undated} undated row(s) stored: {rolling_rows} where the "
+                f"source states no closing date (shown as live, retired after "
+                f"{settings.ongoing_max_age_days} days unseen), "
+                f"{undated - rolling_rows} where we could not read one"
+            )
+        if unassessed:
+            # Said out loud because these rows are stored ACTIVE but are NOT
+            # actionable, so they appear in no dashboard view until the review
+            # queue exists. A number in the run log is the only thing standing
+            # between "held for review" and "silently lost".
+            self._log(
+                f"  ↳ {unassessed} row(s) stored as UNASSESSED — a closing date "
+                f"could not be determined. They are held for review, not shown "
+                f"as live and not archived."
+            )
+        if out_of_scope:
+            # Counted separately from the prose gate. "the source says this is
+            # a contract award" and "this does not read like an opportunity"
+            # are different rejections, and merging them would hide a scraper
+            # whose source vocabulary has changed.
+            self._log(
+                f"  ↳ {out_of_scope} row(s) rejected by the source's own type "
+                f"or status fields, before any title was read"
             )
         return saved, expired, dupes, spam, rejected
 
@@ -507,25 +698,98 @@ class ScraperManager:
         log.info(message)
 
     @staticmethod
-    def _open_run(source: str) -> int:
+    def _last_good_signature(scraper) -> str:
+        """The structure signature from this source's last run that produced rows.
+
+        Without it, drift and "found nothing" are indistinguishable — which is
+        why STRUCTURE_CHANGED requires a difference against a KNOWN GOOD run,
+        not merely a signature that exists. Keyed on source_key so a rename does
+        not lose the history.
+        """
+        try:
+            with session_scope() as db:
+                row = db.execute(
+                    select(ScrapeRun.structure_signature)
+                    .where(ScrapeRun.source_key == scraper.name,
+                           ScrapeRun.saved > 0,
+                           ScrapeRun.structure_signature.is_not(None))
+                    .order_by(ScrapeRun.started_at.desc())
+                    .limit(1)
+                ).scalar()
+                return row or ""
+        except Exception:                                       # noqa: BLE001
+            return ""
+
+    @staticmethod
+    def _open_run(source: str, source_key: str = "") -> int:
         with session_scope() as db:
-            run = ScrapeRun(source_website=source, started_at=datetime.now(timezone.utc))
+            run = ScrapeRun(
+                source_website=source,
+                # The registry key, which survives a display-name change. The
+                # baseline found 91 distinct display names for 85 sources
+                # because renames split each source's history in two, which
+                # breaks every "last successful run" and consecutive-failure
+                # count keyed on the name.
+                source_key=source_key or source,
+                started_at=datetime.now(timezone.utc),
+                worker_id=run_lock.worker_id(),
+                heartbeat_at=datetime.now(timezone.utc),
+            )
             db.add(run)
             db.flush()
             return run.id
 
     @staticmethod
-    def _close_run(run_id: int, prog: dict[str, Any]) -> None:
+    def _close_run(run_id: int, prog: dict[str, Any],
+                   evidence: Evidence | None = None) -> None:
+        """Write the terminal record, with a stated reason for whatever happened.
+
+        The old version copied `prog["status"]` and nothing else. `prog["status"]`
+        is set to "completed" after the crawl loop, so it meant "the function
+        returned" — which is why all 916 runs in the baseline said `completed`
+        or `running` and none ever said why a source produced nothing.
+        """
+        started = None
         with session_scope() as db:
             run = db.get(ScrapeRun, run_id)
-            if run:
-                run.finished_at = datetime.now(timezone.utc)
-                run.pages_scraped = prog["pages"]
-                run.found = prog["found"]
-                run.saved = prog["saved"]
-                run.skipped_expired = prog["skipped_expired"]
-                run.errors = prog["errors"]
-                run.status = prog["status"]
+            if not run:
+                return
+            finished = datetime.now(timezone.utc)
+            started = run.started_at
+            run.finished_at = finished
+            run.pages_scraped = prog["pages"]
+            run.found = prog["found"]
+            run.saved = prog["saved"]
+            run.skipped_expired = prog["skipped_expired"]
+            run.errors = prog["errors"]
+            run.duplicates = prog.get("duplicates", 0)
+            run.rejected = prog.get("rejected", 0)
+            run.status = prog["status"]
+            if started is not None:
+                st = started if started.tzinfo else started.replace(tzinfo=timezone.utc)
+                run.duration_s = (finished - st).total_seconds()
+
+            if evidence is not None:
+                outcome, code, message = classify(evidence)
+                run.outcome = outcome.value
+                run.error_code = code.value if code else None
+                run.error_message = message
+                run.first_http_status = evidence.first_http_status
+                run.last_http_status = evidence.last_http_status
+                run.final_url = (evidence.final_url or "")[:1024] or None
+                run.fetch_mode = evidence.fetch_mode or None
+                run.attempts = evidence.attempts
+                run.structure_signature = evidence.structure_signature or None
+                # Say it once, loudly, at the moment it happens — the brief's
+                # "log a clear warning immediately when a source returns
+                # nothing". Waiting for someone to open the dashboard is how a
+                # source stays dead for 127 runs.
+                if not outcome.is_healthy:
+                    log.warning("[%s] %s — %s | next: %s",
+                                run.source_website, outcome.value.upper(),
+                                message, outcome.next_action)
+                elif outcome is Outcome.CONFIRMED_EMPTY:
+                    log.info("[%s] CONFIRMED_EMPTY — %s", run.source_website, message)
 
 
 manager = ScraperManager()  # module-level singleton, injected into routes

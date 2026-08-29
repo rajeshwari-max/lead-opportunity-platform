@@ -688,10 +688,11 @@ class UNPartnerPortalScraper(BaseScraper):
                 log.info("[%s] listing API: %s", self.name, endpoint)
                 self._paginate(page, endpoint, headers, queue, stop_event, done)
             finally:
-                try:
-                    context.close()
-                except Exception:
-                    pass
+                # close_owned also closes the Browser that owns this
+                # context; context.close() alone left the Chromium
+                # process running. It guards each step internally, so
+                # the try/except that used to wrap this is redundant.
+                site_auth.close_owned(context)
 
     def _ensure_signed_in(self, page) -> tuple[bool, dict]:
         """(signed_in, auth_headers). Checked against the API, never assumed.

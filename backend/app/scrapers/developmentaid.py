@@ -40,6 +40,7 @@ from app.schemas.opportunity import RawOpportunity
 from app.scrapers.base_scraper import BaseScraper
 from app.scrapers.registry import register
 from app.services.amounts import clean_amount
+from app.services.walk_budget import WalkBudget
 
 log = logging.getLogger("scraper")
 
@@ -1706,17 +1707,59 @@ class DevelopmentAidScraper(BaseScraper):
                  "%s, so it will be partitioned until every part fits",
                  slug, f"{grand_total:,}" if grand_total >= 0 else "?", reachable)
 
-        budget_used = 0
-        searches_cap = settings.devaid_max_slices
+        # Whichever of the three binds first ends the walk cleanly, naming
+        # itself so the run's coverage number can be read as a bound rather
+        # than as a failure. See services/walk_budget.py.
+        budget = WalkBudget(
+            searches_cap=settings.devaid_max_slices,
+            duration_s=settings.devaid_max_duration_s,
+            record_cap=settings.devaid_max_records,
+        )
 
-        def cover(base: dict, dim_idx: int, label: str, lo: int = 0, hi: int = 0) -> None:
-            nonlocal budget_used
-            if stop_flag.is_set() or budget_used >= searches_cap:
+        def over_budget() -> str:
+            return budget.exceeded(len(seen))
+
+        # How deep budget bisection may go. 0-20,000,000 halved to width 1 is
+        # 25 levels, and the 2026-08-26 run went all the way down — producing
+        # labels like "budget 0-1", "budget 1-2", each re-reading the SAME 102
+        # rows. A cap is a backstop; the inert-axis test below is the real fix.
+        MAX_BUDGET_DEPTH = 8
+        # None = untested, True = it finds new rows, False = proven useless.
+        sort_reversal = {"works": None}
+
+        def cover(base: dict, dim_idx: int, label: str, lo: int = 0, hi: int = 0,
+                  parent_total: int | None = None, budget_depth: int = 0) -> None:
+            if stop_flag.is_set():
+                return
+            if over_budget():
                 return
             total = self._probe_total(page, captured, base, slug)
-            budget_used += 1
+            budget.spend()
             if total == 0:
                 return
+            # Did narrowing the budget range actually narrow anything?
+            #
+            # This is the guard whose absence turned a 390-row leak into an
+            # 839-row loss. Carrying lo/hi into the leaves made budget
+            # bisection reachable — correct — but nothing checked that the
+            # server HONOURS the filter down there. It does not: every level
+            # came back holding 102, so the recursion split 0-20,000,000 down
+            # to 0-1 and read the same 102 rows at every one of 800 nodes.
+            # Coverage fell from 1,214 distinct to 375 because the search
+            # budget was spent on an exponential tree of identical queries.
+            #
+            # A split that returns its parent's count is not a split. One
+            # probe is enough to know, and the answer costs nothing extra —
+            # this run had to make the probe anyway.
+            budget_inert = (
+                budget_depth > 0
+                and parent_total is not None
+                and total >= parent_total
+            )
+            if budget_inert and budget_depth == 1:
+                log.info("[developmentaid] %s: budget filter has no effect inside "
+                         "%s (still %s after halving the range) — not bisecting it "
+                         "here", slug, label, f"{total:,}")
             if total < 0:
                 run_search(base, label)
                 return
@@ -1733,7 +1776,7 @@ class DevelopmentAidScraper(BaseScraper):
                          "into %s parts", slug, label, f"{total:,}", reachable,
                          dname, len(dvalues))
                 for value, vname in dvalues:
-                    if stop_flag.is_set() or budget_used >= searches_cap:
+                    if stop_flag.is_set() or over_budget():
                         break
                     child = _json.loads(_json.dumps(base))
                     try:
@@ -1752,10 +1795,14 @@ class DevelopmentAidScraper(BaseScraper):
                           f"{label}+{dname}={vname}" if label != "all" else f"{dname}={vname}",
                           lo, hi)
                 return
-            if budget_path and hi > lo + 1:
+            if budget_inert or budget_depth >= MAX_BUDGET_DEPTH:
+                # Fall through to the leaf handling below rather than
+                # bisecting a filter this subtree has just proved it ignores.
+                pass
+            elif budget_path and hi > lo + 1:
                 mid = (lo + hi) // 2
                 for a, b in ((lo, mid), (mid, hi)):
-                    if stop_flag.is_set() or budget_used >= searches_cap:
+                    if stop_flag.is_set() or over_budget():
                         break
                     child = _json.loads(_json.dumps(base))
                     try:
@@ -1767,31 +1814,44 @@ class DevelopmentAidScraper(BaseScraper):
                         node[budget_path[-1]] = rng
                     except Exception:
                         continue
-                    cover(child, dim_idx, f"{label}+budget {a}-{b}", a, b)
+                    # parent_total is what makes the inert-axis test at the top
+                    # possible: the child compares its own count against the
+                    # count this node just measured, and stops the moment
+                    # narrowing stops narrowing.
+                    cover(child, dim_idx, f"{label}+budget {a}-{b}", a, b,
+                          parent_total=total, budget_depth=budget_depth + 1)
                 return
-            # No axis left. Before giving up, read the list from the other end.
+            # No axis left. Before giving up, try reading from the other end.
             #
-            # A truncated search always returns the FIRST `reachable` rows of
-            # some ordering. Reversing that ordering returns the LAST ones, and
-            # they are a different set — so one extra request roughly doubles
-            # what an unsplittable leaf yields, with no filter to discover and
-            # no assumption about what the server allows. On the 2026-08-26 run
-            # the four leaks held 838 listings between them and surrendered 348;
-            # reading both ends is the cheapest way to close most of that gap.
+            # The theory: a truncated search returns the FIRST `reachable` rows
+            # of some ordering, so reversing the ordering returns the LAST ones.
+            # On this API the theory is wrong — the 2026-08-26 run reversed 800
+            # leaves and got `0 new` from every single one, because the endpoint
+            # ignores `sort` the same way it ignores the budget range.
             #
-            # It cannot recover a leaf holding more than 2x `reachable` — that
-            # needs a real axis — so the shortfall is still reported, now
-            # counting what both directions actually returned.
+            # So it is now measured, once, and switched off when it fails. An
+            # idea that costs one request per leaf has to prove itself on the
+            # first leaf or stop costing anything. `None` = untested,
+            # False = tried and yielded nothing.
             gained = run_search(base, label)
             flipped = 0
             sort_val = base.get("sort")
-            if isinstance(sort_val, str) and "." in sort_val and total > reachable:
+            if (sort_reversal["works"] is not False
+                    and isinstance(sort_val, str) and "." in sort_val
+                    and total > reachable):
                 field, _, direction = sort_val.rpartition(".")
                 other = "asc" if direction.lower() == "desc" else "desc"
                 mirror = _json.loads(_json.dumps(base))
                 mirror["sort"] = f"{field}.{other}"
                 flipped = run_search(mirror, f"{label} [reversed]")
-                budget_used += 1
+                budget.spend()
+                if sort_reversal["works"] is None:
+                    sort_reversal["works"] = flipped > 0
+                    if not sort_reversal["works"]:
+                        log.info("[developmentaid] %s: reversing the sort order "
+                                 "returns the same rows — this endpoint ignores "
+                                 "`sort`, so it will not be tried again this run",
+                                 slug)
             if total > reachable * 2:
                 log.warning(
                     "[developmentaid] %s: %s holds %s but no split axis remains — "
@@ -1818,9 +1878,46 @@ class DevelopmentAidScraper(BaseScraper):
             log.info("[developmentaid] %s: PASS 1 — covering open listings", slug)
             cover(_json.loads(_json.dumps(open_payload)), 0, "open", 0, hi_budget)
             log.info("[developmentaid] %s: PASS 1 done — %s open listings captured "
-                     "using %s searches", slug, f"{len(seen):,}", budget_used)
-            log.info("[developmentaid] %s: PASS 2 — covering the historical archive",
-                     slug)
+                     "using %s searches", slug, f"{len(seen):,}", budget.searches)
+
+            # PASS 2 — the historical archive. OFF unless explicitly asked for.
+            #
+            # This is what a scheduled production run was doing every time, and
+            # the 2026-08-29 baseline measured the cost: DevelopmentAid found
+            # 779,856 records to save 55,013 — a 93% discard rate — and 85% of
+            # the whole database (90,551 of 106,854 rows) is expired as a
+            # result. The platform's job is opportunities someone can still
+            # respond to; the archive is, by definition, the opposite.
+            #
+            # It remains available as an explicitly invoked maintenance
+            # operation via LOP_DEVAID_INCLUDE_ARCHIVE=true, which is what the
+            # brief asks for: separate, and disabled by default.
+            if not settings.devaid_include_archive:
+                log.info(
+                    "[developmentaid] %s: skipping the historical archive — "
+                    "production runs collect open/current listings only. "
+                    "%s open listing(s) captured in %s searches. Set "
+                    "LOP_DEVAID_INCLUDE_ARCHIVE=true for a one-off backfill.",
+                    slug, f"{len(seen):,}", budget.searches,
+                )
+                return True
+
+            log.warning(
+                "[developmentaid] %s: PASS 2 — walking the HISTORICAL ARCHIVE "
+                "because LOP_DEVAID_INCLUDE_ARCHIVE is enabled. This is a "
+                "maintenance operation: it is long, and most of what it finds "
+                "has already closed.", slug,
+            )
+        elif not settings.devaid_include_archive:
+            # No open-only filter was available (the status taxonomy could not
+            # be fetched), so the single pass below is unavoidably over
+            # everything. Say so rather than letting an archive walk happen
+            # under the name of a normal run.
+            log.warning(
+                "[developmentaid] %s: no status filter is available this run, so "
+                "the only possible pass covers closed listings too. Bounded by "
+                "the caps below; coverage of OPEN listings will be partial.", slug,
+            )
         cover(_json.loads(_json.dumps(payload)), 0, "all", 0, hi_budget)
 
         if grand_total > 0:
@@ -1828,9 +1925,26 @@ class DevelopmentAidScraper(BaseScraper):
             log.info("[developmentaid] %s: COVERAGE %s of %s listings (%.1f%%) from %s "
                      "searches", slug, f"{len(seen):,}", f"{grand_total:,}", pct,
                      stats["searches"])
-            if budget_used >= searches_cap:
-                log.warning("[developmentaid] %s: stopped at the %s-search cap — raise "
-                            "LOP_DEVAID_MAX_SLICES to go further", slug, searches_cap)
+            if budget.reason:
+                # Name the cap AND the gap. "15.5% covered" is a fact someone
+                # can act on; "completed" for the same run is not.
+                missing = max(grand_total - len(seen), 0)
+                log.warning(
+                    "[developmentaid] %s: PARTIAL COVERAGE — stopped at %s. "
+                    "%s of %s listings collected (%.1f%%); roughly %s were not "
+                    "reached this run. This is a bound, not a failure: the run "
+                    "did what it was allowed to do. Raise LOP_DEVAID_MAX_SLICES "
+                    "/ _MAX_DURATION_S / _MAX_RECORDS to go further, or accept "
+                    "partial coverage of a source whose plan limits reads.",
+                    slug, budget.reason, f"{len(seen):,}",
+                    f"{grand_total:,}", pct, f"{missing:,}",
+                )
+            elif pct < 95:
+                log.warning(
+                    "[developmentaid] %s: %.1f%% coverage without hitting any cap — "
+                    "the remaining listings are unreachable with the filters this "
+                    "account can apply, not merely unvisited.", slug, pct,
+                )
 
         total_sent = stats["sent"]
         if total_sent == 0:

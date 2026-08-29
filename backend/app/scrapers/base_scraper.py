@@ -446,13 +446,33 @@ class BaseScraper(ABC):
         needs_login = self.name in site_auth.LOGIN_SITES
 
         with sync_playwright() as pw:
+            # Both branches now hand back a CONTEXT, and teardown goes through
+            # site_auth.close_owned, which closes the context AND the browser
+            # behind it.
+            #
+            # The previous shape was:
+            #
+            #     context = site_auth.open_context(...)
+            #     browser = context          # <- a BrowserContext named "browser"
+            #     ...
+            #     finally: browser.close()   # <- closes the context only
+            #
+            # open_context's storage-state and anonymous paths launch a Browser
+            # and return one of its contexts without keeping a reference, so
+            # that `close()` left the Chromium process running every time. The
+            # name is what made it survive review: the line reads exactly like
+            # correct cleanup. See site_auth.close_owned for the full account.
+            context = None
             if needs_login:
                 context = site_auth.open_context(pw, self.name, headless=True)
-                browser = context
                 page = context.pages[0] if context.pages else context.new_page()
             else:
+                # Was pw.chromium.launch() + browser.new_page(), which has the
+                # same ownership split. Creating an explicit context keeps one
+                # teardown path for both branches instead of two that drift.
                 browser = pw.chromium.launch(headless=True)
-                page = browser.new_page(user_agent=settings.user_agent)
+                context = browser.new_context(user_agent=settings.user_agent)
+                page = context.new_page()
             try:
                 page.goto(url, timeout=int(settings.request_timeout * 1000))
                 try:
@@ -494,4 +514,4 @@ class BaseScraper(ABC):
                         break
                 return page.content()
             finally:
-                browser.close()
+                site_auth.close_owned(context)

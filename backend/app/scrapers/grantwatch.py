@@ -159,7 +159,9 @@ class GrantWatchScraper(BaseScraper):
                 log.info("[grantwatch] accumulated %s page snapshots", len(chunks))
                 return "<html><body>" + "".join(chunks) + "</body></html>"
             finally:
-                context.close()
+                # context.close() left the owning Browser running — see
+                # site_auth.close_owned.
+                site_auth.close_owned(context)
 
     def parse_listing(self, html: str, page_url: str) -> list[RawOpportunity]:
         soup = BeautifulSoup(html, "lxml")

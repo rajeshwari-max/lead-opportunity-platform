@@ -110,7 +110,9 @@ class BondScraper(BaseScraper):
                          clicks, prev_count, total or "?")
                 return page.content()
             finally:
-                context.close()
+                # context.close() left the owning Browser running — see
+                # site_auth.close_owned.
+                site_auth.close_owned(context)
 
     # ------------------------------------------------------------------ parse
     def parse_listing(self, html: str, page_url: str) -> list[RawOpportunity]:

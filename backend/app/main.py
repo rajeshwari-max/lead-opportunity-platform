@@ -34,12 +34,42 @@ async def lifespan(_app: FastAPI):
     from app.services import dispatch_service
 
     manager.on_complete = dispatch_service.post_scrape_hook
-    scheduler.start()  # restores any persisted daily/weekly/monthly/yearly schedule
 
-    # One-time vertical backfill for pre-existing rows (runs in the background so
-    # startup stays instant; idempotent — only rows without canonical verticals).
     import asyncio
 
+    # ------------------------------------------------------ startup recovery
+    # BEFORE the scheduler, and before anything can start a scrape.
+    #
+    # The database held 106 runs stuck in `running`, and the dashboard reported
+    # them as live scrapes. Closing them out is cheap (two indexed statements)
+    # and it has to happen first: a scheduled or manual run that begins while
+    # those records are inconsistent inherits the confusion, and the lease
+    # cannot be reasoned about while a dead process appears to hold it.
+    from app.services.run_recovery import run_startup_recovery
+
+    try:
+        await asyncio.to_thread(run_startup_recovery)
+    except Exception:                                           # noqa: BLE001
+        # Recovery failing must not prevent the app from serving. It logs its
+        # own detail; the run-state it could not fix stays visible as stuck,
+        # which is the honest outcome.
+        import logging
+
+        logging.getLogger("scraper").exception("startup recovery failed")
+
+    scheduler.start()  # restores any persisted daily/weekly/monthly/yearly schedule
+
+    # ------------------------------------------------- background maintenance
+    # These eight passes each scan or rewrite the whole opportunities table.
+    # They used to be launched as eight concurrent tasks, so every boot put
+    # eight full-table workloads on one SQLite file at once — on a 177 MB
+    # database on a small EC2 box that is minutes of contention, competing with
+    # the API's own queries and, before the change above, with a catch-up scrape
+    # starting in parallel.
+    #
+    # Running them in sequence in ONE worker thread costs nothing in total work
+    # and removes the pile-up: SQLite serialises the writes anyway, so the
+    # concurrency was buying contention rather than speed.
     from app.services.amounts import backfill_amounts
     from app.services.geography import backfill_geography
     from app.services.organization import backfill_organizations
@@ -49,34 +79,38 @@ async def lifespan(_app: FastAPI):
     from app.services.study_type import backfill_study_types
     from app.services.work_type import backfill_work_types
 
-    backfill_task = asyncio.create_task(asyncio.to_thread(backfill_verticals))
-    # Same idea for country/region: cleans region names, aliases and title
-    # artifacts out of the country column on rows saved before normalisation
-    # existed. Idempotent — a clean row is left untouched.
-    geo_task = asyncio.create_task(asyncio.to_thread(backfill_geography))
-    # And for organisation: recovers the funder from summary prose on sources
-    # that never provided it as a field. Only touches blank rows.
-    org_task = asyncio.create_task(asyncio.to_thread(backfill_organizations))
-    # And the amount: strips page furniture off stored values and recovers
-    # figures stated in the listing text ("provides up to US$250,000").
-    amt_task = asyncio.create_task(asyncio.to_thread(backfill_amounts))
-    # Research vs Implementation on existing rows, so routing works from day one.
-    wt_task = asyncio.create_task(asyncio.to_thread(backfill_work_types))
-    # Which kind of study a research assignment is (Baseline / Endline / …).
-    st_task = asyncio.create_task(asyncio.to_thread(backfill_study_types))
-    # Clear links that resolve to a homepage rather than the opportunity.
-    link_task = asyncio.create_task(asyncio.to_thread(repair_links))
-    # Sentinel deadlines (9999-12-31 = "ongoing") and Active/Expired drift.
-    dl_task = asyncio.create_task(asyncio.to_thread(audit_deadlines))
+    def _startup_maintenance() -> None:
+        """Idempotent repair passes, one at a time, in priority order.
+
+        Deadlines first: it is the one whose absence is visible to users — the
+        baseline had 1,481 Active rows whose deadline had passed. The rest fill
+        in fields on existing rows and can wait a few seconds.
+        """
+        import logging
+
+        slog = logging.getLogger("scraper")
+        for name, fn in (
+            ("deadline audit", audit_deadlines),          # Active/Expired drift
+            ("verticals", backfill_verticals),            # routing labels
+            ("links", repair_links),                      # homepage-only links
+            ("geography", backfill_geography),
+            ("organisation", backfill_organizations),
+            ("amounts", backfill_amounts),
+            ("work type", backfill_work_types),
+            ("study type", backfill_study_types),
+        ):
+            try:
+                result = fn()
+                slog.info("[startup] %s: %s", name, result)
+            except Exception:                                   # noqa: BLE001
+                # One failing pass must not cancel the seven after it.
+                slog.exception("[startup] %s failed", name)
+
+    maintenance_task = asyncio.create_task(asyncio.to_thread(_startup_maintenance))
+
     yield
-    dl_task.cancel()
-    link_task.cancel()
-    st_task.cancel()
-    wt_task.cancel()
-    amt_task.cancel()
-    org_task.cancel()
-    geo_task.cancel()
-    backfill_task.cancel()
+
+    maintenance_task.cancel()
     scheduler.shutdown()
 
 

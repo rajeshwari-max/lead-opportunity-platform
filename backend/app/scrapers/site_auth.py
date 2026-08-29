@@ -503,6 +503,103 @@ def open_context(pw, source: str, headless: bool = True):
     return mask_headless(browser.new_context(**context_args))
 
 
+def close_owned(context) -> None:
+    """Close a context returned by open_context AND the browser that owns it.
+
+    Why this exists
+    ---------------
+    open_context has four return paths. Two of them launch a Browser and return
+    only one of its contexts:
+
+        browser = _launch()
+        return mask_headless(browser.new_context(...))       # browser is a local
+
+    `browser` goes out of scope the moment this function returns, so the caller
+    receives a BrowserContext with no reference to the process behind it.
+    Callers then do `context.close()`, which closes the context and leaves the
+    Chromium process running. That is the orphan-Chrome leak: it is structural,
+    not intermittent, and it affects the storage-state and anonymous paths —
+    which between them cover most sources.
+
+    It stayed invisible for two reasons. First, `base_scraper` named the
+    variable `browser` while holding a BrowserContext, so `browser.close()`
+    read as correct in review. Second, `with sync_playwright()` kills the driver
+    (and its browsers) on exit, so a run that completes normally cleans up
+    anyway — the leak only shows when the thread never reaches that exit, which
+    is exactly what happens on stop, timeout or an abandoned worker.
+
+    The other two paths use launch_persistent_context, which has no separate
+    Browser: closing the context closes its process. `BrowserContext.browser`
+    returns None for those, so one branch covers both ownership models without
+    the caller needing to know which it got.
+
+    Every step is guarded independently: a half-dead browser must not stop the
+    rest of the teardown, and teardown runs in `finally` blocks where an
+    exception would mask the real error.
+    """
+    if context is None:
+        return
+
+    # Pages first. Closing a context closes its pages, but an unresponsive page
+    # can make context.close() hang, and closing pages individually gives that
+    # a chance to resolve before the bigger hammer.
+    try:
+        for page in list(getattr(context, "pages", []) or []):
+            try:
+                page.close()
+            except Exception:                                   # noqa: BLE001
+                pass
+    except Exception:                                           # noqa: BLE001
+        pass
+
+    owner = None
+    try:
+        owner = context.browser          # None for a persistent context
+    except Exception:                                           # noqa: BLE001
+        owner = None
+
+    try:
+        context.close()
+    except Exception:                                           # noqa: BLE001
+        pass
+
+    if owner is not None:
+        try:
+            owner.close()
+        except Exception:                                       # noqa: BLE001
+            pass
+
+
+def chrome_process_count() -> int:
+    """How many Chrome/Chromium processes exist right now, or -1 if unknowable.
+
+    The acceptance criterion for the lifecycle work is "the count returns to its
+    pre-run baseline", and a number nobody can read is not a criterion. Used by
+    the tests and by the runbook's before/after check; deliberately dependency
+    free (no psutil) so it works on the EC2 box as shipped.
+    """
+    import subprocess
+    import sys
+
+    try:
+        if sys.platform == "win32":
+            out = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq chrome.exe", "/NH"],
+                capture_output=True, text=True, timeout=15,
+            ).stdout
+            return sum(1 for line in out.splitlines() if "chrome.exe" in line.lower())
+        out = subprocess.run(
+            ["ps", "-e", "-o", "comm="], capture_output=True, text=True, timeout=15,
+        ).stdout
+        return sum(
+            1 for line in out.splitlines()
+            if line.strip().lower() in ("chrome", "chromium", "chromium-browser",
+                                        "headless_shell")
+        )
+    except Exception:                                           # noqa: BLE001
+        return -1
+
+
 class NoDisplayError(RuntimeError):
     """Raised when an interactive login is attempted on a machine with no screen."""
 

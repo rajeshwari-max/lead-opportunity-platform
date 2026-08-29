@@ -5,7 +5,22 @@ backend/logs/
 backend/.venv/
 frontend/node_modules/
 frontend/dist/
+backend/data_snapshot/
+
+# Every .env variant, not just the bare name.
+#
+# `.env` alone does NOT match `.env.bak`, and a .env.bak holding the same
+# credentials was sitting untracked in backend/ — one `git add -A` away from
+# being published in a PUBLIC repository. The negation keeps .env.example,
+# which is the one that is supposed to be here.
 .env
+.env.*
+!.env.example
+
+# Scratch output from probe/audit runs. Large, regenerated on demand, and they
+# carry scraped listing data that has no reason to be in the repo.
+sweep.json
+unpp_check.json
 
 # Word lock files (created while a .docx is open) — never belong in the repo
 ~$*.docx

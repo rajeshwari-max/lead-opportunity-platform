@@ -191,6 +191,117 @@ def _run_migrations(conn) -> None:
         elif "verticals" not in cols:
             conn.exec_driver_sql("ALTER TABLE team_members ADD COLUMN verticals TEXT NOT NULL DEFAULT ''")
 
+    # ------------------------------------------------------ deadline states
+    # `deadline IS NULL` meant both "the source says rolling" (actionable) and
+    # "we could not parse a date" (not actionable), for 3,021 Active rows.
+    #
+    # The backfill below is deliberately conservative and deliberately marked.
+    # The original signal — the scraper's assume_active flag — was never stored,
+    # so which of the two a legacy NULL row was CANNOT be recovered. Marking
+    # them all UNKNOWN would hide 3,021 rows that are currently visible, on a
+    # guess. So they become ROLLING with confidence='legacy_assumed', which
+    # preserves today's behaviour exactly and leaves the assumption visible and
+    # queryable for a later re-check. Dated rows get DATED/'parsed'.
+    if "opportunities" in _tables(conn):
+        opp_cols = columns("opportunities")
+        for name, ddl in (
+            ("deadline_state",      "VARCHAR(16)"),
+            ("deadline_raw",        "VARCHAR(256)"),
+            ("deadline_confidence", "VARCHAR(24)"),
+            ("deadline_convention", "VARCHAR(16)"),
+            ("deadline_checked_at", "DATETIME"),
+        ):
+            if name not in opp_cols:
+                conn.exec_driver_sql(f"ALTER TABLE opportunities ADD COLUMN {name} {ddl}")
+
+        # Only rows that have never been classified — so this is a one-time
+        # backfill that a later re-check can override, not a repeated overwrite
+        # of whatever the scrapers have since determined.
+        conn.exec_driver_sql(
+            "UPDATE opportunities "
+            "   SET deadline_state = 'dated', deadline_confidence = 'parsed' "
+            " WHERE deadline_state IS NULL AND deadline IS NOT NULL"
+        )
+        conn.exec_driver_sql(
+            "UPDATE opportunities "
+            "   SET deadline_state = 'rolling', deadline_confidence = 'legacy_assumed' "
+            " WHERE deadline_state IS NULL AND deadline IS NULL"
+        )
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_opp_actionable "
+            "ON opportunities(status, deadline_state, deadline)"
+        )
+
+    # ---------------------------------------------------- scrape-run evidence
+    # A run used to be able to say only "completed", and 792 of the 916 runs in
+    # the 2026-08-29 baseline said exactly that — including all 127 attempts by
+    # the 16 sources that have never fetched a page or saved a row. Nothing
+    # recorded a status code, a URL or an error, so "the site blocked us" and
+    # "our parser is broken" were indistinguishable rows.
+    #
+    # Every column here is additive and nullable (or defaulted), so this runs on
+    # the existing 177 MB database without rewriting a single row: SQLite's ADD
+    # COLUMN is O(1) metadata when there is no NOT NULL without a default.
+    # Historical runs stay exactly as they are — evidence nobody captured cannot
+    # be back-filled, and pretending otherwise would put invented causes on 916
+    # rows.
+    if "scrape_runs" in _tables(conn):
+        run_cols = columns("scrape_runs")
+        for name, ddl in (
+            # identity: the registry key, which survives a display-name rename.
+            # 91 distinct names for 85 sources in the baseline, because renames
+            # split each source's history ("Macfound"/"Macarthur Foundation").
+            ("source_key",          "VARCHAR(64)"),
+            # the taxonomy verdict, alongside the original `status`
+            ("outcome",             "VARCHAR(32)"),
+            ("error_code",          "VARCHAR(48)"),
+            ("error_message",       "TEXT"),
+            # transport — the half of the picture that was entirely missing
+            ("first_http_status",   "INTEGER"),
+            ("last_http_status",    "INTEGER"),
+            ("final_url",           "VARCHAR(1024)"),
+            ("fetch_mode",          "VARCHAR(16)"),
+            ("attempts",            "INTEGER NOT NULL DEFAULT 0"),
+            ("duration_s",          "FLOAT"),
+            # counts that separate "healthy and repeating itself" from
+            # "the gate threw everything away"
+            ("duplicates",          "INTEGER NOT NULL DEFAULT 0"),
+            ("rejected",            "INTEGER NOT NULL DEFAULT 0"),
+            # liveness: the lease that tells a live run from an abandoned one.
+            # 106 runs sit in `running` with no way to express which is which.
+            ("heartbeat_at",        "DATETIME"),
+            ("worker_id",           "VARCHAR(64)"),
+            # parser drift
+            ("structure_signature", "VARCHAR(64)"),
+            ("debug_capture",       "VARCHAR(512)"),
+        ):
+            if name not in run_cols:
+                conn.exec_driver_sql(f"ALTER TABLE scrape_runs ADD COLUMN {name} {ddl}")
+
+        # Indexes for the three questions the health view asks constantly:
+        # "what is this source's current state", "which runs are abandoned",
+        # "when did this source last produce anything".
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_scrape_runs_source_key "
+            "ON scrape_runs(source_key, started_at DESC)"
+        )
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_scrape_runs_outcome ON scrape_runs(outcome)"
+        )
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_scrape_runs_heartbeat "
+            "ON scrape_runs(heartbeat_at) WHERE finished_at IS NULL"
+        )
+
+    # The cross-process scrape lease. create_all() makes the table; this seeds
+    # the single row it will ever hold, so acquire() never has to decide whether
+    # it is inserting or updating under a race.
+    if "scrape_lease" in _tables(conn):
+        conn.exec_driver_sql(
+            "INSERT OR IGNORE INTO scrape_lease (id, worker_id, acquired_at, "
+            "heartbeat_at, label) VALUES (1, NULL, NULL, NULL, '')"
+        )
+
     if "ix_opportunities_sectors" in index_names("opportunities"):
         conn.exec_driver_sql("DROP INDEX ix_opportunities_sectors")
     conn.exec_driver_sql(

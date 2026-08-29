@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator, Field
 
@@ -38,6 +39,19 @@ class RawOpportunity(BaseModel):
     # until its source stops listing it (LOP_ONGOING_MAX_AGE_DAYS).
     assume_active: bool = False
     dayfirst: bool = True                  # date convention: True=31/07 (IN/EU), False=07/31 (US)
+    # What the SOURCE calls this record, in the source's own vocabulary —
+    # "contract_award", "tender", "eoi", "project", "grant". Left empty unless
+    # the source exposes such a field; it is never inferred from the title,
+    # because inferring it is exactly the mistake it exists to prevent. A World
+    # Bank contract award and an open tender read identically as prose.
+    # Judged against the source's contract in services/source_manifest.py.
+    record_type: str = ""
+    # The source's own status word — "Open", "Cancelled", "Closed",
+    # "Request for Expressions of Interest". Only a value the source's contract
+    # lists as closed may discard a row; an unrecognised value means UNKNOWN,
+    # never closed, so a vocabulary nobody has configured cannot silently
+    # delete records.
+    source_status: str = ""
 
 
 class OpportunityOut(BaseModel):
@@ -195,6 +209,23 @@ class SendSelectionIn(BaseModel):
     """Hand-picked opportunities plus the team members to send them to."""
     opportunity_ids: list[int]
     member_ids: list[int]
+
+
+class ReviewDecisionIn(BaseModel):
+    """A person's ruling on a row whose closing date could not be determined.
+
+    Three decisions, because those are the three things a reviewer can actually
+    know after looking at the listing:
+
+        dated    they read a closing date -> store it (a past date closes it)
+        rolling  the call is open-ended   -> becomes live, any stored date cleared
+        closed   it has already closed    -> archived, never deleted
+    """
+
+    decision: Literal["dated", "rolling", "closed"]
+    # Required for "dated" and ignored otherwise. Validated in the route rather
+    # than here so the error names the field a person actually filled in.
+    deadline: date | None = None
 
 
 class SendResult(BaseModel):

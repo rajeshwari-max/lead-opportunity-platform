@@ -1,4 +1,4 @@
-import type { DigestRunResult, EmailSettings, Facets, FilterState, Opportunity, Paginated, Progress, ScheduleStatus, SourceInfo, Stats, TeamMember } from "./types";
+import type { DigestRunResult, ReviewQueueResponse, EmailSettings, Facets, FilterState, Opportunity, Paginated, Progress, ScheduleStatus, SourceInfo, Stats, TeamMember } from "./types";
 
 const BASE = "/api";
 
@@ -141,5 +141,27 @@ export const api = {
     const res = await fetch(`${BASE}/email/run-now`, { method: "POST" });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     return res.json() as Promise<DigestRunResult>;
+  },
+  /** Rows whose closing date could not be determined. They are in neither the
+   *  live table nor the archive, so this endpoint is the only way to see them. */
+  reviewQueue: (opts: { limit?: number; source_website?: string } = {}) => {
+    const p = new URLSearchParams();
+    if (opts.limit) p.set("limit", String(opts.limit));
+    if (opts.source_website) p.set("source_website", opts.source_website);
+    return get<ReviewQueueResponse>(`/review-queue?${p}`);
+  },
+  /** Record a person's ruling. "closed" archives the row; it is never deleted. */
+  decideReviewItem: async (
+    id: number,
+    decision: "dated" | "rolling" | "closed",
+    deadline?: string,
+  ) => {
+    const res = await fetch(`${BASE}/review-queue/${id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, deadline: deadline || null }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json();
   },
 };

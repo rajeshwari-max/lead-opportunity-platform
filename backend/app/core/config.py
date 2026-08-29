@@ -40,6 +40,35 @@ class Settings(BaseSettings):
     # Run the deadline/link/junk maintenance pass automatically at the end of
     # every scrape. These repairs existed but were never called by anything.
     run_maintenance_after_scrape: bool = True
+
+    # ------------------------------------------------------------- scheduling
+    # Re-run a schedule slot the server was not alive for.
+    #
+    # OFF by default, which reverses the previous behaviour. The reasoning that
+    # put it in was sound for a laptop: an in-process APScheduler only fires
+    # while the process happens to be running, so a dev machine that is closed
+    # overnight misses every 02:00 window forever. On a server it is a different
+    # thing entirely — it means "restarting the application can start a full
+    # scrape", so a deploy, a crash-loop or a supervisor restart at the wrong
+    # moment launches an unbounded ~85-source run that nobody asked for and that
+    # no dashboard button initiated.
+    #
+    # The brief's rule is the right one: a scrape starts at an explicitly
+    # configured time, or because an authorised person clicked Start. Nothing
+    # else. Set LOP_SCHEDULER_CATCHUP_ON_RESTART=true to opt back in; the
+    # schedule card should show it when enabled, because an invisible automatic
+    # trigger is exactly what made this hard to reason about.
+    scheduler_catchup_on_restart: bool = False
+
+    # How long after its slot a missed job may still fire, in seconds.
+    #
+    # APScheduler's default is 1 second: a job whose event loop was busy for two
+    # seconds at 02:00:00 is silently dropped, and nothing records that it was.
+    # A weekly scrape that quietly does not happen looks identical to one that
+    # happened and found nothing — the same ambiguity the outcome taxonomy
+    # exists to remove. 15 minutes is long enough to survive a busy loop or a
+    # slow startup, short enough that a job never fires at a surprising hour.
+    scheduler_misfire_grace_s: int = 900
     detail_fetch_limit: int = 1500      # max detail-page visits per source per run, for scrapers
                                         # with enrich_details=True. Caps the extra load: only rows
                                         # missing an amount/organisation are fetched at all.
@@ -210,7 +239,28 @@ class Settings(BaseSettings):
     # minimum, and far more in practice because the partitions are uneven. A run
     # that stops at a few hundred covers a couple of percent, so this is set high
     # enough to finish; the real limit should be the archive running out.
-    devaid_max_slices: int = 25000
+    # ------------------------------------------------- DevelopmentAid bounds
+    # A production run has to be able to finish. Before these, the only limit
+    # was 25,000 search slices, which at roughly a second each is seven hours —
+    # not a bound, an absence of one. The 2026-08-26 run walked 801 searches in
+    # 31 minutes and had covered 15.5% when it stopped.
+    #
+    # Three independent caps, because they fail in different ways: a source can
+    # be slow without being large, large without being slow, or produce far more
+    # than expected because a filter silently stopped applying. Whichever binds
+    # first, the run ends cleanly and reports partial coverage honestly rather
+    # than being killed by a timeout with its record half-written.
+    devaid_max_slices: int = 600            # search partitions per section
+    devaid_max_duration_s: int = 1800       # 30 minutes per section
+    devaid_max_records: int = 20000         # rows handed off per section
+
+    # Walk the historical archive as well as currently-open listings.
+    #
+    # OFF. A scheduled run collects what someone can still respond to. With this
+    # on, the 2026-08-26 run found 779,856 records and saved 55,013 — a 93%
+    # discard rate — and it is why 85% of the database (90,551 of 106,854 rows)
+    # is expired. Turn it on deliberately for a one-off backfill, then off again.
+    devaid_include_archive: bool = False
     # Scrape only open/forecast DevelopmentAid listings. Their unfiltered totals
     # (118k grants, 1.2M tenders) are dominated by calls that closed years ago;
     # restricting to live ones is both what the dashboard needs and small enough

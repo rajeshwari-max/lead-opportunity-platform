@@ -14,6 +14,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.database.models import Category, Opportunity, SentLog, Status, TeamMember
+from app.services.actionable import actionable_clause
 
 
 def _csv(value: str) -> list[str]:
@@ -33,10 +34,10 @@ class MatchingService:
         shown against each member and the digest actually emailed — a member
         with 900 matches saw "100 new" and received 100.
         """
-        stmt = select(Opportunity).where(
-            Opportunity.status == Status.ACTIVE,
-            or_(Opportunity.deadline >= date.today(), Opportunity.deadline.is_(None)),
-        )
+        # Was a third copy of the "still open" rule, and it had drifted from
+        # the other two: `deadline IS NULL` counted as open, so every row whose
+        # date could not be parsed was emailed as a live opportunity.
+        stmt = select(Opportunity).where(actionable_clause())
 
         keywords = _csv(member.keywords)
         if keywords:

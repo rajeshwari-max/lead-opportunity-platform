@@ -55,7 +55,34 @@ async def _daily_digest_and_reminders() -> None:
 
 class ScrapeScheduler:
     def __init__(self) -> None:
-        self._scheduler = AsyncIOScheduler()
+        # Job defaults stated rather than inherited.
+        #
+        # APScheduler's defaults are max_instances=1, coalesce=False and
+        # misfire_grace_time=1s. Two of those are wrong here and the third was
+        # only right by accident:
+        #
+        #   max_instances=1  — correct, and now deliberate. Two overlapping
+        #       scrapes would share one SQLite file and one browser budget.
+        #       (It is not sufficient on its own: it is per-process, so it does
+        #       nothing about a second application process. That needs the
+        #       database lease in Phase 2b.)
+        #
+        #   coalesce=True    — if several slots were missed while the process
+        #       was down, run the job ONCE on recovery, not once per missed
+        #       slot. Without it a server down for three weeks would fire three
+        #       weekly scrapes back to back.
+        #
+        #   misfire_grace_time — 1 second means a job whose event loop was busy
+        #       at the scheduled instant is dropped silently. Eight concurrent
+        #       full-table backfills run at startup, so "the loop was busy" is
+        #       not hypothetical here.
+        self._scheduler = AsyncIOScheduler(
+            job_defaults={
+                "coalesce": True,
+                "max_instances": 1,
+                "misfire_grace_time": settings.scheduler_misfire_grace_s,
+            }
+        )
         self.current: ScheduleRequest = ScheduleRequest(mode="manual")
         # Run history (persisted): ISO timestamps + last outcome.
         self.last_run: datetime | None = None
@@ -80,18 +107,36 @@ class ScrapeScheduler:
                 self.current = ScheduleRequest(mode="manual")
                 return
 
-            # This scheduler only fires while the server process is actually
-            # alive at the scheduled instant — it's in-process (APScheduler),
-            # not an OS-level task. A dev server that restarts frequently (or a
-            # desktop app that isn't left running overnight) can easily miss
-            # every single 2 AM window forever, leaving last_run stuck at null
-            # even though the schedule is configured correctly. Catch up here:
-            # if today's slot has already passed and we haven't run since, run
-            # it now instead of silently waiting for tomorrow's exact instant.
+            # Restart catch-up: OFF unless explicitly enabled.
+            #
+            # The original reasoning holds for a laptop — an in-process
+            # scheduler only fires while the process is alive, so a machine
+            # closed overnight misses every 02:00 window forever. On a server
+            # the same code means "restarting the application can begin a full
+            # scrape of ~85 sources", which fires on deploys, crash-loops and
+            # supervisor restarts. None of those is a person clicking Start or
+            # a configured time arriving, and both of those are the only two
+            # things allowed to start a scrape.
+            #
+            # It is logged either way. A trigger nobody can see is worse than
+            # one nobody wants.
+            if not settings.scheduler_catchup_on_restart:
+                if self._missed_run_today():
+                    log.info(
+                        "Scheduler: today's %s slot (%02d:%02d) was missed while the "
+                        "server was down. NOT catching up — restart catch-up is "
+                        "disabled. The next run is the next scheduled slot. Set "
+                        "LOP_SCHEDULER_CATCHUP_ON_RESTART=true to change that.",
+                        self.current.mode, self.current.hour, self.current.minute,
+                    )
+                return
+
             if self._missed_run_today():
-                log.info(
+                log.warning(
                     "Scheduler: missed today's %s run (server wasn't running "
-                    "at %02d:%02d) — catching up now",
+                    "at %02d:%02d) — catching up now because "
+                    "LOP_SCHEDULER_CATCHUP_ON_RESTART is enabled. A scrape is "
+                    "starting that no one initiated.",
                     self.current.mode, self.current.hour, self.current.minute,
                 )
                 asyncio.create_task(self._scrape_all())
@@ -157,9 +202,24 @@ class ScrapeScheduler:
     def _missed_run_today(self) -> bool:
         """Best-effort check — good enough to decide 'catch up or not', not
         exact-to-the-second. cron mode is too generic to safely reason about
-        here, so it's excluded (falls back to waiting for its next real fire)."""
+        here, so it's excluded (falls back to waiting for its next real fire).
+
+        Clock note. `last_run` is stored as naive UTC (`datetime.now(timezone.utc)
+        .replace(tzinfo=None)`), while CronTrigger fires on the scheduler's local
+        timezone. Comparing `last_run.date()` against a naive LOCAL `now.date()`
+        mixes the two: on a UTC host they agree, but on a UTC+5:30 laptop any run
+        between 18:30 and midnight local is stamped with tomorrow's UTC date, so
+        the comparison reports "not run today" for a run that just happened — and
+        with catch-up enabled that starts a second scrape.
+
+        Both sides are now read in UTC. That leaves the scheduled-instant
+        comparison approximate on a non-UTC host, which is acceptable for a
+        yes/no catch-up decision and is why this stays 'best-effort'; the real
+        fix for scheduling across timezones is an explicit application timezone,
+        which belongs with the rest of the Phase 2 scheduling work.
+        """
         req = self.current
-        now = datetime.now()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         if req.mode == "daily":
             due_today = True
         elif req.mode == "weekly":

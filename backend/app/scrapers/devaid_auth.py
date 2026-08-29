@@ -288,6 +288,7 @@ def open_persistent(pw, headless: bool = True):
 
 # The canonical implementation lives in site_auth, because every
 # JS-rendered source needs the same browser identity — not just this one.
+from app.scrapers import site_auth  # noqa: E402
 from app.scrapers.site_auth import mask_headless as _mask_headless  # noqa: E402
 
 
@@ -329,8 +330,19 @@ def _context_from_session(pw, common: dict):
 
     Not a persistent context: storage_state and launch_persistent_context are
     mutually exclusive in Playwright, so this launches an ordinary browser and
-    injects the cookies and localStorage instead. Callers only ever use the
-    returned object as a context, so the difference doesn't leak out.
+    injects the cookies and localStorage instead.
+
+    That difference DOES leak out, and this docstring used to claim otherwise.
+    A persistent context owns its browser process, so closing it is enough. The
+    object returned here does not: `browser` below is a local that goes out of
+    scope, so a caller doing `context.close()` closes the context and leaves
+    Chromium running. On DevelopmentAid — a run that opens the browser for tens
+    of minutes across hundreds of page loads — that is the worst instance of
+    the leak in the codebase.
+
+    Callers must tear this down with site_auth.close_owned(), which follows
+    `context.browser` and closes the owner when there is one. Never
+    `context.close()` alone.
     """
     launch_args = {k: v for k, v in common.items()
                    if k in ("headless", "args", "ignore_default_args")}
@@ -380,7 +392,7 @@ def export_session_state() -> dict:
             state = context.storage_state()
         finally:
             try:
-                context.close()
+                site_auth.close_owned(context)
             except Exception:
                 pass
 
@@ -627,7 +639,7 @@ def verify_session() -> bool:
             return True
         finally:
             try:
-                context.close()
+                site_auth.close_owned(context)
             except Exception:
                 pass
 
@@ -697,7 +709,7 @@ def connect_interactive_sync() -> bool:
         except Exception:
             pass
         try:
-            context.close()
+            site_auth.close_owned(context)
         except Exception:
             pass
 

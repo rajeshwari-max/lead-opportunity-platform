@@ -414,10 +414,11 @@ class AdbTendersScraper(BaseScraper):
                         return
                     page.wait_for_timeout(int(settings.rate_limit_delay * 1000))
             finally:
-                try:
-                    context.close()
-                except Exception:
-                    pass
+                # close_owned also closes the Browser that owns this
+                # context; context.close() alone left the Chromium
+                # process running. It guards each step internally, so
+                # the try/except that used to wrap this is redundant.
+                site_auth.close_owned(context)
 
     @classmethod
     def _goto_page(cls, page, search_url: str | None, page_nr: int) -> bool:

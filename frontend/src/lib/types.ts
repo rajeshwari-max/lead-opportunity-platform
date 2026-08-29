@@ -216,3 +216,26 @@ export interface DigestRunResult {
   opportunities_sent: number;
   reminders_sent: number;
 }
+
+/** One row awaiting a human decision about its closing date, plus the evidence
+ *  needed to make it — `deadline_raw` is the source's own words. */
+export interface ReviewQueueItem {
+  id: number;
+  title: string;
+  organization: string;
+  source_website: string;
+  opportunity_url: string;
+  deadline_raw: string;
+  deadline_confidence: string;
+  date_scraped: string | null;
+  last_seen: string | null;
+  summary: string;
+}
+
+export interface ReviewQueueResponse {
+  total: number;
+  /** Where the backlog sits. A backlog concentrated in one source is a parser
+   *  bug for that source, not a review job. */
+  by_source: { source_website: string; count: number }[];
+  items: ReviewQueueItem[];
+}

@@ -13,6 +13,7 @@ from app.database.db import get_db
 from app.schemas.opportunity import (
     ApprovalRequest,
     OpportunityFilters,
+    ReviewDecisionIn,
     OpportunityOut,
     PaginatedOpportunities,
     ScheduleRequest,
@@ -26,7 +27,13 @@ from app.schemas.opportunity import (
 )
 from app.scrapers.registry import SCRAPER_REGISTRY
 from app.database.models import TeamMember
-from app.services import approval_service, dispatch_service, email_service, export_service
+from app.services import (
+    approval_service,
+    dispatch_service,
+    email_service,
+    export_service,
+    review_queue,
+)
 from app.services.matching_service import MatchingService
 from app.services.filter_service import FilterService
 from app.services.scheduler import scheduler
@@ -439,6 +446,64 @@ def set_schedule(req: ScheduleRequest) -> ScheduleStatusOut:
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
+
+
+# ------------------------------------------------------------- review queue
+#
+# Rows whose closing date could not be determined. They are stored ACTIVE but
+# are not actionable, so before these endpoints existed they appeared in no
+# view: excluded from the live list by actionable_clause(), excluded from the
+# archive by expired_clause(). "Held for review" and "silently lost" look
+# identical until something can list them. See services/review_queue.py.
+
+@router.get("/review-queue")
+def get_review_queue(
+    limit: int = 50,
+    offset: int = 0,
+    source_website: str = "",
+    db: Session = Depends(get_db),
+) -> dict:
+    return {
+        "total": review_queue.queue_size(db),
+        "by_source": review_queue.by_source(db),
+        "items": [e.as_dict() for e in review_queue.fetch(
+            db, limit=limit, offset=offset, source_website=source_website)],
+    }
+
+
+@router.post("/review-queue/{opportunity_id}",
+             dependencies=[Depends(require_writable)])
+def decide_review_item(
+    opportunity_id: int,
+    body: ReviewDecisionIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Record a person's judgement about one row's closing date.
+
+    Not admin-gated: deciding whether a call is still open is the same class of
+    act as approving one, which any signed-in user may do. It is gated on
+    require_writable because the read-only mirror must never write.
+    """
+    from app.core.auth import COOKIE_NAME, current_user
+
+    reviewer = current_user(request.cookies.get(COOKIE_NAME)).get("email", "")
+    try:
+        if body.decision == "dated":
+            if body.deadline is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="A date is required when the decision is 'dated'.")
+            result = review_queue.set_deadline(
+                db, opportunity_id, body.deadline, reviewer)
+        elif body.decision == "rolling":
+            result = review_queue.mark_rolling(db, opportunity_id, reviewer)
+        else:
+            result = review_queue.mark_closed(db, opportunity_id, reviewer)
+    except review_queue.ReviewError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    db.commit()
+    return result
 
 
 # -------------------------------------------------------------- team & sending
