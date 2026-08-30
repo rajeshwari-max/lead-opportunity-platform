@@ -74,6 +74,8 @@ import re
 
 from app.database.models import Category
 from app.schemas.opportunity import RawOpportunity
+from app.services.notice_types import record_type_for
+from app.services.source_manifest import RecordType
 from app.scrapers.base_scraper import BaseScraper, PageRequest
 from app.scrapers.registry import register
 
@@ -261,9 +263,24 @@ class WorldBankScraper(BaseScraper):
             if not is_open_notice(notice_type_raw):
                 skipped_closed += 1
                 continue
+            # Where the title came from is evidence about WHAT this record is.
+            #
+            # `project_name` was in this chain, so a record with no bid
+            # description was titled with the project it belongs to — and then
+            # read on the dashboard as a project rather than a notice. It is
+            # the reason World Bank rows look like projects.
+            #
+            # It stays in the chain (dropping it would silently lose rows that
+            # may be real notices), but a row that had nothing else is marked
+            # as a project so the source's contract decides, visibly and
+            # centrally, instead of this parser deciding quietly.
             title = _text(_first(
                 r, "bid_description", "noticetitle", "notice_title", "title",
-                "project_name", "bid_reference_no"))
+                "bid_reference_no"))
+            titled_from_project = False
+            if not title:
+                title = _text(r.get("project_name"))
+                titled_from_project = bool(title)
             if not title:
                 continue
             nid = _text(_first(r, "id", "noticeid", "notice_id", "uuid", "guid"))
@@ -313,6 +330,14 @@ class WorldBankScraper(BaseScraper):
                 website=SITE,
                 source_website=self.display_name,
                 category_hint=Category.TENDER,
+                # The source's OWN words, handed to the contract rather than
+                # only written into the summary text. Without these,
+                # `record_is_in_scope` sees a blank record type and keeps
+                # everything — so World Bank's manifest, which excludes
+                # contract awards and projects, could never fire.
+                record_type=(RecordType.PROJECT.value if titled_from_project
+                             else record_type_for(notice_type_raw)),
+                source_status=notice_type_raw[:64],
                 # Every record here is a published notice, but one without a
                 # readable deadline must not become a permanently open row —
                 # see the assume_active note in schemas/opportunity.py.

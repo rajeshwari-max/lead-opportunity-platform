@@ -38,6 +38,7 @@ from bs4 import BeautifulSoup
 
 from app.core.config import settings
 from app.schemas.opportunity import RawOpportunity
+from app.services.notice_types import record_type_for
 from app.scrapers.base_scraper import BaseScraper
 from app.scrapers.registry import register
 
@@ -199,6 +200,13 @@ class AdbTendersScraper(BaseScraper):
                     vertical=sector[:256],
                     summary=" | ".join(b for b in summary_bits if b)[:2000],
                     deadline_raw=fields.get("deadline", "")[:64],
+                    # ADB prints both on every result row and this scraper was
+                    # writing them into the summary text only. Handed to the
+                    # contract, they are what lets ADB's manifest — which
+                    # excludes contract awards and projects — actually reject
+                    # something.
+                    record_type=record_type_for(fields.get("notice type", "")),
+                    source_status=status[:64],
                     opportunity_url=url,
                     website=self.website,
                     source_website=self.display_name,

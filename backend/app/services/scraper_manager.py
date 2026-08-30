@@ -153,11 +153,56 @@ class ScraperManager:
                 if self._stop.is_set():
                     self.progress[scraper.name]["status"] = "stopped"
                     return
-                await self._run_source(scraper)
+                # A source gets a bounded slot, not an open-ended one.
+                #
+                # The baseline found 106 runs stuck in "running" — a source
+                # that hangs holds its semaphore slot forever, and with
+                # max_concurrent_sources slots that is how an entire night's
+                # scrape stops after the first few sources wedge. The timeout
+                # is what turns "never finishes" into "finishes, badly, and
+                # says so".
+                #
+                # asyncio.wait_for cancels the awaiting coroutine at the next
+                # await point. Playwright work runs in a worker thread and
+                # `asyncio.to_thread` is NOT cancellable, so the thread may
+                # still be finishing its current page when this returns. That
+                # is why the stop flag is set as well: the crawl loop checks it
+                # between pages and exits on its own, and the timeout only
+                # stops US waiting.
+                timeout = max(60, settings.source_timeout_s)
+                try:
+                    await asyncio.wait_for(self._run_source(scraper), timeout)
+                except asyncio.TimeoutError:
+                    prog = self.progress.get(scraper.name, {})
+                    prog["status"] = "failed"
+                    prog["timed_out"] = True
+                    self._log(
+                        f"[{scraper.display_name}] stopped after "
+                        f"{timeout}s — the per-source time limit. Its worker "
+                        f"may still be finishing the page it was on; the run "
+                        f"is recorded as timed out either way, which is the "
+                        f"honest answer and is not the same as 'completed'."
+                    )
 
         heart = asyncio.create_task(self._heartbeat_loop())
         try:
-            await asyncio.gather(*(_guarded(s) for s in scrapers))
+            # And a ceiling on the whole run. Per-source timeouts alone do not
+            # bound it: 85 sources times the per-source limit is days. This is
+            # the one that guarantees a nightly scrape has ended before the
+            # next one is due — the scheduler's max_instances=1 would otherwise
+            # skip every subsequent run while the first is still going.
+            whole_run = max(300, settings.run_timeout_s)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*(_guarded(s) for s in scrapers)), whole_run)
+            except asyncio.TimeoutError:
+                self._stop.set()          # let the crawl loops unwind
+                self._log(
+                    f"Scrape stopped after {whole_run}s — the whole-run time "
+                    f"limit. Sources that had not started are left untouched "
+                    f"and will run next time; raise LOP_RUN_TIMEOUT_S if the "
+                    f"full set legitimately needs longer."
+                )
         finally:
             heart.cancel()
             if settings.run_maintenance_after_scrape:

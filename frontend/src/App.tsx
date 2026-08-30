@@ -9,6 +9,8 @@ import { LoginScreen } from "@/components/LoginScreen";
 import { UserMenu } from "@/components/UserMenu";
 import { OpportunitiesTable } from "@/components/OpportunitiesTable";
 import { ReviewQueueCard } from "@/components/ReviewQueueCard";
+import { ScraperHealthCard } from "@/components/ScraperHealthCard";
+import { UnclassifiedCard } from "@/components/UnclassifiedCard";
 import { ScraperPanel } from "@/components/ScraperPanel";
 import { StatCards } from "@/components/StatCards";
 import { TeamPanel } from "@/components/TeamPanel";
@@ -135,6 +137,9 @@ export default function App() {
                 empty, and it is not admin-gated — deciding whether a call is
                 still open is the same class of act as approving one. */}
             <ReviewQueueCard readOnly={readOnly} />
+            {/* Both hide themselves when there is nothing to do. */}
+            <UnclassifiedCard readOnly={readOnly} />
+            <ScraperHealthCard isAdmin={isAdmin} />
             {isAdmin && <ScraperPanel sources={sources} progress={progress} />}
             {/* Admin-only: this panel sets the send time and reminder days for
                 the WHOLE team, and its PUT route already rejects non-admins.

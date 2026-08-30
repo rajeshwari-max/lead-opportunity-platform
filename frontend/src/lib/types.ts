@@ -148,6 +148,10 @@ export const emptyFilters: FilterState = {
 };
 
 export interface TeamMember {
+  /** Empty = everywhere, like every other routing field. */
+  countries?: string;
+  regions?: string;
+  geo_include_unknown?: boolean;
   id: number;
   name: string;
   email: string;
@@ -238,4 +242,88 @@ export interface ReviewQueueResponse {
    *  bug for that source, not a review job. */
   by_source: { source_website: string; count: number }[];
   items: ReviewQueueItem[];
+}
+
+/** One source's health, read from the evidence its runs recorded. */
+export interface SourceHealth {
+  source_key: string;
+  display_name: string;
+  listing_url: string;
+  /** generic = one of the 71 config-driven sources; bespoke = its own parser. */
+  implementation: "generic" | "bespoke";
+  requires_login: boolean;
+  fetch_mode: "http" | "browser";
+  pagination: string;
+  expected_types: string;
+  /** False means nobody has stated what this source should yield. */
+  scope_confirmed: boolean;
+  last_run_at: string | null;
+  last_outcome: string;
+  last_error_code: string;
+  last_error_message: string;
+  last_http_status: number | null;
+  runs_30d: number;
+  unhealthy_streak: number;
+  total_rows: number;
+  last_saved_at: string | null;
+  /** Measured from the last row SAVED, not the last run attempted. */
+  days_since_saved: number | null;
+  state: "ok" | "never_produced" | "stale" | "failing" | "unknown";
+  note: string;
+}
+
+export interface ScraperHealth {
+  summary: { total: number; by_state: Record<string, number>; needs_attention: number };
+  alerting: string[];
+  sources: SourceHealth[];
+  thresholds: { failure_streak: number; stale_days: number };
+}
+
+/** What the model would have said, and on what evidence. Shown to the reviewer
+ *  because a bare confidence number gives them nothing to agree with. */
+export interface VerticalSuggestion {
+  vertical: string;
+  score: number;
+  evidence: string[];
+}
+
+export interface UnclassifiedItem {
+  id: number;
+  title: string;
+  organization: string;
+  source_website: string;
+  opportunity_url: string;
+  summary: string;
+  country: string;
+  category: string;
+  deadline: string | null;
+  date_scraped: string | null;
+  classification_status: "classified" | "uncertain" | "unclassified";
+  suggestions: VerticalSuggestion[];
+}
+
+export interface UnclassifiedQuery {
+  search?: string;
+  sources?: string[];
+  countries?: string[];
+  organizations?: string[];
+  categories?: string[];
+  deadline_before?: string;
+  deadline_after?: string;
+  page?: number;
+  page_size?: number;
+  sort_by?: string;
+  sort_dir?: string;
+}
+
+export interface UnclassifiedResponse {
+  total: number;
+  /** Before any filter — so the header can say "12 matching of 4,982". */
+  unfiltered_total: number;
+  page: number;
+  page_size: number;
+  pages: number;
+  by_source: { source_website: string; count: number }[];
+  verticals: string[];
+  items: UnclassifiedItem[];
 }

@@ -194,6 +194,12 @@ class TeamMemberIn(BaseModel):
     keywords: str = ""      # comma-separated, e.g. "climate, environment"
     categories: str = ""    # comma-separated Category values; empty = all
     verticals: str = ""     # comma-separated canonical verticals; empty = all
+    # Empty = everywhere. Unrecognised names are reported back rather than
+    # dropped: a country nobody recognises matches nothing, which looks exactly
+    # like a working filter that happens to find nothing.
+    countries: str = ""
+    regions: str = ""
+    geo_include_unknown: bool = True
     auto_send: bool = True
     active: bool = True
 
@@ -226,6 +232,20 @@ class ReviewDecisionIn(BaseModel):
     # Required for "dated" and ignored otherwise. Validated in the route rather
     # than here so the error names the field a person actually filled in.
     deadline: date | None = None
+
+
+class BulkVerticalsIn(BaseModel):
+    """Assign (or clear, or revert) verticals on a batch of rows by hand."""
+
+    opportunity_ids: list[int]
+    # Empty list is a real answer — "none of our six" — and is stored as a
+    # human label rather than as an unlabelled row, so the backfill leaves it
+    # alone. Ignored when `revert` is true.
+    verticals: list[str] = Field(default_factory=list)
+    # Hand the row back to the classifier. Exists because "I labelled the wrong
+    # batch" has to be recoverable: the backfill skips human rows, so without
+    # this a mis-click would be permanent.
+    revert: bool = False
 
 
 class SendResult(BaseModel):

@@ -8,13 +8,21 @@ A member matches an opportunity when:
 """
 from __future__ import annotations
 
+import logging
+
 from datetime import date, datetime, timezone
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.database.models import Category, Opportunity, SentLog, Status, TeamMember
+from app.services import geo_routing, relevance
 from app.services.actionable import actionable_clause
+from app.services.vertical_names import normalize_vertical_csv
+from app.services.verticals import VERTICALS
+
+
+log = logging.getLogger("scraper")
 
 
 def _csv(value: str) -> list[str]:
@@ -41,14 +49,29 @@ class MatchingService:
 
         keywords = _csv(member.keywords)
         if keywords:
+            # SQL narrows; Python decides.
+            #
+            # This used to be the whole test, and it had no word boundaries:
+            # `%ict%` matched District, Conflict and Restricted; `%ai%` matched
+            # Maintenance and Training; `%it%` matched almost every row in the
+            # database. A member with one short keyword received a digest that
+            # was mostly noise, and no ranking model fixes a filter that
+            # matches the middle of unrelated words.
+            #
+            # SQLite has no REGEXP without a registered function, so the LIKE
+            # stays as a cheap prefilter and the exact whole-word test runs in
+            # Python below. That order is safe in the direction that matters:
+            # every word-boundary match is also a substring match, so the
+            # prefilter can over-fetch but can never drop a real result.
             clauses = []
-            for kw in keywords:
-                like = f"%{kw.lower()}%"
+            for term in relevance.like_prefilter_terms(keywords):
+                like = f"%{term}%"
                 clauses.append(func.lower(Opportunity.title).like(like))
                 clauses.append(func.lower(Opportunity.summary).like(like))
                 clauses.append(func.lower(Opportunity.vertical).like(like))
                 clauses.append(func.lower(Opportunity.eligibility).like(like))
-            stmt = stmt.where(or_(*clauses))
+            if clauses:
+                stmt = stmt.where(or_(*clauses))
 
         categories = _csv(member.categories)
         if categories:
@@ -58,20 +81,97 @@ class MatchingService:
 
         # Vertical routing: only email opportunities in the member's selected
         # verticals (empty = all verticals, preserving pre-vertical behaviour).
-        verticals = _csv(getattr(member, "verticals", "") or "")
+        #
+        # The saved value is normalised first. One member is stored with both
+        # "Climate/Sustainability" and "Climate/Sustainability(ESG)" — the old
+        # name and its replacement — and that routes correctly today only
+        # because this is a substring test and the old name is a prefix of the
+        # new one. Resolving the name here means the filter no longer depends
+        # on that coincidence. See services/vertical_names.py.
+        normalized, unknown = normalize_vertical_csv(
+            getattr(member, "verticals", "") or "")
+        if unknown:
+            # Not dropped silently: a vertical nobody recognises matches
+            # nothing, which looks exactly like a working filter that happens
+            # to find nothing.
+            log.warning(
+                "[matching] %s has unrecognised vertical(s) in their routing: "
+                "%s — those are matching nothing. Known verticals: %s",
+                member.email, ", ".join(unknown), ", ".join(VERTICALS),
+            )
+        verticals = _csv(normalized)
         if verticals:
             stmt = stmt.where(
                 or_(*[Opportunity.verticals.like(f"%{s}%") for s in verticals])
             )
 
+        # Geography. Empty means everywhere, like every other field here, so
+        # this changes nothing for anyone until they choose one.
+        #
+        # It is the axis that was missing when an Australian council's
+        # micro-grant for individuals reached a member whose filter reads
+        # Health / E4C / Livelihood: geography existed only as a dashboard
+        # filter and the digest never consulted it.
+        countries, bad_countries = geo_routing.normalize_countries(
+            getattr(member, "countries", "") or "")
+        regions, bad_regions = geo_routing.normalize_regions(
+            getattr(member, "regions", "") or "")
+        if bad_countries or bad_regions:
+            log.warning(
+                "[matching] %s has unrecognised place name(s) in their "
+                "routing: %s — those match nothing until corrected",
+                member.email, ", ".join(bad_countries + bad_regions),
+            )
+        geo = geo_routing.geo_clause(
+            geo_routing.parse_csv(countries),
+            geo_routing.parse_csv(regions),
+            include_unknown=bool(getattr(member, "geo_include_unknown", True)),
+        )
+        if geo is not None:
+            stmt = stmt.where(geo)
+
         if not include_sent:
             sent = select(SentLog.opportunity_id).where(SentLog.member_id == member.id)
             stmt = stmt.where(Opportunity.id.not_in(sent))
 
-        stmt = stmt.order_by(Opportunity.deadline.asc())
-        if limit is not None:
-            stmt = stmt.limit(limit)
-        return list(self.db.execute(stmt).scalars().all())
+        # The limit is applied AFTER scoring, not in SQL. Truncating in the
+        # database would cut the list by deadline and then rank whatever
+        # survived — so a member's single best match could be dropped before
+        # anything had judged it.
+        rows = list(self.db.execute(stmt).scalars().all())
+        if not keywords:
+            # No keywords means "send me everything", which is the documented
+            # behaviour and not something to score. Deadline order, as before.
+            rows.sort(key=lambda o: (o.deadline is None, o.deadline or date.max))
+            return rows[:limit] if limit is not None else rows
+
+        scored = self.score_rows(rows, keywords)
+        kept = [(row, m) for row, m in scored if m.is_match]
+        ranked = relevance.rank(kept)
+        result = [row for row, _ in ranked]
+        return result[:limit] if limit is not None else result
+
+    def score_rows(self, rows, keywords) -> list[tuple[Opportunity, relevance.Match]]:
+        """Score every candidate row. Exposed so the reasons can be shown.
+
+        A digest someone distrusts is only fixable if they can see which of
+        their keywords pulled a row in; a bare relevance number gives them
+        nothing to correct.
+        """
+        compiled = relevance.compile_keywords(keywords)
+        return [
+            (
+                row,
+                relevance.score_opportunity(
+                    compiled,
+                    title=row.title or "",
+                    summary=row.summary or "",
+                    vertical=row.vertical or "",
+                    eligibility=row.eligibility or "",
+                ),
+            )
+            for row in rows
+        ]
 
     def mark_sent(self, member: TeamMember, opportunities: list[Opportunity]) -> None:
         """Record what went out, refreshing the timestamp on anything resent.

@@ -7,7 +7,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { VERTICALS, type TeamMember } from "@/lib/types";
 
-const emptyForm = { name: "", email: "", keywords: "", categories: "", verticals: "", auto_send: true, active: true };
+const emptyForm = { name: "", email: "", keywords: "", categories: "", verticals: "",
+                    countries: "", regions: "", geo_include_unknown: true,
+                    auto_send: true, active: true };
+
+/** The regions the pipeline recognises. Mirrors services/geography.py. */
+const REGIONS = ["Africa", "South Asia", "East Asia", "Southeast Asia",
+                 "Central Asia", "Europe", "Middle East", "Latin America",
+                 "North America", "Oceania", "Global"];
 
 export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
   const [members, setMembers] = useState<TeamMember[]>([]);
@@ -75,6 +82,8 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
     setEditingId(m.id);
     setForm({ name: m.name, email: m.email, keywords: m.keywords,
               categories: m.categories, verticals: m.verticals ?? "",
+              countries: m.countries ?? "", regions: m.regions ?? "",
+              geo_include_unknown: m.geo_include_unknown ?? true,
               auto_send: m.auto_send, active: m.active });
     setShowForm(true);
   };
@@ -132,6 +141,12 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
     const set = new Set(form.categories.split(",").map((c) => c.trim()).filter(Boolean));
     set.has(cat) ? set.delete(cat) : set.add(cat);
     setForm({ ...form, categories: [...set].join(", ") });
+  };
+
+  const toggleRegion = (region: string) => {
+    const set = new Set(form.regions.split(",").map((s) => s.trim()).filter(Boolean));
+    set.has(region) ? set.delete(region) : set.add(region);
+    setForm({ ...form, regions: [...set].join(", ") });
   };
 
   const toggleVertical = (vertical: string) => {
@@ -193,7 +208,8 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
         const q = query.trim().toLowerCase();
         // Search the routing rules too, not just the person — "who is getting
         // the climate leads?" is the question this panel is usually opened for.
-        return [m.name, m.email, m.keywords, m.categories, m.verticals]
+        return [m.name, m.email, m.keywords, m.categories, m.verticals,
+                m.regions, m.countries]
           .some((v) => (v || "").toLowerCase().includes(q));
       })
     : members;
@@ -343,8 +359,44 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
                   );
                 })}
               </div>
+              {/* Geography. Roughly a third of the database is US / UK /
+                  Australia / Austria / Canada listings against India at 1.8%,
+                  and until now the digest had no way to know where anyone
+                  works — geography was a dashboard filter only. */}
+              <p className="pt-1 text-[11px] font-semibold text-muted-foreground">Region</p>
+              <div className="flex flex-wrap gap-1.5">
+                {REGIONS.map((r) => {
+                  const on = form.regions.split(",").map((x) => x.trim()).includes(r);
+                  return (
+                    <button key={r} onClick={() => toggleRegion(r)}
+                            className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                              on ? "border-accent bg-accent/20 text-accent"
+                                 : "border-border text-muted-foreground hover:bg-muted"}`}>
+                      {r}
+                    </button>
+                  );
+                })}
+              </div>
+              <Input placeholder="Specific countries, comma separated (e.g. India, Kenya)"
+                     value={form.countries}
+                     onChange={(e) => setForm({ ...form, countries: e.target.value })} />
+              {(form.regions || form.countries) && (
+                <label className="flex items-start gap-2 text-[11px] text-muted-foreground">
+                  <input type="checkbox" className="mt-0.5 h-3 w-3"
+                         checked={form.geo_include_unknown}
+                         onChange={(e) => setForm({ ...form, geo_include_unknown: e.target.checked })} />
+                  {/* One row in ten has no country. That is a data gap, not
+                      evidence the opportunity is somewhere else. */}
+                  <span>
+                    Also include opportunities with no country recorded (about
+                    1 in 10). Unticking gives a tighter list and will drop
+                    real opportunities whose location we could not read.
+                  </span>
+                </label>
+              )}
               <p className="text-[11px] text-muted-foreground">
-                Nothing selected = all categories / all verticals. Auto-digest after each scrape is on by default.
+                Nothing selected = all categories / all verticals / everywhere.
+                Auto-digest after each scrape is on by default.
               </p>
               <div className="flex gap-2">
                 <Button size="sm" onClick={saveMember}>
@@ -389,6 +441,11 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
                     {m.keywords && <span className="text-primary">{m.keywords}</span>}
                     {m.categories && <span className="ml-1">· {m.categories}</span>}
                     {m.verticals && <span className="ml-1 text-accent">· {m.verticals}</span>}
+                    {(m.regions || m.countries) && (
+                      <span className="ml-1 text-muted-foreground">
+                        · {[m.regions, m.countries].filter(Boolean).join(", ")}
+                      </span>
+                    )}
                   </p>
                 )}
               </div>

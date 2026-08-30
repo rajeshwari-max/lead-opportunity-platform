@@ -1,4 +1,5 @@
 """Engine/session management + SQLite FTS5 full-text index."""
+import logging
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -7,6 +8,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
 from app.database.models import Base
+
+log = logging.getLogger("scraper")
 
 engine = create_engine(
     settings.database_url,
@@ -231,6 +234,104 @@ def _run_migrations(conn) -> None:
             "CREATE INDEX IF NOT EXISTS ix_opp_actionable "
             "ON opportunities(status, deadline_state, deadline)"
         )
+
+        # ------------------------------------------- who assigned the verticals
+        #
+        # backfill_verticals() re-classifies EVERY row at every startup, on the
+        # stated reasoning that tags "are derived purely from the keyword rules
+        # (never hand-edited)". That was true until a person could edit them.
+        # Without this column the first restart after someone corrects a batch
+        # silently undoes the work, and the only thing they learn is that
+        # correcting rows does not stick.
+        #
+        # Every existing row is machine-classified by definition — nothing has
+        # been able to hand-edit one until now — so NULL reads as "auto" and no
+        # backfill of existing rows is needed or honest.
+        for name, ddl in (
+            ("verticals_source",     "VARCHAR(16)"),
+            ("verticals_labeled_by", "VARCHAR(128)"),
+            ("verticals_labeled_at", "DATETIME"),
+        ):
+            if name not in columns("opportunities"):
+                conn.exec_driver_sql(
+                    f"ALTER TABLE opportunities ADD COLUMN {name} {ddl}")
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_opp_verticals_source "
+            "ON opportunities(verticals_source)"
+        )
+
+        # ------------------------------------------------- classification
+        # Additive and nullable. A row classified before these existed reads
+        # NULL, which `classification_status_of()` resolves from the labels it
+        # already has — so nothing has to be re-classified to migrate, and no
+        # historical row is retro-fitted with a confidence nobody measured.
+        for name, ddl in (
+            ("classification_status",   "VARCHAR(16)"),
+            ("classification_source",   "VARCHAR(16)"),
+            ("classification_version",  "VARCHAR(32)"),
+            ("vertical_scores",         "TEXT"),
+            ("classification_evidence", "TEXT"),
+            ("classified_at",           "DATETIME"),
+        ):
+            if name not in columns("opportunities"):
+                conn.exec_driver_sql(
+                    f"ALTER TABLE opportunities ADD COLUMN {name} {ddl}")
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_opp_classification_status "
+            "ON opportunities(classification_status)"
+        )
+
+    # ------------------------------------------- finish the vertical rename
+    #
+    # The verticals were renamed ("E4C" -> "E4C(Evidence for Change)",
+    # "Climate/Sustainability" -> "Climate/Sustainability(ESG)") and
+    # backfill_verticals() fixed the OPPORTUNITY rows. Nothing fixed the team
+    # members. One is still stored with both spellings of the same vertical,
+    # and it routes correctly today only because the filter is a substring test
+    # and the old name is a prefix of the new one.
+    #
+    # Left alone, that is a trap with a delay on it: the first person to make
+    # vertical matching exact — the correct change — silently empties that
+    # member's routing, and nobody finds out until they notice the mail
+    # stopped. Normalising here also collapses the duplicate, so a filter that
+    # names one vertical twice stops looking like it covers two things.
+    if "team_members" in _tables(conn):
+        # Geography as a routing axis. Additive and defaulted so that nobody's
+        # digest changes until they choose a geography: empty means everywhere,
+        # exactly like keywords, categories and verticals already do.
+        for name, ddl in (
+            ("countries",           "TEXT NOT NULL DEFAULT ''"),
+            ("regions",             "TEXT NOT NULL DEFAULT ''"),
+            ("geo_include_unknown", "BOOLEAN NOT NULL DEFAULT 1"),
+        ):
+            if name not in columns("team_members"):
+                conn.exec_driver_sql(
+                    f"ALTER TABLE team_members ADD COLUMN {name} {ddl}")
+
+        from app.services.vertical_names import normalize_vertical_csv
+
+        for member_id, value in conn.exec_driver_sql(
+            "SELECT id, verticals FROM team_members "
+            " WHERE verticals IS NOT NULL AND verticals != ''"
+        ).fetchall():
+            fixed, unknown = normalize_vertical_csv(value)
+            if unknown:
+                # Reported, never dropped. Deleting part of someone's routing
+                # without telling them is how a filter quietly stops matching
+                # what they expect.
+                log.warning(
+                    "team member %s has unrecognised vertical(s): %s — left as "
+                    "they are; they match nothing until corrected",
+                    member_id, ", ".join(unknown),
+                )
+                continue
+            if fixed != value:
+                log.info("team member %s verticals normalised: %r -> %r",
+                         member_id, value, fixed)
+                conn.exec_driver_sql(
+                    "UPDATE team_members SET verticals = ? WHERE id = ?",
+                    (fixed, member_id),
+                )
 
     # ---------------------------------------------------- scrape-run evidence
     # A run used to be able to say only "completed", and 792 of the 916 runs in

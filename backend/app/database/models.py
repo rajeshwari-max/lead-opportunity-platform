@@ -48,6 +48,38 @@ class Opportunity(Base):
     # e.g. "Health, Climate/Sustainability". `vertical` above keeps the raw
     # source-provided free text untouched.
     verticals: Mapped[str] = mapped_column(String(256), default="", index=True)
+    # Who assigned those tags: "" / "auto" = the keyword classifier, "human" =
+    # a person.
+    #
+    # backfill_verticals() re-classifies EVERY row on every startup and
+    # overwrites `verticals` wherever the rules now disagree. That is correct
+    # for machine tags and destructive for human ones: without this column, the
+    # first restart after someone corrects a batch of rows silently undoes
+    # their work, and the only thing they learn is that correcting rows does
+    # not stick. The backfill skips any row marked human.
+    verticals_source: Mapped[str | None] = mapped_column(String(16), index=True)
+    verticals_labeled_by: Mapped[str | None] = mapped_column(String(128))
+    verticals_labeled_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # ------------------------------------------------------- classification
+    # `verticals_source` says human-or-machine and nothing else. These record
+    # what the classifier actually decided, so a label can be audited, a
+    # threshold can be re-tuned against stored probabilities without
+    # re-running the model, and a low-confidence row can be routed to review
+    # instead of being asserted.
+    #
+    #   classification_status  classified | unclassified | uncertain
+    #   classification_source  rule | model | human
+    #   classification_version which ruleset/model produced it
+    #   vertical_scores        {"Health": 0.91, ...} as JSON text; the raw
+    #                          per-label probabilities, kept so thresholds can
+    #                          move without a re-inference pass over 100k rows
+    #   classification_evidence  the patterns or terms that drove it
+    classification_status: Mapped[str | None] = mapped_column(String(16), index=True)
+    classification_source: Mapped[str | None] = mapped_column(String(16))
+    classification_version: Mapped[str | None] = mapped_column(String(32), index=True)
+    vertical_scores: Mapped[str | None] = mapped_column(Text)
+    classification_evidence: Mapped[str | None] = mapped_column(Text)
+    classified_at: Mapped[datetime | None] = mapped_column(DateTime)
     # Research vs Implementation — decides which team an RFP is routed to.
     # Empty means genuinely unclear from the text; see services/work_type.py.
     work_type: Mapped[str] = mapped_column(String(32), default="", index=True)
@@ -240,6 +272,15 @@ class TeamMember(Base):
     keywords: Mapped[str] = mapped_column(Text, default="")      # comma-separated, e.g. "climate, environment"
     categories: Mapped[str] = mapped_column(Text, default="")    # comma-separated Category values; empty = all
     verticals: Mapped[str] = mapped_column(Text, default="")     # comma-separated canonical verticals; empty = all
+    # Where this person works. Empty = everywhere, like every other routing
+    # field here — anything else would change what all four members receive the
+    # moment this deploys. See services/geo_routing.py.
+    countries: Mapped[str] = mapped_column(Text, default="")     # canonical names; empty = all
+    regions: Mapped[str] = mapped_column(Text, default="")       # canonical regions; empty = all
+    # 10% of rows have no country at all. That is a data gap, not evidence the
+    # opportunity is somewhere else, so those rows are kept by default; someone
+    # who wants the tighter list can switch this off for themselves.
+    geo_include_unknown: Mapped[bool] = mapped_column(default=True)
     auto_send: Mapped[bool] = mapped_column(default=True)        # include in post-scrape auto-digest
     active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(

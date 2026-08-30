@@ -5,6 +5,852 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-08-30 — World Bank was storing projects, and nothing was ever told not to
+
+### Two faults, and the first one made the second invisible
+
+**1. No scraper populated `record_type` or `source_status`.**
+
+`RawOpportunity` gained both fields, `_ingest` calls `record_is_in_scope`, and
+World Bank's manifest excludes `contract_award` and `project`. Every piece was
+there and tested. Nothing fed it.
+
+World Bank reads `notice_type` off the API, uses it in a local filter, and
+writes it into the summary TEXT. ADB reads `Notice type:` and `Status:` off
+every result row and does the same. Neither passed either value on. So the
+contract saw a blank record type, and `record_is_in_scope` on a blank keeps the
+record — the exclusion was real, wired in, and structurally incapable of
+firing.
+
+**2. World Bank's title chain fell back to `project_name`.**
+
+    _first(r, "bid_description", "noticetitle", "notice_title", "title",
+              "project_name", "bid_reference_no")
+
+A record with no bid description was titled with the project it belongs to, and
+then read on the dashboard as a project. That is why the rows look like what
+they look like.
+
+`project_name` stays in the chain — dropping it would silently lose rows that
+may be real notices — but a row that had nothing else is now marked
+`record_type="project"`, so the CONTRACT decides, visibly and centrally,
+instead of the parser deciding quietly.
+
+### `services/notice_types.py`
+
+Sources do not speak `RecordType`. World Bank says "Contract Award", ADB says
+"Invitation for Bids". This maps the source's own wording to the vocabulary the
+contract judges on.
+
+Finished kinds are checked FIRST. "Contract Award Notice" contains both "award"
+and "notice", and a rule that reached "procurement notice" first would file an
+award as an open tender — the exact mistake the manifest exists to prevent.
+
+An unrecognised string maps to `""`, never to a guess.
+
+### The dangerous half, caught before it shipped
+
+With `record_type` finally populated, `expected_types` became live — and it was
+acting as an **allowlist**:
+
+    ADB expected: consultancy, eoi, tender
+    ADB's main output: "Invitation for Bids"  ->  itb
+
+ADB would have discarded most of what it produces. UNPP would have lost every
+tender and RFP. DevelopmentAid would have lost EOIs and ITBs. Those lists were
+written as descriptions of what each source publishes, not as audited
+allowlists, and nothing had ever tested them against real records because
+nothing ever exercised them.
+
+So the semantics are now explicit: **`excluded_types` enforces,
+`expected_types` describes.** An expected list rejects only when a manifest
+sets `expected_types_exhaustive=True`, which none does, and a test asserts none
+does until someone has checked it against a real sample.
+
+This is the same principle already applied to status values: a vocabulary
+nobody has finished configuring must not silently delete a source's output.
+
+### What happens now
+
+    Contract Award Notice                  -> contract_award  REJECT
+    Cancellation Notice                    -> contract_award  REJECT
+    (titled only from project_name)        -> project         REJECT
+    Invitation for Bids                    -> itb             keep
+    Request for Expressions of Interest    -> eoi             keep
+    General Procurement Notice             -> tender          keep
+    Consultant Qualification               -> consultancy     keep
+    Some wording nobody configured         -> (unmapped)      keep
+
+### The rows already stored
+
+The fix only affects future scrapes. `scripts/project_rows_audit.py` finds the
+existing ones from what WAS captured — both scrapers write "Notice type: X"
+into the summary, which is the source's own word recorded at scrape time.
+
+    python scripts/project_rows_audit.py
+    python scripts/project_rows_audit.py --archive
+
+`--archive` sets status=Expired and never deletes. A row wrongly archived can
+be brought back; a deleted one cannot. Rows with no "Notice type:" in their
+summary are reported as unjudgeable rather than assumed clean.
+
+### Verify
+
+    python -m pytest tests -q
+
+440 tests, 1 skipped. `tests/test_notice_types.py` (28) includes the assertion
+the whole entry turns on: the scrapers must actually pass the fields.
+
+---
+
+## 2026-08-30 — the day/month inversion the brief flagged: found, and it is ISO
+
+### What it actually was
+
+`dateutil` applies `dayfirst` to the last two components **whatever the shape**,
+including ISO:
+
+    du_parser.parse("2026-01-09", dayfirst=True).date()   ->  2026-09-01
+
+The pipeline default is `dayfirst=True`. DevelopmentAid returns ISO dates from
+its API and never sets the flag. So every DevelopmentAid deadline whose month
+and day are both 12 or under has been stored **eight months out**.
+
+The clusters the brief named — `2026-01-09`, `2026-02-09`, `2026-03-09` — are
+ISO dates `2026-09-01`, `2026-09-02`, `2026-09-03` read backwards. The day
+looked pinned at 09 because 09 was really the **month**.
+
+My earlier read of that signature was that a source was writing MM/DD and being
+parsed as DD/MM. The shape was right and the cause was one layer lower: the
+source writes unambiguous ISO and the parser was making it ambiguous.
+
+### The fix
+
+`DeadlineParser.parse` now recognises `YYYY-MM-DD` and reads it as itself,
+ignoring `dayfirst` entirely. Detected on shape rather than left to a
+per-source declaration: a convention someone has to remember to set is one that
+will be missed, and it already was.
+
+Deliberately strict — anchored, four-digit year first, only a time or timezone
+may follow. `31-07-2026` and `07/31/2026` are not ISO and still go through the
+source's convention.
+
+Labels are stripped **before** the check. `"Deadline: 2026-09-01"` is an ISO
+date with a prefix, and checking first sent it down the ambiguous path to be
+inverted — the same bug, reintroduced by the order of two lines. Caught by the
+test written for the original.
+
+### Correcting what is already stored
+
+    python scripts/iso_inversion_audit.py            # dry run
+    python scripts/iso_inversion_audit.py --apply
+
+This is what `deadline_raw` was preserved for. The script re-parses each row's
+raw text — the source's own words — and reports every stored deadline that
+disagrees, per source, with the reopened/closed counts:
+
+* rows currently **Expired** whose real deadline has not passed are live
+  opportunities nobody can see;
+* rows currently **Active** that have really closed are the ones someone could
+  waste a week on.
+
+`--apply` moves the status with the date. A corrected row that kept the
+visibility its wrong date gave it is the same harm with a right-looking date
+beside it.
+
+Rows scraped before `deadline_raw` existed have no raw text to check against.
+The script says so rather than reporting them as clean.
+
+### A second defect, found by the test written for the first
+
+The manifests are keyed `worldbank`, `unpp`, `adb`. The scrapers register as
+`world_bank`, `un_partner_portal`, `adb_tenders`, and `_ingest` passes the
+**registry** key. So `contract_for(scraper.name)` fell through to the
+needs_review placeholder for the three sources whose contracts matter most —
+World Bank, whose feed is mostly contract awards, and UN Partner Portal, whose
+`/projects` route is the red herring the brief names.
+
+It never failed loudly. A placeholder contract has no expected types and no
+status vocabulary, and `record_is_in_scope` on an empty contract returns
+keep=True, so the scope check was a silent no-op that looked exactly like a
+working one. My own tests missed it because they reach into `MANIFESTS` by name
+instead of going through the key the pipeline uses.
+
+Fixed with `KEY_ALIASES`, plus a test asserting every manifest is reachable
+from a registered scraper — so a future rename cannot reopen it quietly.
+
+### Source-specific date-format tests
+
+`tests/test_date_conventions.py` (36), which the brief asked for by name. Each
+source's real formats: `31/07/2026` and `31.07.2026` for the Indian sources,
+ISO for the API sources, `09/18/26` for GrantWatch. It also asserts an ISO date
+does not depend on the `dayfirst` flag at all — the regression guard for this
+entry.
+
+One gap it surfaced: **FundsForNGOs** is confirmed and in production, holds
+48,350 rows, and states no date convention. Rather than guess one, its contract
+now says so explicitly and names the script that settles it. The test accepts a
+blank convention only when the contract admits it is undetermined — silence and
+"we checked and it does not matter" otherwise look identical, and one of them
+is a 48,350-row guess waiting to happen.
+
+### Verify
+
+    python -m pytest tests -q
+    python scripts/iso_inversion_audit.py
+
+412 tests, 1 skipped (Devex — a date convention for a source nobody scrapes
+would be a guess with nothing to check it against).
+
+---
+
+## 2026-08-29 — Geographic routing: the last measured gap, and it changes nothing until you use it
+
+### Why this was the remaining piece
+
+Measured on 4,000 recent actionable rows:
+
+    (blank)           405   10.1%        Afghanistan   75   1.9%
+    United States     301    7.5%        India         71   1.8%
+    United Kingdom    284    7.1%        Belgium       63   1.6%
+    Australia         254    6.3%        Lebanon       62   1.6%
+    Austria           213    5.3%        Ukraine       61   1.5%
+    Canada            189    4.7%        Bangladesh    48   1.2%
+
+Roughly a third of the database is high-income-country listings. `TeamMember`
+had keywords, categories and verticals and **no geography at all** — geography
+existed only as a dashboard filter, so the digest never consulted it. That is
+how "Banyule Environment Grants Round – Individuals (Australia)" reached a
+member whose filter reads Health / E4C / Livelihood.
+
+### Three columns and a rule
+
+    countries             canonical names, comma separated; empty = everywhere
+    regions               canonical regions; empty = everywhere
+    geo_include_unknown   default TRUE
+
+**Empty means everywhere.** Every other routing field on `TeamMember` already
+works that way, and anything else would change what all four of you receive the
+moment this deploys. Nobody's mail changes until they pick a geography.
+
+**Region and country are ORed.** Someone selecting "South Asia" and "Kenya"
+wants both — the region and the one country outside it. Requiring a row to
+satisfy every selection would make each addition narrow the list, which is the
+opposite of what picking more places means.
+
+**Selecting a region also matches rows whose region column is blank but whose
+country belongs to it.** Without that, "South Asia" would miss every Indian row
+that predates the geography backfill. The country list is derived from the
+geography tables rather than typed out, so a country added there routes
+correctly without anyone remembering to.
+
+### The 10% with no country
+
+Those rows are **included by default**. A geographic filter cannot see them
+either way; that is a data gap, not evidence the opportunity is somewhere else.
+Excluding them by default would silently drop one row in ten from every
+filtered digest, and someone who set "South Asia" would never learn that
+"unknown" had been quietly read as "not South Asia".
+
+It is a per-member checkbox, and the UI says plainly what unticking costs:
+a tighter list that will drop real opportunities whose location we could not
+read.
+
+### A typo fails open, deliberately
+
+A member whose only entry is "Narnia" receives **everything**, with a warning
+naming the value, rather than silently receiving nothing. An empty inbox looks
+like the system is broken and gives them no clue why; too much mail is visibly
+wrong and the log says the cause. Unrecognised names are reported, never
+dropped — the same failure mode the vertical rename already had once.
+
+### Where to set it
+
+Team & Lead Routing, under the vertical chips: region chips, a free-text
+country field, and the unknown-country checkbox that appears once a geography
+is chosen. Each member's row now shows their geography alongside their
+keywords and verticals, and `scripts/routing_audit.py` prints it too.
+
+### Verify
+
+    cd backend
+    .venv\Scripts\activate
+    python -m pytest tests -q
+    python scripts/routing_audit.py
+
+378 tests. `tests/test_geo_routing.py` (16) leads with the two properties that
+matter most — no geography selected adds no filter at all, and a member with
+none set receives exactly what they did before.
+
+---
+
+## 2026-08-29 — Priorities 1, 3 and 6 closed out: health view, timeouts, bulk labelling
+
+Four items were still genuinely missing when I audited the code rather than my
+notes. All four are now in.
+
+### Priority 1 — source health, from evidence
+
+`services/scraper_health.py`, `GET /api/scraper-health`, and a dashboard card.
+
+792 of 916 runs recorded "completed", including all 127 attempts by the 16
+sources that never fetched a page or saved a row. "Completed" meant "the
+function returned", so there was nothing to alert on. This reads the columns
+runs now capture — outcome, error code, HTTP status — and answers the two
+questions people actually ask: which sources are broken, and for how long.
+
+Each source lands in one state:
+
+    failing          N consecutive unhealthy runs (default 3)
+    never_produced   runs recorded, no row ever saved
+    stale            producing, but nothing saved in 21+ days
+    unknown          no run has recorded an outcome yet
+    ok
+
+Two decisions worth naming:
+
+* **Staleness is measured from the last row SAVED**, not the last run
+  attempted. A source that runs nightly and has saved nothing since July is
+  broken, and "last run: today" would hide exactly that.
+* **CONFIRMED_EMPTY and CANCELLED are not failures.** A source that proved it
+  has nothing to list is working; a run somebody stopped is an operator action.
+  Counting either would train people to ignore the alert.
+
+The streak stops counting at a run recorded before outcomes existed. Treating a
+blank as healthy would silently reset a real streak; treating it as unhealthy
+would invent failures nobody observed.
+
+Thresholds are configuration — `LOP_HEALTH_FAILURE_STREAK`,
+`LOP_HEALTH_STALE_DAYS` — because how much flakiness is normal is a property of
+the sources, not of this code.
+
+### Priority 3 — a run that always ends
+
+    LOP_SOURCE_TIMEOUT_S  2700   45 min per source
+    LOP_RUN_TIMEOUT_S    21600   6 hours for the whole run
+
+The baseline found 106 runs stuck in "running". A source that hangs holds its
+concurrency slot forever, so a night's scrape stops after the first few sources
+wedge. The per-source limit is deliberately above the largest *legitimate*
+source rather than near the average — DevelopmentAid's own per-section cap is
+30 minutes and it has several sections — so a slow source is not killed nightly
+and mistaken for a broken one.
+
+The whole-run ceiling exists because per-source limits alone do not bound
+anything: 85 sources times 45 minutes is days, and the scheduler's
+`max_instances=1` skips every subsequent run while the first is still going.
+
+Stated plainly, because it is a real limit: `asyncio.to_thread` is **not**
+cancellable. The timeout stops *us waiting*; a Playwright worker may still be
+finishing the page it was on. That is why the stop flag is set as well — the
+crawl loop checks it between pages and exits on its own. A timed-out run is
+recorded as timed out, which is not the same word as "completed".
+
+### Priority 6 — the labels the guard was protecting
+
+`verticals_source` and the backfill guard shipped earlier so a human label
+survives a restart. That protection was inert: nothing could create one.
+
+`services/vertical_assignment.py`, `GET /api/opportunities/unclassified`,
+`POST /api/opportunities/verticals/bulk`, and an Unclassified card.
+
+34% of actionable rows carry no vertical, and `has_vertical` defaults to ON, so
+a third of the database is invisible in the working view — not because anyone
+judged it irrelevant but because the keyword rules had nothing to say about it.
+Those are exactly the rows a person labels in seconds and the rules cannot
+label at all.
+
+Rules that matter:
+
+* **"None of these" is a button.** Recording "it belongs to none of our six" is
+  a decision, stored as a human label with empty verticals. Left blank, the
+  next backfill re-tags it and the reviewer's work is undone — the exact
+  failure the guard exists to stop.
+* **A typo is refused, not dropped.** An unknown vertical stored here would sit
+  in the database forever, matching no filter, looking exactly like a correctly
+  labelled row. Legacy names are accepted and normalised.
+* **500 rows per call.** A review limit, not a technical one: a bulk assign
+  that accepted 10,000 ids would let one mis-click relabel a third of the
+  database with no way to tell which rows were touched.
+* **A batch can be handed back to the classifier.** Without it a mis-click is
+  permanent, because the backfill skips human rows and nothing would ever
+  re-derive them.
+
+The unclassified queue is **newest first** — the opposite of the deadline
+review queue, on purpose. An unassessed deadline ages into irrelevance; an
+unclassified row is a routing gap, and labelling the newest puts live
+opportunities in front of the right team this week.
+
+It is scoped to actionable rows. A row whose deadline nobody has established
+belongs in the deadline queue first; asking two questions about a row that may
+turn out to be closed is wasted review.
+
+### Verify
+
+    cd backend
+    .venv\Scripts\activate
+    python -m pytest tests -q
+
+362 tests.
+
+    cd frontend
+    npm run build
+
+Verified here: `tsc -b` clean, `vite build` succeeds, and `import app.main`
+loads the whole application the way gunicorn does.
+
+---
+
+## 2026-08-29 — Priority 6 (part 4): the de-duplication was not cosmetic, and I said it was
+
+### Correcting the previous entry
+
+I described collapsing case-only duplicate patterns as "harmless for
+correctness". It was not. On your data it moved 120 Climate tags, and the
+reason matters:
+
+    \bEnergy\b   (from the sheet)
+    \benergy\b   (hand-written)
+
+Both match the same word. One mention of "energy" in a summary therefore
+scored 2 and cleared the two-point threshold **on its own** — the exact thing
+the threshold comment says is too weak ("a single body hit alone is too weak;
+title hit or 2+ body hits qualify"). Collapsing the pair dropped those rows.
+
+Three such pairs existed: that one, plus `data\s+collection` and
+`\bevaluation\b` listed twice each in E4C's own hand-written list.
+
+### The gap that exposed
+
+Reading the 120, they are real energy-sector projects:
+
+    Liberia Electricity Sector Strengthening and Access Project
+    WAPP Ghana-Cote d'Ivoire Interconnection Project - Phase 1
+    Mozambique Energy Sector Programmatic Preparation: Hydropower
+
+Climate claims "energy" and could not recognise "electricity". The double
+count had been papering over a vocabulary gap. Added, deliberately narrow:
+
+    electricit(y|ies)   hydro[\s-]?power   \bhydroelectric\b
+    power\s+(sector|plant|grid|transmission|generation|utilit)
+    transmission\s+line   rural\s+electrification
+
+Bare "power" and "grid" are excluded — "purchasing power" and "grid computing"
+are not energy projects, and there are tests for both.
+
+I first wrote `energy\s+(sector|efficiency|access|...)` into that list and it
+re-created the identical double-count, because `\benergy\b` already matches
+every phrase it matches. Caught by the test I had just written for the original
+bug. It is gone; the comment in its place says why.
+
+### The same fault is systemic, and it is behind a flag
+
+Probing eighteen ordinary sector phrases, **fifteen scored more than once
+inside a single vertical**:
+
+    climate change adaptation      x3   climate + adaptation + \bClimate\s+Change\b
+    health system strengthening    x2   \bhealth + health\s+system
+    impact evaluation study        x4
+    occupational health and safety x3
+
+So the documented threshold of "2+ body hits" has been effectively 1 for any
+vertical with a general and a specific pattern for the same idea — which is all
+of them.
+
+The fix is to score by distinct matched **text** rather than by how many
+patterns fired: two hits then means two different pieces of text. "Biodiversity
+conservation" still scores 2 (two concepts, two places); "climate change"
+scores 1 however many patterns describe it.
+
+It is **off by default** — `LOP_VERTICAL_SPAN_SCORING=false` — because it
+re-tags a large share of the database and I have no way to measure that from
+here. Measure it first:
+
+    python scripts/reclassify_preview.py --compare-scoring
+
+That prints the pruning change and the span-scoring change separately, with
+counts and examples of rows that would differ, so the two are not confused
+with each other.
+
+### Verify
+
+    python -m pytest tests -q
+
+329 tests.
+
+---
+
+## 2026-08-29 — Priority 6 (part 3): the sheet's service lines were feeding the sector classifier
+
+### What the precision audit found
+
+`_merge_team_keywords()` folds "Keyword Searches Vertical Wise.xlsx" into the
+classifier. The sheet's **Health** row is:
+
+    Climate & Health, Digital Health, Evaluation, Health care management,
+    Health Consulting, Health Systems strengthening, Maternal & Child Health,
+    Primary Health, Research, Training & Capacity Building
+
+Most of those name a sector. **Research**, **Evaluation** and **Training &
+Capacity Building** do not — they name the kind of engagement. The sheet lists
+what each vertical's people SEARCH for, which reasonably includes their own
+service lines. Fed to a classifier answering "which sector is this in", they
+tag everything, because nearly every listing here is a research or evaluation
+assignment.
+
+Measured on 4,000 recent rows:
+
+    Health      \bResearch\b        sole reason for 114 of 738 Health tags
+    Health      \bEvaluation\b      sole reason for  31
+    Livelihood  \bEnergy\b          sole reason for  45
+    E4C         consult(ing|ancy)   sole reason for  59
+
+Those 114 include **"IEAC Audience Research — Western Balkans 2026"** and
+**"Market Research and Business Development Consultancy Services"**, filed
+under *Health* on the word "Research" alone.
+
+### Rule 1 — a service line is not a sector
+
+Service-line vocabulary no longer tags a sector. This is not a taste call: the
+platform already has `work_type` (Research vs Implementation) and `study_type`
+(Baseline / Endline / Data Collection). The information is not lost, it is left
+in the columns that already exist for it and stops contaminating a different
+question.
+
+**E4C(Evidence for Change) is exempt** — it is "Research and Community
+Engagement", so for that vertical research IS the sector. Stripping these from
+it would gut the one vertical they legitimately define.
+
+Which also means E4C at ~34% of the database may be *correct* rather than
+broken. If most of what this platform collects is research and evaluation work,
+a research vertical should be large. That is a question about the business and
+it is not answered here.
+
+### Rule 2 — the code was undoing a cleanup its own comment describes
+
+The comment on the Livelihood keyword block says:
+
+> Terms in that row that belong to another vertical are routed there instead
+> (M&E/Research -> E4C, Environment & Climate -> Climate, WASH -> Health,
+> HR & Employment -> Worker Wellbeing)
+
+That was done to the hand-written list. `_merge_team_keywords()` then folds the
+untouched spreadsheet back in and **re-adds every one of them** — the intent is
+undone three functions below where it is described.
+
+Twelve of the eighteen terms in the sheet's Livelihood row are already matched
+by another vertical's own patterns:
+
+    Education, Monitoring & Evaluation, Organizational Development,
+    Research & Innovation, Statistics and Data Analysis,
+    Training & Capacity Building          -> E4C
+    Energy, Environment & Climate         -> Climate
+    Fundraising & Grant Management,
+    Macro-Economy & Public Finance        -> Innovative Finance
+    HR & Employment                       -> Worker Wellbeing
+    Sanitation & Hygiene                  -> Health
+
+Dropping those from Livelihood **loses no recall**: the row still gets tagged,
+by the vertical that owns the concept. A test proves this for every term the
+rule removes. What it stops is Livelihood being credited for every energy,
+education and evaluation listing on the platform.
+
+Six terms are NOT owned elsewhere and stay — Agriculture & Rural Development,
+Fisheries & Aquaculture, Food Systems & Livelihoods, Social Development, Water,
+and Project Management (removed by rule 1 instead). Removing those would lose
+the concept rather than move it.
+
+The comparison runs against the HAND-WRITTEN patterns only. Against merged sets
+the answer would depend on which vertical was built first, and a rule whose
+result changes with dictionary order is not a rule.
+
+### Effect on the rows the audit named
+
+    IEAC Audience Research - Western Balkans      Health, E4C  ->  E4C
+    Market Research and Business Development      Health, E4C  ->  E4C
+    Supply of Energy-Dispersive X-ray Spectrom.   Livelihood, Climate -> Climate
+    On-Site Event Management Services             Livelihood   ->  (none)
+
+And unchanged, deliberately:
+
+    Assam State Secondary Healthcare Initiative   Health
+    Solar Irrigation among Smallholder Farmers    Livelihood, Climate
+    Endline Evaluation of Maternal Nutrition      Health, E4C
+    Social Protection Delivery System, Sindh      Worker Wellbeing
+
+### Preview it before it lands
+
+The change applies at the next restart, when `backfill_verticals()` re-tags
+every machine-classified row. That is large to do sight-unseen:
+
+    python scripts/reclassify_preview.py            # 4,000 newest
+    python scripts/reclassify_preview.py --sample 0 # everything
+
+It reports per vertical how many rows gain or lose it, with examples of both,
+and how the multi-tag and no-tag shares move. **Read the '-' examples.** A row
+that loses every vertical stops appearing in the working view, because the
+dashboard's `has_vertical` filter defaults to on. If those rows look like ones
+you want, the pruning went too far and the terms go back.
+
+Human-labelled rows are skipped, as always.
+
+### Also fixed
+
+`\bEnergy\b` from the sheet and `\benergy\b` hand-written are one rule
+evaluated twice under IGNORECASE. Harmless for correctness, and it made the
+precision audit print the same rule as two rows with identical counts —
+`social\s+development` and `\bSocial\s+Development\b` both showing 528. Patterns
+differing only by case now collapse.
+
+### Verify
+
+    python -m pytest tests -q
+
+317 tests. `tests/test_service_terms.py` (27) names a real row from the audit
+per test, and includes the property that matters most: every term the rule
+removes from a vertical is still matched by the vertical that owns it, so no
+concept is lost — only moved.
+
+### Still not done
+
+Geographic routing. `TeamMember` has no country or region field, and the
+country distribution says roughly a third of the database is US / UK /
+Australia / Austria / Canada against India at 1.8%. Adding one changes what
+every member receives, which is a decision about the business rather than a
+bug.
+
+---
+
+## 2026-08-29 — Priority 6 (part 2): the routing audit corrected my diagnosis, twice
+
+### I was wrong about the cause, and the measurement said so
+
+Part 1 concluded the digest noise came from the missing word boundary in the
+keyword filter. `relevance_impact.py` measured it on the live database:
+
+    Across everyone: 0 of 0 matches the old filter made were words-inside-words.
+
+Zero, because **no member has any keywords set**, so that filter never ran.
+The word-boundary fix was a real bug fix and stays. It was not your relevance
+problem.
+
+The second guess was that nothing was filtered at all. Also wrong —
+`routing_audit.py` shows every member has categories and verticals set:
+
+    Jashwoshi   Grant, RFP, Tender, Proposal | Health, E4C, Livelihood   2,416 pending
+    osama       RFP, Grant, Tender, Proposal | Climate/Sustainability…   1,043 pending
+    Rajeshwari  RFP                          | (none)                      328 pending
+    Rahul       RFP                          | E4C                          160 pending
+
+### What the data actually says
+
+The example titles are the finding:
+
+    Banyule Environment Grants Round - Individuals (Australia)
+    Call for Binn Wind Turbine Community Fund (United Kingdom)
+    Applications open for Festive Fund Grants (Australia)
+
+An Australian local-council micro-grant for *individuals* reached a member
+whose filter is "Health, E4C, Livelihood". Three separate faults put it there,
+and none of them is ranking:
+
+1. **No geographic routing exists.** `TeamMember` has keywords, categories and
+   verticals — and no country or region. Geography is a dashboard filter only;
+   the digest ignores it entirely.
+2. **The classifier over-assigns.** E4C(Evidence for Change) is on 30% of the
+   database and 27% of rows carry more than one vertical. A vertical on a third
+   of the database narrows a digest by a third.
+3. **Nothing filters on who may apply.** "Grants Round – Individuals" is not
+   biddable by a consultancy at all.
+
+43% of actionable rows carry no vertical, so vertical routing cannot see them
+either way — a separate problem from the tags being too broad.
+
+### `scripts/classifier_precision.py`
+
+"E4C covers 30%" is a symptom with no fix attached. The actionable form is
+"these patterns account for most E4C tags, and two of them are words in every
+consultancy RFP ever written." So `explain_verticals()` records which keyword
+pattern caused each tag, and the script reports per vertical which patterns
+fire most and how often each was the **sole** reason for the tag. A pattern
+carrying a tag on its own is the one to examine first.
+
+It also reports the country distribution, which is the evidence for or against
+building geographic routing.
+
+A test asserts `explain_verticals()` assigns exactly what `classify_verticals()`
+assigns, over 2,000 randomised inputs. The two differ in that the classifier
+stops scoring once a vertical crosses the threshold; if that difference ever
+changed the assignment, the audit would be reporting reasons for tags the
+pipeline never applied, and every conclusion drawn from it would concern a
+classifier that does not exist.
+
+### A trap with a delay on it, found in the same audit
+
+One member is stored as:
+
+    verticals: Climate/Sustainability, Climate/Sustainability(ESG)
+
+The old name and its replacement, both saved. The verticals were renamed and
+`backfill_verticals()` fixed the ~1,000 opportunity rows; nothing fixed the
+team members.
+
+It routes correctly today **only** because the vertical filter is a substring
+test and the old name is a prefix of the new one. It is working by accident.
+The first person to make that matching exact — the correct change, and the same
+class of fix as the keyword one — silently empties that member's routing, and
+nobody finds out until they notice the mail stopped.
+
+So the rename is finished rather than left as a trap: `vertical_names.py`
+resolves legacy spellings, a migration normalises the stored values, and the
+duplicate collapses (one vertical written twice is not two things to filter on).
+An unrecognised value is **reported, never dropped** — deleting part of
+someone's routing without telling them is how a filter quietly stops matching
+what they expect. A test asserts the normalised value selects exactly the same
+vertical the substring test was selecting, so nobody's mail changes.
+
+### Verify
+
+    cd backend
+    .venv\Scripts\activate
+    pip install pytest
+    python -m pytest tests -q
+    python scripts/classifier_precision.py
+
+290 tests.
+
+### The open decision
+
+`TeamMember` has no geography field, and adding one changes what every member
+receives. That is a decision about your business, not a bug to fix, so it is
+not being made here.
+
+---
+
+## 2026-08-29 — Priority 6 (part 1): the email relevance problem was a missing word boundary
+
+### The measurement that decided where to start
+
+You said mail relevance was poor and asked whether weighted keyword
+classification was the cause. It is not the classifier. `matching_service`
+built its filter as:
+
+    func.lower(Opportunity.title).like(f"%{kw}%")
+
+No word boundaries. Measured on twelve representative listing titles from this
+platform's own sources:
+
+    keyword   substring (today)   whole-word   false positives
+    ict                       3            0                 3
+    ai                        2            0                 2
+    it                        4            0                 4
+
+`ict` is matched by **District**, **Conflict** and **Restricted**. `ai` is
+matched by **Maintenance** and **Training**. `it` matches nearly every listing
+in the database. A member whose keyword list contains one short term received
+a digest that was mostly noise.
+
+No embedding model fixes a filter that matches the middle of unrelated words.
+That is why this comes before any model comparison.
+
+### Two more faults in the same rule
+
+**Every hit counted the same, and nothing was ranked.** One keyword appearing
+once in a paragraph of eligibility boilerplate counted exactly as much as three
+keywords in the title, and results were ordered by deadline — so the best match
+in a digest could sit anywhere in it, including below where someone stops
+reading.
+
+**Eligibility text was searched like content.** "NGOs registered in India with
+three years of audited accounts may apply" describes who may bid, not what the
+work is. It still contributes at a low weight, because occasionally it is the
+only place a sector is named.
+
+### `services/relevance.py`
+
+Whole-word matching with lookarounds rather than `\b`, because a keyword can
+begin or end with a non-word character — `M&E` and `C4D` are both real entries
+in your inventory, and `\bm&e\b` does not mean what it looks like it means.
+Multi-word keywords tolerate the separator, so "health system" also finds
+"health-system"; someone typing a keyword is naming a concept, not a byte
+sequence.
+
+Field weights: title 3, summary 1, vertical 1, eligibility 0.5. Threshold 2.0 —
+one title hit, or two hits elsewhere. A keyword counts once per field however
+often it appears, because a long document repeating one word is not more
+relevant than a short one naming it in the title.
+
+Results are ranked by score, with the deadline as tie-break rather than as the
+sort key.
+
+A match carries **why** it matched — which keywords, in which fields. A digest
+someone distrusts is only fixable if they can see what pulled a row in; a bare
+relevance number gives them nothing to correct.
+
+### SQL narrows, Python decides
+
+SQLite has no REGEXP without a registered function, so the `LIKE` stays as a
+cheap prefilter and the exact test runs in Python on the survivors. That order
+is safe in the one direction that matters: every whole-word match is also a
+substring match, so the prefilter can over-fetch but can never drop a real
+result. A test asserts this for every keyword shape the matcher accepts.
+
+The row limit now applies **after** scoring. Applied in SQL it would cut the
+list by deadline and then rank whatever survived, so a member's single best
+match could be dropped before anything had judged it.
+
+### Human labels now survive a restart
+
+`backfill_verticals()` re-classifies every row at every startup, on the stated
+reasoning that tags "are derived purely from the keyword rules (never
+hand-edited)". True when written; false the moment a UI can set a vertical.
+Without a guard, the first restart after someone corrects a batch silently
+undoes the work, and the only thing they learn is that correcting rows does not
+stick.
+
+Three new columns — `verticals_source`, `verticals_labeled_by`,
+`verticals_labeled_at` — and the backfill skips any row marked `human`,
+logging how many it protected so that can be confirmed without opening the
+database. NULL reads as machine-classified, which is a fact rather than an
+assumption: nothing could hand-edit a row before the column existed.
+
+A human clearing every vertical is also protected. "This belongs to none of our
+six" is a judgement too, and treating empty as unlabelled would re-tag it on
+the next restart — exactly the correction being overwritten.
+
+This is a prerequisite for the bulk assignment UI, not the UI itself.
+
+### Measure it on your own data
+
+    cd backend
+    .venv\Scripts\activate
+    python scripts/relevance_impact.py
+
+Read-only. It runs both matchers over your real rows and reports, per team
+member, how many of the emails they were being sent contained their keyword
+only inside another word. If that number is near zero for everyone, the
+substring bug was not your relevance problem and the classifier is the next
+place to look — which needs labelled examples before any model comparison
+means anything.
+
+### Verify
+
+    python -m pytest tests -q
+
+266 tests. `tests/test_relevance.py` (36) is built around the actual false
+positives, one test per real title. `tests/test_human_labels.py` (11) runs
+against a real database and includes surviving three consecutive restarts,
+because a label that decays after the third is still a label that does not
+stick.
+
+### Not done yet
+
+Model comparison (TF-IDF / embeddings / transformer), threshold calibration and
+the bulk assignment UI. All three need a labelled set, and inventing labels
+would produce a benchmark that measures nothing. That is the next piece.
+
+---
+
 ## 2026-08-29 — Priority 5 complete: the review queue exists, so unassessed rows are held rather than lost
 
 ### The gap this closes

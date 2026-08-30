@@ -108,18 +108,28 @@ class FilterService:
             stmt = stmt.where(Opportunity.work_type == f.work_type)
         if getattr(f, "study_type", ""):
             stmt = stmt.where(Opportunity.study_type == f.study_type)
-        # English-only and classified-only are unconditional, not options. The
-        # team works in English and routes work by vertical, so a row that is
-        # neither readable nor ownable is not a lead — it is noise in every
-        # view, every export and every digest. Making them togglable put the
-        # burden on the reader to remember to switch them on.
-        if True:
+        # English-only and classified-only DEFAULT to on, and are now actually
+        # options again.
+        #
+        # They were `if True:` — the flags existed on the filter model, were
+        # documented as options, and were ignored. That is a dishonest API
+        # contract whatever the behaviour behind it: a caller passing
+        # has_vertical=false got the same rows as one passing true, silently.
+        #
+        # It also made the Unclassified section impossible. Those rows are
+        # excluded from the working table on purpose, and the section that
+        # exists to review them has to be able to ask for them.
+        #
+        # The defaults are unchanged, so no existing view moves: the team works
+        # in English and routes work by vertical, and a row that is neither
+        # readable nor ownable is noise in the main table.
+        if f.english_only:
             for lo, hi in (("\u0590", "\u05ff"), ("\u0600", "\u06ff"),
                            ("\u0400", "\u04ff"), ("\u0900", "\u097f"),
                            ("\u0e00", "\u0e7f"), ("\u4e00", "\u9fff"),
                            ("\u3040", "\u30ff"), ("\uac00", "\ud7af")):
                 stmt = stmt.where(~Opportunity.title.op("GLOB")(f"*[{lo}-{hi}]*"))
-        if True:
+        if f.has_vertical:
             stmt = stmt.where(
                 Opportunity.verticals.is_not(None), Opportunity.verticals != ""
             )

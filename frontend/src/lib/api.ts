@@ -1,4 +1,4 @@
-import type { DigestRunResult, ReviewQueueResponse, EmailSettings, Facets, FilterState, Opportunity, Paginated, Progress, ScheduleStatus, SourceInfo, Stats, TeamMember } from "./types";
+import type { DigestRunResult, ReviewQueueResponse, ScraperHealth, UnclassifiedQuery, UnclassifiedResponse, EmailSettings, Facets, FilterState, Opportunity, Paginated, Progress, ScheduleStatus, SourceInfo, Stats, TeamMember } from "./types";
 
 const BASE = "/api";
 
@@ -25,6 +25,22 @@ export function filterParams(f: FilterState): URLSearchParams {
   p.set("page_size", String(f.page_size));
   p.set("sort_by", f.sort_by);
   p.set("sort_dir", f.sort_dir);
+  return p;
+}
+
+function unclassifiedParams(q: UnclassifiedQuery): URLSearchParams {
+  const p = new URLSearchParams();
+  if (q.search) p.set("search", q.search);
+  (q.sources ?? []).forEach((v) => p.append("sources", v));
+  (q.countries ?? []).forEach((v) => p.append("countries", v));
+  (q.organizations ?? []).forEach((v) => p.append("organizations", v));
+  (q.categories ?? []).forEach((v) => p.append("categories", v));
+  if (q.deadline_before) p.set("deadline_before", q.deadline_before);
+  if (q.deadline_after) p.set("deadline_after", q.deadline_after);
+  if (q.page) p.set("page", String(q.page));
+  if (q.page_size) p.set("page_size", String(q.page_size));
+  if (q.sort_by) p.set("sort_by", q.sort_by);
+  if (q.sort_dir) p.set("sort_dir", q.sort_dir);
   return p;
 }
 
@@ -160,6 +176,28 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decision, deadline: deadline || null }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json();
+  },
+  /** Which sources are broken and for how long, from run evidence. */
+  scraperHealth: () => get<ScraperHealth>("/scraper-health"),
+  /** Rows no vertical could be derived for — hidden from the main table. */
+  unclassified: (q: UnclassifiedQuery = {}) =>
+    get<UnclassifiedResponse>(`/opportunities/unclassified?${unclassifiedParams(q)}`),
+  /** Every id the filter matches, for select-all. Capped server-side at the
+   *  same limit a bulk assignment accepts, so the UI cannot offer a selection
+   *  the write path would refuse. */
+  unclassifiedIds: (q: UnclassifiedQuery = {}) =>
+    get<{ ids: number[]; capped: boolean; cap: number; note: string }>(
+      `/opportunities/unclassified/ids?${unclassifiedParams(q)}`),
+  /** Label rows by hand. An empty list means "none of our six", which is
+   *  recorded as a decision so the classifier will not overwrite it. */
+  assignVerticals: async (ids: number[], verticals: string[]) => {
+    const res = await fetch(`${BASE}/opportunities/verticals/bulk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ opportunity_ids: ids, verticals }),
     });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     return res.json();

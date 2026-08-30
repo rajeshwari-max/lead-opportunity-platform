@@ -261,6 +261,39 @@ class Settings(BaseSettings):
     # discard rate — and it is why 85% of the database (90,551 of 106,854 rows)
     # is expired. Turn it on deliberately for a one-off backfill, then off again.
     devaid_include_archive: bool = False
+
+    # Score a vertical by distinct matched TEXT rather than by how many
+    # patterns fired.
+    #
+    # The documented threshold is "a title hit, or 2+ body hits". It has not
+    # meant that for a long time: general and specific patterns overlap, so
+    # "climate change adaptation" matches `climate`, `adaptation` and
+    # `\bClimate\s+Change\b` and one phrase scores 3. Fifteen of eighteen
+    # probed sector phrases scored more than once inside a single vertical.
+    #
+    # OFF by default because switching it on re-tags a large share of the
+    # database at the next restart. Measure first:
+    #     python scripts/reclassify_preview.py --compare-scoring
+    vertical_span_scoring: bool = False
+
+    # Scraper health thresholds. Configurable because "how much flakiness is
+    # normal" is a property of the sources, not of the code: one bad run is a
+    # site being down, three is a pattern.
+    # A source that hangs holds its concurrency slot forever; the baseline
+    # found 106 runs stuck in "running". These turn "never finishes" into
+    # "finishes, badly, and says so".
+    #
+    # 45 min per source: DevelopmentAid's own section cap is 30 min and it has
+    # several sections, so this is deliberately above the largest legitimate
+    # source rather than tuned to the average.
+    source_timeout_s: int = 2700
+    # 6 hours for the whole run. Per-source limits alone do not bound it — 85
+    # sources times 45 minutes is days — and the scheduler skips a run while
+    # the previous one is still going.
+    run_timeout_s: int = 21600
+
+    health_failure_streak: int = 3
+    health_stale_days: int = 21
     # Scrape only open/forecast DevelopmentAid listings. Their unfiltered totals
     # (118k grants, 1.2M tenders) are dominated by calls that closed years ago;
     # restricting to live ones is both what the dashboard needs and small enough

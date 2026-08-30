@@ -80,8 +80,24 @@ class SourceContract:
     key: str                                    # registry name
     display_name: str
     listing_url: str = ""
+    # What this source is understood to produce. A DESCRIPTION, not an audited
+    # allowlist — see `expected_types_exhaustive`.
     expected_types: tuple[RecordType, ...] = ()
+    # What it must never yield. This is the half that rejects.
     excluded_types: tuple[RecordType, ...] = ()
+    # Does `expected_types` list EVERY type this source can emit?
+    #
+    # False by default, and no manifest sets it today. While nothing populated
+    # `record_type`, treating the expected list as an allowlist was harmless
+    # because it never ran. The moment the scrapers started passing the
+    # source's own notice wording it became a deletion rule built on lists
+    # nobody had audited for completeness: ADB's list omits `itb`, so every
+    # "Invitation for Bids" — its main output — would have been discarded.
+    #
+    # Same principle as an unrecognised status value: a vocabulary nobody has
+    # finished configuring must not silently delete a source's output. Set this
+    # True only after checking a real sample of what the source emits.
+    expected_types_exhaustive: bool = False
     # The source's OWN status vocabulary — the values it uses, not ours.
     open_status_values: tuple[str, ...] = ()
     closed_status_values: tuple[str, ...] = ()
@@ -227,11 +243,15 @@ MANIFESTS: dict[str, SourceContract] = {
         deadline_format="dayfirst",       # Indian source: 31/07/2026
         scope_status=ScopeStatus.CONFIRMED,
         known_defect=(
-            "Every row is stored with the listing url "
-            "https://www.devnetjobsindia.org/rfp_assignments.aspx rather than a "
-            "per-RFP link, because that one .aspx page IS the list. 86 rows in "
-            "the 2026-08-29 database share it, so their dashboard links do not "
-            "open the opportunity they name. Detail-link extraction is the fix."
+            "STORED ROWS ONLY — the scraper no longer does this. It recovers "
+            "job_id three ways (href, joblogos/<id> image, sidebar title match) "
+            "and returns an EMPTY link when all three fail, so the row is "
+            "dropped rather than shipped pointing at the index. What remains is "
+            "history: 86 rows in the 2026-08-29 database still carry "
+            "https://www.devnetjobsindia.org/rfp_assignments.aspx as their "
+            "opportunity_url, so their dashboard links open the list rather "
+            "than the RFP they name. Repair with "
+            "scripts/listing_link_audit.py."
         ),
         owner_note="RFPs, RFQs and consultancies. Not the job listings that share "
                    "the site.",
@@ -251,7 +271,12 @@ MANIFESTS: dict[str, SourceContract] = {
         owner_note=(
             "48,350 of 105,297 records saved — 45% of the whole database. Worth "
             "confirming the scope is grants and calls rather than the site's "
-            "articles about grants."
+            "articles about grants. "
+            "DATE CONVENTION NOT ESTABLISHED: the site's format has not been "
+            "checked, and guessing one would decide the meaning of 48,350 "
+            "deadlines on nothing. Settle it with "
+            "scripts/deadline_convention_audit.py --source FundsForNGOs, which "
+            "measures the day/month distribution of its ambiguous dates."
         ),
     ),
 }
@@ -264,9 +289,34 @@ DEFAULT_CONTRACT_NOTE = (
 )
 
 
+# Registry key -> manifest key, where the two were written differently.
+#
+# This existed as a silent defect. The manifests are keyed `worldbank`, `unpp`
+# and `adb`; the scrapers register themselves as `world_bank`,
+# `un_partner_portal` and `adb_tenders`, and the ingest path passes the
+# REGISTRY key. So `contract_for(scraper.name)` fell through to the
+# needs_review placeholder for the three sources whose contracts matter most —
+# World Bank, whose feed is mostly contract awards, and UN Partner Portal,
+# whose `/projects` route is the red herring the brief names by name.
+#
+# It never failed loudly: a placeholder contract has no expected types and no
+# status vocabulary, and `record_is_in_scope` on an empty contract returns
+# keep=True. The scope check was a no-op for those sources and looked exactly
+# like a working one. The tests missed it because they reach into MANIFESTS by
+# name instead of going through the key the pipeline actually uses.
+#
+# `test_source_manifest.py` now asserts every manifest is reachable from a
+# registered scraper, so a future rename cannot re-open this quietly.
+KEY_ALIASES: dict[str, str] = {
+    "world_bank": "worldbank",
+    "un_partner_portal": "unpp",
+    "adb_tenders": "adb",
+}
+
+
 def contract_for(key: str, display_name: str = "") -> SourceContract:
     """The manifest for a source, or an honest placeholder saying there is none."""
-    found = MANIFESTS.get(key)
+    found = MANIFESTS.get(key) or MANIFESTS.get(KEY_ALIASES.get(key, ""))
     if found is not None:
         return found
     return SourceContract(
@@ -311,7 +361,10 @@ def record_is_in_scope(
         for excluded in contract.excluded_types:
             if rt == excluded.value or excluded.value in rt:
                 return False, f"source type {record_type!r} is excluded for this source"
-        if contract.expected_types:
+        # Only an EXHAUSTIVE expected list may reject. An incomplete one is
+        # exactly like an unrecognised status: evidence of unfinished
+        # configuration, not evidence the record is out of scope.
+        if contract.expected_types and contract.expected_types_exhaustive:
             if not any(rt == e.value or e.value in rt for e in contract.expected_types):
                 return False, (f"source type {record_type!r} is not among this "
                                f"source's expected types")

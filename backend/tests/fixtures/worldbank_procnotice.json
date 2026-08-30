@@ -1,0 +1,39 @@
+{
+  "_comment": "Sanitized shape of search.worldbank.org/api/v2/procnotices. Values invented; field names and nesting are the contract under test.",
+  "rows": 3,
+  "procnotices": [
+    {
+      "id": "OP00000001",
+      "notice_type": "Invitation for Bids",
+      "bid_description": "Supply and Installation of Laboratory Equipment",
+      "project_name": "Health Systems Improvement Project",
+      "project_ctry_name": "Kenya",
+      "submission_deadline_date": "2027-03-15T23:59:00Z",
+      "noticedate": "2026-08-01T00:00:00Z",
+      "procurement_group": "GO",
+      "procurement_method_name": "Request for Bids",
+      "borrower": "Ministry of Health",
+      "bid_reference_no": "KE-MOH-000001-GO-RFB",
+      "url": "https://projects.worldbank.org/en/projects-operations/procurement-detail/OP00000001"
+    },
+    {
+      "id": "OP00000002",
+      "notice_type": "Contract Award",
+      "bid_description": "Award of Contract for Supervision Services",
+      "project_name": "Urban Transport Project",
+      "project_ctry_name": "India",
+      "submission_deadline_date": "2026-06-01T23:59:00Z",
+      "procurement_group": "CS",
+      "borrower": "State Transport Authority"
+    },
+    {
+      "id": "OP00000003",
+      "notice_type": "",
+      "project_name": "Rural Water Supply Programme",
+      "project_ctry_name": "Nepal",
+      "submission_deadline_date": "2027-01-20T23:59:00Z",
+      "procurement_group": "CW",
+      "borrower": "Department of Water Supply"
+    }
+  ]
+}

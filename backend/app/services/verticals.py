@@ -124,6 +124,29 @@ _VERTICAL_KEYWORDS: dict[str, list[str]] = {
         #  than Livelihood; the Climate row itself was blank in the sheet, so
         #  the existing Climate keywords above are kept unchanged.)
         r"environment\s*(&|and)\s*climate", r"\benergy\b",
+        # The energy sector, spelled the way procurement notices spell it.
+        #
+        # Added because de-duplicating `\bEnergy\b` / `\benergy\b` exposed a
+        # gap rather than creating one. That pair was scoring a SINGLE body
+        # mention of "energy" twice, which is what pushed 120 rows over the
+        # two-point threshold; collapsing it dropped them. Reading those rows,
+        # they are real energy-sector projects — "Liberia Electricity Sector
+        # Strengthening and Access Project", "WAPP Ghana-Cote d'Ivoire
+        # Interconnection Project" — that this vertical never matched on their
+        # own words. It claims "energy" and could not recognise "electricity".
+        #
+        # These are the sector's vocabulary, not a broadening of scope: a row
+        # matching any of them was already meant to be Climate. Deliberately
+        # narrow — bare "power" and "grid" are excluded, because "purchasing
+        # power" and "grid computing" are not energy projects.
+        # Note what is NOT here: `energy\s+(sector|efficiency|...)`. It was,
+        # and it re-created the exact double-counting the dedupe removed —
+        # `\benergy\b` above already matches every one of those phrases, so
+        # "energy sector" scored 2 from one mention again. A pattern that adds
+        # no new vocabulary adds nothing but a second count.
+        r"electricit(y|ies)", r"hydro[\s-]?power", r"\bhydroelectric\b",
+        r"power\s+(sector|plant|grid|transmission|generation|utilit)",
+        r"transmission\s+line", r"rural\s+electrification",
     ],
     VERTICAL_WWB: [
         r"\bworker(s)?\b", r"\blabou?r\b", r"occupational", r"workplace",
@@ -202,10 +225,33 @@ def _merge_team_keywords() -> dict[str, list[str]]:
     and dropping them would lose recall on phrasings the sheet doesn't spell
     out. The sheet's terms are escaped and wrapped in \\b so a term like "Fund"
     matches the word and not "funding" inside "refunding".
+
+    Service-line terms are dropped. The sheet lists what each vertical's people
+    SEARCH for, which reasonably includes their own service lines — "Research",
+    "Evaluation", "Training & Capacity Building". Folded into a classifier that
+    answers "which SECTOR is this in", those words tag everything, because
+    nearly every listing here is a research or evaluation assignment. Measured
+    on 4,000 recent rows, `\\bResearch\\b` alone was the only reason for 114 of
+    738 Health tags — including "Market Research and Business Development
+    Consultancy Services" filed under Health.
+
+    They are kept for E4C(Evidence for Change), whose identity IS that kind of
+    work. See services/service_terms.py.
     """
     from app.services.keyword_inventory import VERTICAL_KEYWORDS
+    from app.services.service_terms import (
+        dedupe_patterns,
+        is_service_line,
+        owned_elsewhere,
+        pattern_is_service_line,
+    )
 
-    merged = {k: list(v) for k, v in _VERTICAL_KEYWORDS.items()}
+    merged: dict[str, list[str]] = {}
+    for vertical, patterns in _VERTICAL_KEYWORDS.items():
+        merged[vertical] = [
+            p for p in patterns
+            if not pattern_is_service_line(vertical, p)
+        ]
     for vertical, terms in VERTICAL_KEYWORDS.items():
         if vertical not in merged:
             continue                       # unknown vertical name — ignore quietly
@@ -214,8 +260,22 @@ def _merge_team_keywords() -> dict[str, list[str]]:
             # Very short terms match far too much ("CE", "TB" inside words).
             if len(t) < 4:
                 continue
+            if is_service_line(t, vertical):
+                continue
+            # Already another vertical's concept? Then this row does not also
+            # belong here. The comment on the Livelihood block above says
+            # exactly this was done — it was done to the hand-written list, and
+            # this merge put every one of them straight back.
+            owner = owned_elsewhere(t, vertical, _VERTICAL_KEYWORDS)
+            if owner:
+                log.debug("[verticals] %r dropped from %s — already owned by %s",
+                          t, vertical, owner)
+                continue
             merged[vertical].append(rf"\b{re.escape(t)}\b".replace(r"\ ", r"\s+"))
-    return merged
+    # `\bEnergy\b` from the sheet and `\benergy\b` hand-written are one rule
+    # evaluated twice under IGNORECASE — harmless, and it made the audit report
+    # the same rule as two rows with identical counts.
+    return {v: dedupe_patterns(p) for v, p in merged.items()}
 
 
 _COMPILED: dict[str, list[re.Pattern[str]]] = {
@@ -228,25 +288,108 @@ _BODY_WEIGHT = 1
 _THRESHOLD = 2  # a single body hit alone is too weak; title hit or 2+ body hits qualify
 
 
-def classify_verticals(title: str, body: str = "") -> list[str]:
+def classify_verticals(title: str, body: str = "",
+                       span_scoring: bool | None = None) -> list[str]:
     """Return every canonical vertical this opportunity belongs to (may be empty).
 
     Multi-label by design: a "solar irrigation for farmers" grant is both
     Climate/Sustainability and Livelihood.
     """
+    span = _span_scoring_enabled() if span_scoring is None else span_scoring
     matched: list[str] = []
     for vertical in VERTICALS:  # preserve canonical ordering in the output
-        score = 0
-        for pat in _COMPILED[vertical]:
-            if pat.search(title):
-                score += _TITLE_WEIGHT
-            if body and pat.search(body):
-                score += _BODY_WEIGHT
-            if score >= _THRESHOLD:
-                break
+        if span:
+            score = _span_score(vertical, title, body)
+        else:
+            score = 0
+            for pat in _COMPILED[vertical]:
+                if pat.search(title):
+                    score += _TITLE_WEIGHT
+                if body and pat.search(body):
+                    score += _BODY_WEIGHT
+                if score >= _THRESHOLD:
+                    break
         if score >= _THRESHOLD:
             matched.append(vertical)
     return matched
+
+
+def _span_scoring_enabled() -> bool:
+    from app.core.config import settings
+
+    return bool(getattr(settings, "vertical_span_scoring", False))
+
+
+def _covered(text: str, vertical: str) -> list[tuple[int, int]]:
+    """Merged character ranges this vertical's patterns match in `text`."""
+    spans: list[tuple[int, int]] = []
+    for pat in _COMPILED[vertical]:
+        for m in pat.finditer(text):
+            if m.end() > m.start():
+                spans.append((m.start(), m.end()))
+    if not spans:
+        return []
+    spans.sort()
+    merged = [spans[0]]
+    for start, end in spans[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end:                 # overlapping or touching
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _span_score(vertical: str, title: str, body: str) -> int:
+    """Score by distinct matched TEXT, not by how many patterns fired.
+
+    The threshold is documented as "a single body hit alone is too weak; title
+    hit or 2+ body hits qualify". It has not meant that for a long time,
+    because general and specific patterns overlap: "climate change adaptation"
+    matches `climate`, `adaptation` AND `\\bClimate\\s+Change\\b`, so one phrase
+    scores 3 and a single body mention clears a threshold of 2 on its own.
+    Probing eighteen ordinary sector phrases, fifteen scored more than once
+    inside a single vertical.
+
+    Counting merged spans instead means two hits require two different pieces
+    of text, which is what the rule always claimed. "Biodiversity conservation"
+    still scores 2 — those are two distinct concepts in two distinct places —
+    while "climate change" scores 1 however many patterns describe it.
+    """
+    return (_TITLE_WEIGHT * len(_covered(title, vertical))
+            + (_BODY_WEIGHT * len(_covered(body, vertical)) if body else 0))
+
+
+def explain_verticals(title: str, body: str = "") -> dict[str, list[str]]:
+    """Which keyword patterns caused each vertical to be assigned.
+
+    Same scoring as `classify_verticals`, but it records the evidence instead
+    of discarding it. Needed because "E4C covers 30% of the database" is a
+    symptom with no fix attached — the actionable form of it is "these three
+    patterns account for most E4C tags, and two of them are words that appear
+    in every consultancy RFP ever written."
+
+    `classify_verticals` stays the hot path and is not routed through this: it
+    runs on every ingested row, and building explanation lists for rows nobody
+    will inspect is work for nothing.
+    """
+    out: dict[str, list[str]] = {}
+    for vertical in VERTICALS:
+        score = 0
+        why: list[str] = []
+        for pat in _COMPILED[vertical]:
+            hit = False
+            if pat.search(title):
+                score += _TITLE_WEIGHT
+                hit = True
+            if body and pat.search(body):
+                score += _BODY_WEIGHT
+                hit = True
+            if hit:
+                why.append(pat.pattern)
+        if score >= _THRESHOLD:
+            out[vertical] = why
+    return out
 
 
 def verticals_to_str(verticals: list[str]) -> str:
@@ -263,8 +406,15 @@ def backfill_verticals() -> int:
     Runs in the background at startup and is safe to run repeatedly — a row
     whose tags don't change is not written.
 
-    This deliberately re-checks *all* rows rather than only blank ones. Tags are
-    derived purely from the keyword rules (never hand-edited), so whenever those
+    Rows a PERSON labelled are skipped. The sentence below — "never
+    hand-edited" — was true when it was written and stopped being true the
+    moment the review UI could set a vertical. Re-classifying those rows would
+    overwrite a human judgement with the output of the rules that got it wrong
+    in the first place, and someone whose corrections vanish at the next
+    restart learns only that correcting rows is pointless.
+
+    This deliberately re-checks all remaining rows rather than only blank ones.
+    Machine tags are derived purely from the keyword rules, so whenever those
     rules change the stored values need to catch up. Blank-only backfilling left
     two problems behind: rows tagged under an earlier keyword set never picked
     up new keywords, and ~1,000 rows still carried pre-rename labels ("E4C",
@@ -278,9 +428,13 @@ def backfill_verticals() -> int:
     from app.database.models import Opportunity
 
     updated = 0
+    protected = 0
     with session_scope() as db:
         rows = db.execute(select(Opportunity)).scalars().all()
         for opp in rows:
+            if is_human_labeled(opp):
+                protected += 1
+                continue
             body = " ".join(filter(None, [opp.summary, opp.vertical, opp.eligibility]))
             new_value = verticals_to_str(classify_verticals(opp.title, body))
             if new_value != (opp.verticals or ""):
@@ -288,4 +442,24 @@ def backfill_verticals() -> int:
                 updated += 1
     if updated:
         log.info("Vertical backfill: re-tagged %s opportunities", updated)
+    if protected:
+        # Logged rather than silent: this number is how anyone confirms that
+        # human labelling is actually being honoured, without opening the
+        # database to check.
+        log.info("Vertical backfill: left %s human-labelled opportunities alone",
+                 protected)
     return updated
+
+
+HUMAN = "human"
+AUTO = "auto"
+
+
+def is_human_labeled(opportunity) -> bool:
+    """Did a person set this row's verticals?
+
+    NULL and "auto" both mean the classifier did. Every row that existed before
+    the column was added is machine-classified by definition — nothing could
+    hand-edit one — so treating NULL as auto is a fact, not an assumption.
+    """
+    return (getattr(opportunity, "verticals_source", None) or AUTO) == HUMAN

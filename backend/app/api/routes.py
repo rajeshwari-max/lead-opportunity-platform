@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.database.db import get_db
 from app.schemas.opportunity import (
     ApprovalRequest,
+    BulkVerticalsIn,
     OpportunityFilters,
     ReviewDecisionIn,
     OpportunityOut,
@@ -33,11 +34,14 @@ from app.services import (
     email_service,
     export_service,
     review_queue,
+    scraper_health,
+    vertical_assignment,
 )
 from app.services.matching_service import MatchingService
 from app.services.filter_service import FilterService
 from app.services.scheduler import scheduler
 from app.services.scraper_manager import manager
+from app.services.verticals import VERTICALS
 
 router = APIRouter()
 
@@ -179,6 +183,11 @@ def filters_dep(
     approved: bool = False,
     work_type: str = "",
     study_type: str = "",
+    # Bound at last. These were on the filter model and never read from the
+    # query string, so even after FilterService started honouring them there
+    # was no way to send a value. Defaults match the model.
+    english_only: bool = True,
+    has_vertical: bool = True,
     page: int = 1,
     page_size: int = 25,
     sort_by: str = "deadline",
@@ -187,6 +196,7 @@ def filters_dep(
     return OpportunityFilters(
         archived=archived, new_today=new_today, approved=approved,
         work_type=work_type, study_type=study_type,
+        english_only=english_only, has_vertical=has_vertical,
         categories=categories, verticals=verticals, countries=countries, regions=regions,
         sources=sources, organizations=organizations, deadline_before=deadline_before,
         deadline_after=deadline_after, search=search, page=page, page_size=page_size,
@@ -469,6 +479,128 @@ def get_review_queue(
         "items": [e.as_dict() for e in review_queue.fetch(
             db, limit=limit, offset=offset, source_website=source_website)],
     }
+
+
+# ------------------------------------------------------- scraper health
+#
+# 792 of 916 runs said "completed", including all 127 attempts by the 16
+# sources that have never fetched a page or saved a row. This reads the
+# evidence those runs now record instead of their status word.
+
+@router.get("/scraper-health")
+def get_scraper_health(db: Session = Depends(get_db)) -> dict:
+    entries = scraper_health.source_health(
+        db,
+        failure_streak=settings.health_failure_streak,
+        stale_days=settings.health_stale_days,
+    )
+    return {
+        "summary": scraper_health.summary(entries),
+        "alerting": [e.source_key for e in scraper_health.alerting_sources(
+            entries, settings.health_failure_streak)],
+        "sources": [e.as_dict() for e in entries],
+        "thresholds": {
+            "failure_streak": settings.health_failure_streak,
+            "stale_days": settings.health_stale_days,
+        },
+    }
+
+
+# --------------------------------------------------- unclassified + labelling
+#
+# 34% of actionable rows carry no vertical, and the dashboard's has_vertical
+# filter defaults to ON — so a third of the database is invisible in the
+# working view. These are the rows a person can label in seconds and the
+# keyword rules cannot label at all.
+
+def unclassified_query(
+    search: str = "",
+    sources: list[str] = Query(default=[]),
+    countries: list[str] = Query(default=[]),
+    organizations: list[str] = Query(default=[]),
+    categories: list[str] = Query(default=[]),
+    deadline_before: date | None = None,
+    deadline_after: date | None = None,
+    scraped_after: date | None = None,
+    page: int = 1,
+    page_size: int = 25,
+    sort_by: str = "date_scraped",
+    sort_dir: str = "desc",
+) -> vertical_assignment.UnclassifiedQuery:
+    return vertical_assignment.UnclassifiedQuery(
+        search=search, sources=tuple(sources), countries=tuple(countries),
+        organizations=tuple(organizations), categories=tuple(categories),
+        deadline_before=deadline_before, deadline_after=deadline_after,
+        scraped_after=scraped_after, page=page, page_size=page_size,
+        sort_by=sort_by, sort_dir=sort_dir)
+
+
+@router.get("/opportunities/unclassified")
+def get_unclassified(
+    q: vertical_assignment.UnclassifiedQuery = Depends(unclassified_query),
+    db: Session = Depends(get_db),
+) -> dict:
+    """The Unclassified section: paginated, searchable, filterable server-side.
+
+    Server-side because select-all has to mean "everything matching this
+    filter" rather than "the 25 rows on screen" — a bulk action scoped to the
+    visible page silently does a fraction of what was asked.
+    """
+    page = vertical_assignment.search_unclassified(db, q)
+    page["by_source"] = vertical_assignment.by_source(db)
+    page["verticals"] = VERTICALS
+    page["unfiltered_total"] = vertical_assignment.count_unclassified(db)
+    return page
+
+
+@router.get("/opportunities/unclassified/ids")
+def get_unclassified_ids(
+    q: vertical_assignment.UnclassifiedQuery = Depends(unclassified_query),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Every id the current filter matches, for select-all.
+
+    Capped at the bulk-assignment limit, and it says so, so the UI cannot
+    offer a selection the write path would refuse.
+    """
+    ids = vertical_assignment.matching_ids(db, q)
+    over = len(ids) > vertical_assignment.MAX_BULK
+    return {
+        "ids": ids[:vertical_assignment.MAX_BULK],
+        "capped": over,
+        "cap": vertical_assignment.MAX_BULK,
+        "note": ("More rows match than one assignment may touch. Narrow the "
+                 "filter, or work through it in pages." if over else ""),
+    }
+
+
+@router.post("/opportunities/verticals/bulk",
+             dependencies=[Depends(require_writable)])
+def bulk_assign_verticals(
+    body: BulkVerticalsIn,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Set verticals on a batch of rows, as a human decision.
+
+    An empty list is accepted and meaningful — "none of our six" — and is
+    stored as a human label so the backfill leaves it alone. Storing it as an
+    ordinary empty value would let the next restart re-tag the row and undo
+    the reviewer's work.
+    """
+    from app.core.auth import COOKIE_NAME, current_user
+
+    reviewer = current_user(request.cookies.get(COOKIE_NAME)).get("email", "")
+    try:
+        if body.revert:
+            result = vertical_assignment.revert_to_auto(db, body.opportunity_ids)
+        else:
+            result = vertical_assignment.assign(
+                db, body.opportunity_ids, body.verticals, reviewer)
+    except vertical_assignment.AssignmentError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    db.commit()
+    return result
 
 
 @router.post("/review-queue/{opportunity_id}",

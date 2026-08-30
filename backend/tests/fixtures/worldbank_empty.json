@@ -1,0 +1,6 @@
+{
+  "_comment": "The API answering correctly with nothing to list. This is CONFIRMED_EMPTY, not PARSE_ZERO: total is present and zero.",
+  "rows": 0,
+  "total": 0,
+  "procnotices": []
+}
