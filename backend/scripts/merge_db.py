@@ -28,7 +28,6 @@ The target is backed up first. A merge that goes wrong should be recoverable.
 from __future__ import annotations
 
 import argparse
-import shutil
 import sqlite3
 import sys
 from datetime import datetime
@@ -50,6 +49,19 @@ def columns(con: sqlite3.Connection, table: str) -> list[str]:
     return [r[1] for r in con.execute(f"PRAGMA table_info({table})")]
 
 
+def backup_database(source: Path, destination: Path) -> None:
+    """Create one consistent SQLite backup, including committed WAL pages."""
+    source = source.expanduser().resolve()
+    destination = destination.expanduser().resolve()
+    if destination.exists():
+        raise FileExistsError(f"refusing to overwrite backup: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    source_uri = f"file:{source.as_posix()}?mode=ro"
+    with sqlite3.connect(source_uri, uri=True) as source_db:
+        with sqlite3.connect(destination) as destination_db:
+            source_db.backup(destination_db)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True, help="the other .db file to merge FROM")
@@ -67,6 +79,10 @@ def main() -> int:
              "the Archive toggle was removed, so expired rows are invisible in "
              "the UI — they only add size)",
     )
+    ap.add_argument(
+        "--only-source", default="",
+        help="merge only this exact source_website value, e.g. DevelopmentAid",
+    )
     args = ap.parse_args()
 
     src_path, dst_path = Path(args.source), target_path()
@@ -78,7 +94,7 @@ def main() -> int:
         backup = dst_path.with_name(
             f"{dst_path.stem}.before-merge-{datetime.now():%Y%m%d-%H%M%S}.db"
         )
-        shutil.copy2(dst_path, backup)
+        backup_database(dst_path, backup)
         print(f"backup : {backup}\n")
 
     src = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True)
@@ -94,16 +110,39 @@ def main() -> int:
     have = {r[0] for r in dst.execute("SELECT unique_id FROM opportunities")}
     print(f"target already holds : {len(have)}")
 
-    where = " WHERE status = 'Active'" if args.active_only else ""
-    rows = src.execute(f"SELECT {','.join(shared)} FROM opportunities{where}").fetchall()
+    filters: list[str] = []
+    params: list[str] = []
     if args.active_only:
-        total_src = src.execute("SELECT count(*) FROM opportunities").fetchone()[0]
-        print(f"source offers        : {len(rows)} active "
-              f"(skipping {total_src - len(rows)} expired)")
-    else:
-        print(f"source offers        : {len(rows)} (including expired)")
+        filters.append("status = 'Active'")
+    if args.only_source:
+        filters.append("lower(source_website) = lower(?)")
+        params.append(args.only_source)
+    where = f" WHERE {' AND '.join(filters)}" if filters else ""
+    rows = src.execute(
+        f"SELECT {','.join(shared)} FROM opportunities{where}", params
+    ).fetchall()
+    scope = []
+    if args.active_only:
+        scope.append("active")
+    if args.only_source:
+        scope.append(f"source={args.only_source!r}")
+    print(f"source offers        : {len(rows)}"
+          f" ({', '.join(scope) if scope else 'all rows'})")
 
-    new = [tuple(r[c] for c in shared) for r in rows if r["unique_id"] not in have]
+    # The database constraint is the final guard, but dedupe the transfer batch
+    # here as well so the report is exact even when an old/source database lacks
+    # that constraint.  One unique_id can be inserted at most once.
+    seen = set(have)
+    new = []
+    duplicates = 0
+    for row in rows:
+        uid = row["unique_id"]
+        if uid in seen:
+            duplicates += 1
+            continue
+        seen.add(uid)
+        new.append(tuple(row[c] for c in shared))
+    print(f"duplicates skipped   : {duplicates}")
     print(f"genuinely new        : {len(new)}")
 
     if args.dry_run:

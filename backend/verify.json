@@ -1,0 +1,623 @@
+[
+ {
+  "source_key": "developmentaid",
+  "display_name": "DevelopmentAid",
+  "counts": {
+   "official_total": null,
+   "accessible": null,
+   "extracted": 36,
+   "unique": 35,
+   "duplicates": 1,
+   "saved": 35,
+   "excluded": {},
+   "excluded_total": 0
+  },
+  "pagination": {
+   "expected": null,
+   "fetched": 3
+  },
+  "completeness_pct": {
+   "deep_link": 100.0,
+   "deadline_present": 88.9,
+   "deadline_parses": 100.0,
+   "organization": 100.0
+  },
+  "coverage_pct": "unproven",
+  "coverage_basis": "the result count the open-tenders search reports for statuses=3 with no keyword \u2014 read from the page by a signed-in person, since the count is behind the same session as the data",
+  "operational": {
+   "runtime_s": 73.7,
+   "browsers_before": null,
+   "browsers_after": null,
+   "leaked_browsers": null,
+   "health_state": "unknown",
+   "outcome": ""
+  },
+  "access_limitations": "Login is reCAPTCHA-protected and their terms restrict scripted sign-in. The session is established by a person in a real browser and reused; it is never scripted, and credentials never enter the codebase. See docs/DEVELOPMENTAID_SESSION.md.",
+  "findings": [
+   {
+    "severity": "unproven",
+    "check": "browsers",
+    "detail": "no before/after browser count was taken, so a leak would not have been noticed. Take the baseline before the run."
+   },
+   {
+    "severity": "unproven",
+    "check": "coverage",
+    "detail": "no official total was supplied, so coverage is unproven and is NOT reported as a percentage. Obtain it from the result count the open-tenders search reports for statuses=3 with no keyword \u2014 read from the page by a signed-in person, since the count is behind the same session as the data."
+   },
+   {
+    "severity": "unproven",
+    "check": "precondition",
+    "detail": "this source requires a person-established DevelopmentAid session, and the run recorded nothing about it. Add a note saying which one was used."
+   }
+  ],
+  "passed": true,
+  "notes": [
+   "55,013 row(s) already stored under 'DevelopmentAid'"
+  ]
+ },
+ {
+  "source_key": "devex",
+  "display_name": "Devex",
+  "counts": {
+   "official_total": null,
+   "accessible": null,
+   "extracted": 0,
+   "unique": 0,
+   "duplicates": 0,
+   "saved": 0,
+   "excluded": {},
+   "excluded_total": 0
+  },
+  "pagination": {
+   "expected": null,
+   "fetched": 0
+  },
+  "completeness_pct": {
+   "deep_link": 0.0,
+   "deadline_present": 0.0,
+   "deadline_parses": 0.0,
+   "organization": 0.0
+  },
+  "coverage_pct": "unproven",
+  "coverage_basis": "no known method",
+  "operational": {
+   "runtime_s": 9.7,
+   "browsers_before": null,
+   "browsers_after": null,
+   "leaked_browsers": null,
+   "health_state": "unknown",
+   "outcome": ""
+  },
+  "access_limitations": "PAYWALLED. 11 runs, 0 pages fetched, 0 rows \u2014 all recorded as 'completed'. Nothing can be verified until access is resolved: a subscription, an official feed, or dropping the source.",
+  "findings": [
+   {
+    "severity": "blocking",
+    "check": "fetch",
+    "detail": "no page was fetched (outcome: unrecorded). Nothing below is measurable."
+   }
+  ],
+  "passed": false,
+  "notes": []
+ },
+ {
+  "source_key": "devnet",
+  "display_name": "DevNetJobsIndia",
+  "counts": {
+   "official_total": null,
+   "accessible": null,
+   "extracted": 32,
+   "unique": 32,
+   "duplicates": 0,
+   "saved": 21,
+   "excluded": {
+    "no usable link": 11
+   },
+   "excluded_total": 11
+  },
+  "pagination": {
+   "expected": null,
+   "fetched": 1
+  },
+  "completeness_pct": {
+   "deep_link": 65.6,
+   "deadline_present": 100.0,
+   "deadline_parses": 100.0,
+   "organization": 100.0
+  },
+  "coverage_pct": "unproven",
+  "coverage_basis": "the ASP.NET pager's last page number x the grid's page size, read off rfp_assignments.aspx",
+  "operational": {
+   "runtime_s": 23.6,
+   "browsers_before": null,
+   "browsers_after": null,
+   "leaked_browsers": null,
+   "health_state": "unknown",
+   "outcome": ""
+  },
+  "access_limitations": "None. Public ASP.NET WebForms site; pagination is a POST.",
+  "findings": [
+   {
+    "severity": "quality",
+    "check": "links",
+    "detail": "65.6% of rows link to a specific opportunity, below the 100% this source is held to. The rest open a listing."
+   },
+   {
+    "severity": "unproven",
+    "check": "browsers",
+    "detail": "no before/after browser count was taken, so a leak would not have been noticed. Take the baseline before the run."
+   },
+   {
+    "severity": "unproven",
+    "check": "coverage",
+    "detail": "no official total was supplied, so coverage is unproven and is NOT reported as a percentage. Obtain it from the ASP.NET pager's last page number x the grid's page size, read off rfp_assignments.aspx."
+   }
+  ],
+  "passed": false,
+  "notes": [
+   "184 row(s) already stored under 'DevNetJobsIndia'",
+   "the walk ended after 1 of the 3 page(s) allowed \u2014 either the source ran out, or it stopped early"
+  ]
+ },
+ {
+  "source_key": "fundsforngos",
+  "display_name": "FundsForNGOs",
+  "counts": {
+   "official_total": null,
+   "accessible": null,
+   "extracted": 150,
+   "unique": 150,
+   "duplicates": 0,
+   "saved": 134,
+   "excluded": {
+    "opportunity gate: no opportunity signal": 8,
+    "opportunity gate: a grant already awarded, not one being offered": 8
+   },
+   "excluded_total": 16
+  },
+  "pagination": {
+   "expected": null,
+   "fetched": 3
+  },
+  "completeness_pct": {
+   "deep_link": 100.0,
+   "deadline_present": 100.0,
+   "deadline_parses": 100.0,
+   "organization": 2.7
+  },
+  "coverage_pct": "unproven",
+  "coverage_basis": "the X-WP-Total response header on any /wp-json/wp/v2/posts request",
+  "operational": {
+   "runtime_s": 63.0,
+   "browsers_before": null,
+   "browsers_after": null,
+   "leaked_browsers": null,
+   "health_state": "unknown",
+   "outcome": ""
+  },
+  "access_limitations": "The HTML site shows bot-check interstitials; the open WordPress REST API is used instead. No login.",
+  "findings": [
+   {
+    "severity": "quality",
+    "check": "organization",
+    "detail": "2.7% of rows name the funder or procuring agency, below 40%."
+   },
+   {
+    "severity": "unproven",
+    "check": "browsers",
+    "detail": "no before/after browser count was taken, so a leak would not have been noticed. Take the baseline before the run."
+   },
+   {
+    "severity": "unproven",
+    "check": "coverage",
+    "detail": "no official total was supplied, so coverage is unproven and is NOT reported as a percentage. Obtain it from the X-WP-Total response header on any /wp-json/wp/v2/posts request."
+   }
+  ],
+  "passed": false,
+  "notes": [
+   "48,350 row(s) already stored under 'FundsForNGOs'"
+  ]
+ },
+ {
+  "source_key": "clean_air_fund",
+  "display_name": "Clean Air Fund",
+  "counts": {
+   "official_total": null,
+   "accessible": null,
+   "extracted": 0,
+   "unique": 0,
+   "duplicates": 0,
+   "saved": 0,
+   "excluded": {},
+   "excluded_total": 0
+  },
+  "pagination": {
+   "expected": null,
+   "fetched": 0
+  },
+  "completeness_pct": {
+   "deep_link": 0.0,
+   "deadline_present": 0.0,
+   "deadline_parses": 0.0,
+   "organization": 0.0
+  },
+  "coverage_pct": "unproven",
+  "coverage_basis": "a manual count of the entries on /what-we-do/our-grants/ \u2014 the page publishes no total",
+  "operational": {
+   "runtime_s": 3.7,
+   "browsers_before": null,
+   "browsers_after": null,
+   "leaked_browsers": null,
+   "health_state": "unknown",
+   "outcome": ""
+  },
+  "access_limitations": "A grants PAGE rather than an opportunity board. Much of what it lists is already-awarded grants, which are not open calls.",
+  "findings": [
+   {
+    "severity": "blocking",
+    "check": "fetch",
+    "detail": "no page was fetched (outcome: unrecorded). Nothing below is measurable."
+   }
+  ],
+  "passed": false,
+  "notes": []
+ },
+ {
+  "source_key": "world_bank",
+  "display_name": "World Bank",
+  "counts": {
+   "official_total": null,
+   "accessible": null,
+   "extracted": 87,
+   "unique": 86,
+   "duplicates": 1,
+   "saved": 83,
+   "excluded": {
+    "source type 'project' is excluded for this source": 3
+   },
+   "excluded_total": 3
+  },
+  "pagination": {
+   "expected": null,
+   "fetched": 3
+  },
+  "completeness_pct": {
+   "deep_link": 100.0,
+   "deadline_present": 96.6,
+   "deadline_parses": 100.0,
+   "organization": 100.0
+  },
+  "coverage_pct": "unproven",
+  "coverage_basis": "the API's own `total` field in any /api/v2/procnotices response",
+  "operational": {
+   "runtime_s": 7.5,
+   "browsers_before": null,
+   "browsers_after": null,
+   "leaked_browsers": null,
+   "health_state": "unknown",
+   "outcome": ""
+  },
+  "access_limitations": "None. Public JSON API, no login, no rate limit hit so far.",
+  "findings": [
+   {
+    "severity": "quality",
+    "check": "duplicates",
+    "detail": "1.1% of extracted rows repeat within the run, above 1%. Check that pagination advances rather than re-serving a page."
+   },
+   {
+    "severity": "unproven",
+    "check": "browsers",
+    "detail": "no before/after browser count was taken, so a leak would not have been noticed. Take the baseline before the run."
+   },
+   {
+    "severity": "unproven",
+    "check": "coverage",
+    "detail": "no official total was supplied, so coverage is unproven and is NOT reported as a percentage. Obtain it from the API's own `total` field in any /api/v2/procnotices response."
+   }
+  ],
+  "passed": false,
+  "notes": [
+   "81 row(s) already stored under 'World Bank'"
+  ]
+ },
+ {
+  "source_key": "adb_tenders",
+  "display_name": "ADB Tenders",
+  "counts": {
+   "official_total": null,
+   "accessible": null,
+   "extracted": 36,
+   "unique": 12,
+   "duplicates": 24,
+   "saved": 12,
+   "excluded": {},
+   "excluded_total": 0
+  },
+  "pagination": {
+   "expected": null,
+   "fetched": 3
+  },
+  "completeness_pct": {
+   "deep_link": 100.0,
+   "deadline_present": 100.0,
+   "deadline_parses": 100.0,
+   "organization": 100.0
+  },
+  "coverage_pct": "unproven",
+  "coverage_basis": "the result-count line the SearchStax listing renders above the first result (\"N results\")",
+  "operational": {
+   "runtime_s": 17.5,
+   "browsers_before": null,
+   "browsers_after": null,
+   "leaked_browsers": null,
+   "health_state": "unknown",
+   "outcome": ""
+  },
+  "access_limitations": "Client-rendered listing; needs a browser. No login.",
+  "findings": [
+   {
+    "severity": "quality",
+    "check": "duplicates",
+    "detail": "66.7% of extracted rows repeat within the run, above 5%. Check that pagination advances rather than re-serving a page."
+   },
+   {
+    "severity": "unproven",
+    "check": "browsers",
+    "detail": "no before/after browser count was taken, so a leak would not have been noticed. Take the baseline before the run."
+   },
+   {
+    "severity": "unproven",
+    "check": "coverage",
+    "detail": "no official total was supplied, so coverage is unproven and is NOT reported as a percentage. Obtain it from the result-count line the SearchStax listing renders above the first result (\"N results\")."
+   },
+   {
+    "severity": "unproven",
+    "check": "precondition",
+    "detail": "this source requires a working Chromium, and the run recorded nothing about it. Add a note saying which one was used."
+   }
+  ],
+  "passed": false,
+  "notes": [
+   "24 row(s) already stored under 'ADB Tenders'"
+  ]
+ },
+ {
+  "source_key": "undp_procurement",
+  "display_name": "UNDP Procurement",
+  "counts": {
+   "official_total": null,
+   "accessible": null,
+   "extracted": 568,
+   "unique": 568,
+   "duplicates": 0,
+   "saved": 562,
+   "excluded": {
+    "spam": 6
+   },
+   "excluded_total": 6
+  },
+  "pagination": {
+   "expected": null,
+   "fetched": 1
+  },
+  "completeness_pct": {
+   "deep_link": 100.0,
+   "deadline_present": 0.4,
+   "deadline_parses": 50.0,
+   "organization": 100.0
+  },
+  "coverage_pct": "unproven",
+  "coverage_basis": "the notice count procurement-notices.undp.org prints above the table",
+  "operational": {
+   "runtime_s": 175.9,
+   "browsers_before": null,
+   "browsers_after": null,
+   "leaked_browsers": null,
+   "health_state": "unknown",
+   "outcome": ""
+  },
+  "access_limitations": "Served by the GENERIC heuristic scraper, not a documented endpoint. Whether that is reliable enough is an open question \u2014 see the manifest note.",
+  "findings": [
+   {
+    "severity": "quality",
+    "check": "deadlines",
+    "detail": "50.0% of the deadline strings parse into a date, below 90%. Rows whose date never parses cannot expire."
+   },
+   {
+    "severity": "unproven",
+    "check": "browsers",
+    "detail": "no before/after browser count was taken, so a leak would not have been noticed. Take the baseline before the run."
+   },
+   {
+    "severity": "unproven",
+    "check": "coverage",
+    "detail": "no official total was supplied, so coverage is unproven and is NOT reported as a percentage. Obtain it from the notice count procurement-notices.undp.org prints above the table."
+   }
+  ],
+  "passed": false,
+  "notes": [
+   "1,274 row(s) already stored under 'UNDP Procurement'",
+   "the walk ended after 1 of the 3 page(s) allowed \u2014 either the source ran out, or it stopped early"
+  ]
+ },
+ {
+  "source_key": "un_partner_portal",
+  "display_name": "UN Partner Portal",
+  "counts": {
+   "official_total": null,
+   "accessible": null,
+   "extracted": 70,
+   "unique": 70,
+   "duplicates": 0,
+   "saved": 70,
+   "excluded": {},
+   "excluded_total": 0
+  },
+  "pagination": {
+   "expected": null,
+   "fetched": 2
+  },
+  "completeness_pct": {
+   "deep_link": 100.0,
+   "deadline_present": 100.0,
+   "deadline_parses": 100.0,
+   "organization": 100.0
+  },
+  "coverage_pct": "unproven",
+  "coverage_basis": "the `count` field in the /api/projects/open/ response",
+  "operational": {
+   "runtime_s": 17.8,
+   "browsers_before": null,
+   "browsers_after": null,
+   "leaked_browsers": null,
+   "health_state": "unknown",
+   "outcome": ""
+  },
+  "access_limitations": "Requires a signed-in session. Without one the API answers 403 and the correct outcome is AUTH_REQUIRED, never an empty source.",
+  "findings": [
+   {
+    "severity": "unproven",
+    "check": "browsers",
+    "detail": "no before/after browser count was taken, so a leak would not have been noticed. Take the baseline before the run."
+   },
+   {
+    "severity": "unproven",
+    "check": "coverage",
+    "detail": "no official total was supplied, so coverage is unproven and is NOT reported as a percentage. Obtain it from the `count` field in the /api/projects/open/ response."
+   },
+   {
+    "severity": "unproven",
+    "check": "precondition",
+    "detail": "this source requires a connected UNPP session, and the run recorded nothing about it. Add a note saying which one was used."
+   }
+  ],
+  "passed": true,
+  "notes": [
+   "77 row(s) already stored under 'UN Partner Portal'",
+   "the walk ended after 2 of the 3 page(s) allowed \u2014 either the source ran out, or it stopped early"
+  ]
+ },
+ {
+  "source_key": "ngobox",
+  "display_name": "NGOBOX",
+  "counts": {
+   "official_total": null,
+   "accessible": null,
+   "extracted": 17,
+   "unique": 17,
+   "duplicates": 0,
+   "saved": 17,
+   "excluded": {},
+   "excluded_total": 0
+  },
+  "pagination": {
+   "expected": null,
+   "fetched": 1
+  },
+  "completeness_pct": {
+   "deep_link": 100.0,
+   "deadline_present": 100.0,
+   "deadline_parses": 100.0,
+   "organization": 100.0
+  },
+  "coverage_pct": "unproven",
+  "coverage_basis": "the pager's last page number x the cards per page on grant_announcement_listing.php",
+  "operational": {
+   "runtime_s": 4.4,
+   "browsers_before": null,
+   "browsers_after": null,
+   "leaked_browsers": null,
+   "health_state": "unknown",
+   "outcome": ""
+  },
+  "access_limitations": "Serves stale cached pages to plain HTTP clients, so it is rendered through a browser. No login.",
+  "findings": [
+   {
+    "severity": "unproven",
+    "check": "browsers",
+    "detail": "no before/after browser count was taken, so a leak would not have been noticed. Take the baseline before the run."
+   },
+   {
+    "severity": "unproven",
+    "check": "coverage",
+    "detail": "no official total was supplied, so coverage is unproven and is NOT reported as a percentage. Obtain it from the pager's last page number x the cards per page on grant_announcement_listing.php."
+   },
+   {
+    "severity": "unproven",
+    "check": "precondition",
+    "detail": "this source requires a working Chromium, and the run recorded nothing about it. Add a note saying which one was used."
+   }
+  ],
+  "passed": true,
+  "notes": [
+   "26 row(s) already stored under 'NGOBOX'",
+   "the walk ended after 1 of the 3 page(s) allowed \u2014 either the source ran out, or it stopped early"
+  ]
+ },
+ {
+  "source_key": "bond",
+  "display_name": "Bond UK",
+  "counts": {
+   "official_total": null,
+   "accessible": null,
+   "extracted": 448,
+   "unique": 354,
+   "duplicates": 94,
+   "saved": 271,
+   "excluded": {
+    "no usable link": 34,
+    "opportunity gate: no opportunity signal": 12,
+    "opportunity gate: page type is never an opportunity": 35,
+    "opportunity gate: a grant already awarded, not one being offered": 2
+   },
+   "excluded_total": 83
+  },
+  "pagination": {
+   "expected": null,
+   "fetched": 1
+  },
+  "completeness_pct": {
+   "deep_link": 50.9,
+   "deadline_present": 94.6,
+   "deadline_parses": 100.0,
+   "organization": 100.0
+  },
+  "coverage_pct": "unproven",
+  "coverage_basis": "the listing's own result count on /funding-opportunities/",
+  "operational": {
+   "runtime_s": 150.5,
+   "browsers_before": null,
+   "browsers_after": null,
+   "leaked_browsers": null,
+   "health_state": "unknown",
+   "outcome": ""
+  },
+  "access_limitations": "None. Public listing.",
+  "findings": [
+   {
+    "severity": "quality",
+    "check": "links",
+    "detail": "50.9% of rows link to a specific opportunity, below the 90% this source is held to. The rest open a listing."
+   },
+   {
+    "severity": "quality",
+    "check": "duplicates",
+    "detail": "21.0% of extracted rows repeat within the run, above 5%. Check that pagination advances rather than re-serving a page."
+   },
+   {
+    "severity": "unproven",
+    "check": "browsers",
+    "detail": "no before/after browser count was taken, so a leak would not have been noticed. Take the baseline before the run."
+   },
+   {
+    "severity": "unproven",
+    "check": "coverage",
+    "detail": "no official total was supplied, so coverage is unproven and is NOT reported as a percentage. Obtain it from the listing's own result count on /funding-opportunities/."
+   }
+  ],
+  "passed": false,
+  "notes": [
+   "395 row(s) already stored under 'Bond UK'",
+   "the walk ended after 1 of the 3 page(s) allowed \u2014 either the source ran out, or it stopped early"
+  ]
+ }
+]
