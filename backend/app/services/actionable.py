@@ -72,7 +72,10 @@ CONFIDENCE_LEGACY = "legacy_assumed"    # backfilled; the original signal is gon
 CONFIDENCE_UNPARSEABLE = "unparseable"  # raw text was present, no date in it
 
 
-def application_today(tz_offset_minutes: int = 0) -> date:
+IST_OFFSET_MINUTES = 330
+
+
+def application_today(tz_offset_minutes: int | None = None) -> date:
     """"Today" for the purpose of "has this closed".
 
     A deadline is a local-time concept for the applicant, and the server runs
@@ -80,7 +83,8 @@ def application_today(tz_offset_minutes: int = 0) -> date:
     last few hours of an IST working day — precisely when someone is rushing to
     submit. The offset is configuration, not a guess at the viewer's location.
     """
-    return (datetime.now(timezone.utc) + timedelta(minutes=tz_offset_minutes)).date()
+    offset = IST_OFFSET_MINUTES if tz_offset_minutes is None else tz_offset_minutes
+    return (datetime.now(timezone.utc) + timedelta(minutes=offset)).date()
 
 
 # --------------------------------------------------------------- the predicate
@@ -155,6 +159,26 @@ def actionable_clause(today: date | None = None):
                 Opportunity.deadline.is_not(None),
                 Opportunity.deadline >= today,
             ),
+        ),
+    )
+
+
+def strict_actionable_clause(today: date | None = None):
+    """The ordinary-user definition of an active opportunity.
+
+    Administrative review still uses :func:`actionable_clause`, which admits a
+    source-confirmed rolling opportunity without a date.  The dashboard, export
+    and email surfaces are intentionally stricter: a user should only be shown
+    a call with a real closing date that has not passed in application time.
+    """
+    today = today or application_today()
+    return and_(
+        Opportunity.status == Status.ACTIVE,
+        Opportunity.deadline.is_not(None),
+        Opportunity.deadline >= today,
+        or_(
+            Opportunity.deadline_state.is_(None),
+            Opportunity.deadline_state != DeadlineState.UNKNOWN.value,
         ),
     )
 

@@ -212,6 +212,7 @@ Source states and what to do about each:
 | `never_produced` | Runs recorded, no row ever | parser or access problem — read `last_error_message` |
 | `failing` | 3+ consecutive unhealthy runs | read the outcome; `NO_FETCH` is access, `PARSE_ZERO` is the parser |
 | `unknown` | No run has recorded an outcome | it has not run since the outcome columns landed |
+| `disabled` | Held out of production on purpose | read the note — it is the manifest's own reason. Not a fault, and not something to debug |
 
 `CONFIRMED_EMPTY` is **healthy**. The source proved it has nothing to list.
 It keeps getting a cheap first-page check so the next opportunity is picked up
@@ -253,6 +254,46 @@ python scripts/check_scraper.py worldbank --pages 2
 pgrep -fc "chrome|chromium" || echo 0          # must match
 ```
 
+### 12b. Verifying a source against its contract
+
+`check_scraper.py` prints measurements and leaves you to judge them, so the
+answer changes with the reader. `verify_source.py` applies that source's
+thresholds and returns a non-zero exit code when it misses them — which is the
+difference between a report and a check.
+
+```bash
+python scripts/verify_source.py world_bank --pages 3
+python scripts/verify_source.py --all-priority --pages 3 --json verify.json
+```
+
+Nothing is written. Two flags carry the honesty rules:
+
+* `--official-total N` — the count the **source** reports. Without it the
+  report says `coverage: unproven` and names what would prove it; it never
+  divides our count by our count and prints 100%.
+* `--note "…"` — records a precondition, e.g. which DevelopmentAid session was
+  used. Without it that precondition is reported as unproven, because a
+  verification nobody can reproduce is not one.
+
+Which sources are held to what, and why, is `docs/SOURCE_VERIFICATION.md`.
+Do not start a full all-source production scrape until the eleven priority
+sources pass.
+
+### 12c. Sources held out of production
+
+A source with `production_enabled=False` in `services/source_manifest.py` is
+skipped by an all-source run, and the skip is logged with the manifest's own
+reason. Naming it explicitly still runs it, so testing a fix is never blocked
+by the flag:
+
+```bash
+python scripts/verify_source.py devex --pages 1      # runs; the flag is not a lock
+```
+
+Today that is Devex alone, and `test_production_gate.py` asserts it — so
+switching another one off is a visible decision rather than something noticed a
+month later.
+
 ---
 
 ## 13. Read-only diagnostics
@@ -270,6 +311,7 @@ python scripts/project_rows_audit.py                 # stored rows that are proj
 python scripts/listing_link_audit.py                 # rows linking to their own index page
 python scripts/deadline_convention_audit.py          # day/month inversion by source
 python scripts/gold_dataset.py --status              # is there enough labelled data to compare models
+python scripts/verify_source.py --all-priority --pages 3   # do the 11 meet their contracts
 ```
 
 Add `--apply` (or `--archive`) only after reading the dry run.
@@ -287,4 +329,8 @@ Add `--apply` (or `--archive`) only after reading the dry run.
   refuses automated access, the answer is an official API, a licensed feed, or
   dropping the source.
 * **Never** script a login for a site whose terms forbid it. Sessions are
-  connected by a person in a real browser.
+  connected by a person in a real browser. For DevelopmentAid specifically —
+  the one source this applies to — the whole procedure is
+  `docs/DEVELOPMENTAID_SESSION.md`.
+* **Never** report a coverage figure that was not divided by a source-reported
+  total. `unproven` is an acceptable answer; an invented percentage is not.

@@ -131,14 +131,11 @@ export default function App() {
                                 facets={facets} readOnly={readOnly} />
           </div>
           <div className="flex w-full flex-col gap-6 lg:w-80 lg:shrink-0">
-            {/* Above the admin panels on purpose: an unassessed row is
-                invisible everywhere else, so if this card is below the fold it
-                may as well not exist. It hides itself when the queue is
-                empty, and it is not admin-gated — deciding whether a call is
-                still open is the same class of act as approving one. */}
-            <ReviewQueueCard readOnly={readOnly} />
-            {/* Both hide themselves when there is nothing to do. */}
-            <UnclassifiedCard readOnly={readOnly} />
+            {/* Administrative review queues. Hiding the cards is paired with
+                backend authorization, so an ordinary user cannot bypass the
+                UI and call their endpoints directly. */}
+            {isAdmin && <ReviewQueueCard readOnly={readOnly} />}
+            {isAdmin && <UnclassifiedCard readOnly={readOnly} />}
             <ScraperHealthCard isAdmin={isAdmin} />
             {isAdmin && <ScraperPanel sources={sources} progress={progress} />}
             {/* Admin-only: this panel sets the send time and reminder days for

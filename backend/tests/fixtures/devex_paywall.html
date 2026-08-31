@@ -1,0 +1,23 @@
+<!-- SYNTHETIC. This is NOT a listing fixture: Devex is paywalled and the
+     scraper has fetched zero pages in 11 runs, every one recorded as
+     'completed'. The fixture that matters for this source is the wall itself,
+     so the outcome classifier can be tested for saying AUTH_REQUIRED instead
+     of reporting an empty source.
+
+     Contains no credentials, no cookies and no subscriber content — this is
+     what an anonymous visitor sees. -->
+<html>
+<head><title>Sign in to continue | Devex</title></head>
+<body>
+  <div class="paywall">
+    <h1>This content is for Devex Pro members</h1>
+    <p>Sign in or start your free trial to read funding opportunities.</p>
+    <form action="/login" method="post">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" autocomplete="username">
+      <button type="submit">Sign in</button>
+    </form>
+    <a href="/pro">See membership options</a>
+  </div>
+</body>
+</html>

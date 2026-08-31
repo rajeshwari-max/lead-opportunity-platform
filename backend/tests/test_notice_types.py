@@ -163,15 +163,15 @@ def test_the_adb_scraper_hands_over_the_source_s_own_fields():
     assert "source_status=" in src
 
 
-def test_a_world_bank_row_titled_only_from_the_project_name_is_marked_a_project():
-    """`project_name` stayed in the title chain — dropping it would silently
-    lose rows that may be real notices — but a row that had nothing else is
-    marked so the CONTRACT decides, visibly, rather than the parser deciding
-    quietly."""
-    import inspect
+def test_a_world_bank_row_titled_only_from_project_name_is_rejected():
+    """A project name is context, not evidence that bids are being accepted."""
+    import json
 
     from app.scrapers.worldbank import WorldBankScraper
 
-    src = inspect.getsource(WorldBankScraper)
-    assert "titled_from_project" in src
-    assert "RecordType.PROJECT.value" in src
+    scraper = WorldBankScraper()
+    raw = json.dumps({"procnotices": [{
+        "id": "project-only", "project_name": "Rural roads programme",
+    }]})
+    assert scraper.parse_listing(raw, "") == []
+    assert scraper.rejection_counts()["no evidence of a procurement notice"] == 1

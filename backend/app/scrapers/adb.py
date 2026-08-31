@@ -29,6 +29,7 @@ so there is nothing for a plain HTTP parser to read.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 import threading
@@ -95,6 +96,11 @@ SEARCH_URL = (
 STATUS_FACET = "Active"
 
 _PAGE_PARAM = re.compile(r"(searchstax(?:%5B|\[)page(?:%5D|\])=)(\d+)", re.I)
+
+# The container the results live in. Named once, because the pagination guard
+# and the per-page count both have to agree with the parser about what a
+# "result" is — and they did not.
+RESULT_BLOCK = "div.searchstax-search-result"
 # "1 - 12 of 51013" in the pagination bar. The only place the result count is
 # published, and what tells the walk when to stop rather than guessing.
 _TOTAL = re.compile(r"of\s+([\d,]+)", re.I)
@@ -379,7 +385,7 @@ class AdbTendersScraper(BaseScraper):
                     if stop_event.is_set() or done.is_set():
                         return
                     queue.put(page.content())
-                    before = page.inner_text("body")[:4000]
+                    before = self._results_signature(page.content())
                     if n >= pages:
                         log.info("[adb] reached page %s of %s — done", n, pages)
                         return
@@ -389,9 +395,35 @@ class AdbTendersScraper(BaseScraper):
                     # clicking would make — minus the DOM archaeology of finding
                     # a control whose class names change between ADB deploys.
                     if self._goto_page(page, search_url, n + 1):
-                        if page.inner_text("body")[:4000] == before:
-                            log.info("[adb] page %s returned the same results as "
-                                     "page %s — end of the list", n + 1, n)
+                        if self._results_signature(page.content()) == before:
+                            # Same RESULTS, which is not the same as the same
+                            # page. The previous version compared
+                            # page.inner_text("body")[:4000], and the first four
+                            # thousand characters of this page are header, nav
+                            # and facet counts — chrome that changes between
+                            # navigations while the twelve result rows stay
+                            # identical. So the guard passed, the walk carried
+                            # on, and a 2026-08-30 verification run recorded 36
+                            # rows extracted over three pages of which 12 were
+                            # unique: the same twelve, three times.
+                            #
+                            # That is the World Bank `os={offset}` failure in a
+                            # different source — a paging parameter that is
+                            # present, accepted, and does nothing — and it is
+                            # the shape that looks most like success.
+                            if n == 1:
+                                log.warning(
+                                    "[adb] page 2 returned the SAME %s result(s) "
+                                    "as page 1. searchstax[page] is not paging "
+                                    "this widget on a fresh navigation. The "
+                                    "walk is stopping with one page rather than "
+                                    "yielding the same rows repeatedly — but "
+                                    "this is a pagination defect, not the end "
+                                    "of a %s-record list.",
+                                    per_page, f"{total:,}" if total else "?")
+                            else:
+                                log.info("[adb] page %s returned the same results "
+                                         "as page %s — end of the list", n + 1, n)
                             return
                         if n % 10 == 0:
                             log.info("[adb] page %s of %s", n, pages)
@@ -450,6 +482,36 @@ class AdbTendersScraper(BaseScraper):
                 pass
             return not cls._blocked(page)
         return cls._goto_search(page, page_nr)
+
+    @staticmethod
+    def _results_signature(html: str) -> str:
+        """A fingerprint of the RESULT ROWS on a page, and nothing else.
+
+        Pure and takes HTML rather than a Playwright page, so the guard that
+        decides whether pagination advanced can be tested without a browser —
+        which is why the previous guard's defect survived: nothing could
+        exercise it.
+
+        Built from each result block's link plus its first line of text. The
+        link alone would be enough on a well-behaved listing, but a widget that
+        re-renders the same rows with rotated tracking parameters would defeat
+        it, and the text would not.
+
+        An empty result set returns "" — the caller must treat "no results" as
+        its own case, not as "the same as last time".
+        """
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html or "", "lxml")
+        parts: list[str] = []
+        for block in soup.select(RESULT_BLOCK):
+            a = block.find("a", href=True)
+            href = (a["href"].split("?")[0] if a else "")
+            first_line = block.get_text(" ", strip=True)[:120]
+            parts.append(f"{href}|{first_line}")
+        if not parts:
+            return ""
+        return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 
     @staticmethod
     def _read_total(page) -> int:

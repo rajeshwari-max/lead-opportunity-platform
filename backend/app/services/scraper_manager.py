@@ -32,7 +32,11 @@ from app.services.actionable import (
     classify_deadline,
 )
 from app.services.opportunity_gate import is_opportunity
-from app.services.source_manifest import contract_for, record_is_in_scope
+from app.services.source_manifest import (
+    contract_for,
+    disabled_sources,
+    record_is_in_scope,
+)
 from app.services.deadline_audit import is_sentinel
 from app.services.spam import is_spam
 from app.services.organization import extract_organization, tidy_organization
@@ -94,6 +98,33 @@ class ScraperManager:
         # cross-process lease has to be taken — see services/run_lock.py for
         # why max_instances=1 is not sufficient.
         scrapers = get_scrapers(sources or None)
+        # A source marked production_enabled=False must not run in a scheduled
+        # all-source scrape.
+        #
+        # That field, and disabled_sources() beside it, were written in the
+        # previous round and then read by NOTHING — a grep across the whole
+        # backend found no caller outside the module that defines them. So
+        # Devex, whose manifest says in as many words "Disabled until the access
+        # question is answered", ran on every scheduled scrape exactly as
+        # before, failed to fetch a single page exactly as before, and recorded
+        # 'completed' exactly as before. A disable switch nobody reads is worse
+        # than none: it makes people believe the source is off.
+        #
+        # Naming a source explicitly still runs it. An operator testing a fix
+        # for the very defect that disabled it must not be blocked by the flag,
+        # and `sources` is only ever non-empty because a person typed it.
+        if not sources:
+            blocked = disabled_sources(s.name for s in scrapers)
+            if blocked:
+                scrapers = [s for s in scrapers if s.name not in blocked]
+                for key, why in sorted(blocked.items()):
+                    self._log(f"Skipping {key} — held out of production: "
+                              f"{why.splitlines()[0][:160]}")
+        if not scrapers:
+            raise RuntimeError(
+                "Every requested source is held out of production. Name one "
+                "explicitly to override, or clear production_enabled in "
+                "services/source_manifest.py.")
         try:
             self._lease = run_lock.acquire(
                 label=f"{len(scrapers)} source(s)"

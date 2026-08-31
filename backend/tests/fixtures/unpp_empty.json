@@ -1,0 +1,7 @@
+{
+  "_comment": "SYNTHETIC. count:0 with the open filter applied is POSITIVE proof of emptiness, which is what CONFIRMED_EMPTY requires and what a parser returning zero can never supply.",
+  "count": 0,
+  "next": null,
+  "previous": null,
+  "results": []
+}

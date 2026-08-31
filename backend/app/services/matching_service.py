@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.database.models import Category, Opportunity, SentLog, Status, TeamMember
 from app.services import geo_routing, relevance
-from app.services.actionable import actionable_clause
+from app.services.actionable import strict_actionable_clause
 from app.services.vertical_names import normalize_vertical_csv
 from app.services.verticals import VERTICALS
 
@@ -45,7 +45,7 @@ class MatchingService:
         # Was a third copy of the "still open" rule, and it had drifted from
         # the other two: `deadline IS NULL` counted as open, so every row whose
         # date could not be parsed was emailed as a live opportunity.
-        stmt = select(Opportunity).where(actionable_clause())
+        stmt = select(Opportunity).where(strict_actionable_clause())
 
         keywords = _csv(member.keywords)
         if keywords:

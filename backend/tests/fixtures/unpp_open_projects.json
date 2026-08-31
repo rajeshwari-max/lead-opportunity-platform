@@ -1,0 +1,38 @@
+{
+  "_comment": "SYNTHETIC. Shaped from the keys unpp.py::_rows_to_items reads. No session, cookie or partner-account data. The count field is what coverage is measured against.",
+  "count": 3,
+  "next": "https://www.unpartnerportal.org/api/projects/open/?page=2&page_size=50",
+  "previous": null,
+  "results": [
+    {
+      "id": 84120,
+      "title": "Call for Expression of Interest: Nutrition Support in Displacement Sites",
+      "country_code": "SS",
+      "specializations": [{"name": "Nutrition"}, {"name": "Health"}],
+      "agency": {"name": "UNICEF"},
+      "deadline_date": "2027-02-28",
+      "start_date": "2027-04-01",
+      "status": "Ope"
+    },
+    {
+      "id": 84121,
+      "title": "CFEI: Community-Based Protection Monitoring",
+      "country_code": "JO",
+      "specializations": [{"name": "Protection"}],
+      "agency": {"name": "UNHCR"},
+      "deadline_date": "2027-03-10",
+      "start_date": "",
+      "status": "Ope"
+    },
+    {
+      "id": 84122,
+      "title": "Expression of Interest: WASH Infrastructure Rehabilitation",
+      "country_code": "BD",
+      "specializations": [{"name": "WASH"}],
+      "agency": {"name": "UNOPS"},
+      "deadline_date": "",
+      "start_date": "2027-05-01",
+      "status": "Ope"
+    }
+  ]
+}

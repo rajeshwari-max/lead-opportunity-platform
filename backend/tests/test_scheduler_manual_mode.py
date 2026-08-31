@@ -98,9 +98,14 @@ def test_restart_does_not_start_a_scrape_by_default(sched, monkeypatch):
 def test_catchup_runs_only_when_explicitly_enabled(sched, monkeypatch):
     import asyncio
 
-    from app.core.config import settings
+    # Patch the exact settings object held by scheduler.py. Several earlier
+    # tests reload app.core.config to point at a temporary database, so patching
+    # the newly reloaded module can otherwise leave this already-imported
+    # scheduler holding a different Settings instance in a full-suite run.
+    from app.services import scheduler as scheduler_module
 
-    monkeypatch.setattr(settings, "scheduler_catchup_on_restart", True)
+    monkeypatch.setattr(
+        scheduler_module.settings, "scheduler_catchup_on_restart", True)
     created: list[object] = []
     monkeypatch.setattr(asyncio, "create_task", lambda coro: created.append(coro))
     monkeypatch.setattr(sched, "_scrape_all", lambda: "coro")

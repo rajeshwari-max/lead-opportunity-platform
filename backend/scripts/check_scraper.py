@@ -71,13 +71,19 @@ async def run(scraper, pages: int, timeout: float):
 
     async def walk():
         nonlocal page_count
-        async for batch in scraper.crawl(stop, pause, progress):
-            page_count += 1
-            collected.extend(batch)
-            print(f"  .. page {page_count}: {len(batch)} item(s)", flush=True)
-            if page_count >= pages:
-                stop.set()
-                break
+        iterator = scraper.crawl(stop, pause, progress)
+        try:
+            async for batch in iterator:
+                page_count += 1
+                collected.extend(batch)
+                print(f"  .. page {page_count}: {len(batch)} item(s)", flush=True)
+                if page_count >= pages:
+                    stop.set()
+                    break
+        finally:
+            closer = getattr(iterator, "aclose", None)
+            if closer is not None:
+                await closer()
 
     try:
         await asyncio.wait_for(walk(), timeout=timeout)

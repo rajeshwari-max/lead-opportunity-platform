@@ -213,7 +213,15 @@ def source_health(
         total, last_saved = saved.get(display, saved.get(key, (0, None)))
         days = (now - last_saved).days if last_saved else None
 
-        if total == 0:
+        # Checked FIRST, because a source held out of production will also look
+        # stale and never_produced — and reporting it that way sends someone to
+        # debug a scraper that is switched off on purpose. "Why is Devex stale?"
+        # has a one-word answer and the health page should give it.
+        if not contract.production_enabled:
+            state = "disabled"
+            note = (contract.known_defect or contract.owner_note
+                    or "held out of production").splitlines()[0]
+        elif total == 0:
             state = "never_produced"
             note = (f"{len(runs)} run(s) recorded and no row ever saved. Before "
                     f"outcomes were captured this looked identical to success.")

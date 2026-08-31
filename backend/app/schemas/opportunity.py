@@ -151,6 +151,10 @@ class OpportunityFilters(BaseModel):
     # unclassified row is one nobody owns, so it is noise in the working view.
     # A toggle rather than a deletion — many are real, just thin on text.
     has_vertical: bool = True
+    # Administrative opt-in for rolling and undated rows. Ordinary dashboard,
+    # export and email requests leave this false and require a real future (or
+    # today) deadline.
+    include_undated: bool = False
     page: int = 1
     page_size: int = 25
     sort_by: str = "deadline"

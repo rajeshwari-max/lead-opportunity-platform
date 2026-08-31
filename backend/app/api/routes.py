@@ -169,6 +169,7 @@ def require_writable() -> None:
 
 
 def filters_dep(
+    request: Request,
     categories: list[str] = Query(default=[]),
     verticals: list[str] = Query(default=[]),
     countries: list[str] = Query(default=[]),
@@ -188,15 +189,22 @@ def filters_dep(
     # was no way to send a value. Defaults match the model.
     english_only: bool = True,
     has_vertical: bool = True,
+    include_undated: bool = False,
     page: int = 1,
     page_size: int = 25,
     sort_by: str = "deadline",
     sort_dir: str = "asc",
 ) -> OpportunityFilters:
+    if include_undated:
+        # This flag deliberately widens the ordinary Active rule. Keep the
+        # administrative escape hatch without giving users a query-string
+        # bypass around the hidden review queue.
+        require_admin(request)
     return OpportunityFilters(
         archived=archived, new_today=new_today, approved=approved,
         work_type=work_type, study_type=study_type,
         english_only=english_only, has_vertical=has_vertical,
+        include_undated=include_undated,
         categories=categories, verticals=verticals, countries=countries, regions=regions,
         sources=sources, organizations=organizations, deadline_before=deadline_before,
         deadline_after=deadline_after, search=search, page=page, page_size=page_size,
@@ -466,7 +474,7 @@ def health() -> dict[str, str]:
 # archive by expired_clause(). "Held for review" and "silently lost" look
 # identical until something can list them. See services/review_queue.py.
 
-@router.get("/review-queue")
+@router.get("/review-queue", dependencies=[Depends(require_admin)])
 def get_review_queue(
     limit: int = 50,
     offset: int = 0,
@@ -535,7 +543,7 @@ def unclassified_query(
         sort_by=sort_by, sort_dir=sort_dir)
 
 
-@router.get("/opportunities/unclassified")
+@router.get("/opportunities/unclassified", dependencies=[Depends(require_admin)])
 def get_unclassified(
     q: vertical_assignment.UnclassifiedQuery = Depends(unclassified_query),
     db: Session = Depends(get_db),
@@ -553,7 +561,8 @@ def get_unclassified(
     return page
 
 
-@router.get("/opportunities/unclassified/ids")
+@router.get("/opportunities/unclassified/ids",
+            dependencies=[Depends(require_admin)])
 def get_unclassified_ids(
     q: vertical_assignment.UnclassifiedQuery = Depends(unclassified_query),
     db: Session = Depends(get_db),
@@ -575,7 +584,7 @@ def get_unclassified_ids(
 
 
 @router.post("/opportunities/verticals/bulk",
-             dependencies=[Depends(require_writable)])
+             dependencies=[Depends(require_writable), Depends(require_admin)])
 def bulk_assign_verticals(
     body: BulkVerticalsIn,
     request: Request,
@@ -604,7 +613,7 @@ def bulk_assign_verticals(
 
 
 @router.post("/review-queue/{opportunity_id}",
-             dependencies=[Depends(require_writable)])
+             dependencies=[Depends(require_writable), Depends(require_admin)])
 def decide_review_item(
     opportunity_id: int,
     body: ReviewDecisionIn,
@@ -613,9 +622,9 @@ def decide_review_item(
 ) -> dict:
     """Record a person's judgement about one row's closing date.
 
-    Not admin-gated: deciding whether a call is still open is the same class of
-    act as approving one, which any signed-in user may do. It is gated on
-    require_writable because the read-only mirror must never write.
+    This was originally available to every signed-in user. It is now an
+    administrative review decision: ordinary users neither see this queue nor
+    have a direct API route around the hidden panel.
     """
     from app.core.auth import COOKIE_NAME, current_user
 

@@ -1,0 +1,47 @@
+{
+  "_comment": "SYNTHETIC. Shaped from the field names developmentaid.py::_raw_from_item reads, not captured from the site. Contains no session, cookie or account data. Replace with a sanitized real capture the first time a signed-in run succeeds.",
+  "total": 4,
+  "items": [
+    {
+      "id": 118345,
+      "title": "Consultancy: Baseline Survey for Rural Water Supply Programme",
+      "status": "Open",
+      "deadline": "2027-03-15",
+      "locations": [{"name": "Kenya"}],
+      "sectors": [{"name": "Water & Sanitation"}],
+      "abbreviatedDonorNames": "EU",
+      "donorNames": "European Commission",
+      "donorIds": [118345, 118364],
+      "budget": 250000,
+      "url": "/tenders/view/118345"
+    },
+    {
+      "Id": 118401,
+      "title": "Framework Contract for Monitoring and Evaluation Services",
+      "status": "Open",
+      "deadline": "9999-12-31",
+      "locations": [{"name": "Global"}],
+      "sectors": [{"name": "Monitoring & Evaluation"}],
+      "donorIds": [990001],
+      "fundingAgencyName": "World Food Programme"
+    },
+    {
+      "id": 118500,
+      "title": "Grant: Community Health Worker Training Fund",
+      "status": "Open",
+      "closingDate": "2027-01-09",
+      "countryName": "Nepal",
+      "sector": "Health",
+      "donors": [{"name": "Bill & Melinda Gates Foundation"}],
+      "amount": "USD 1,200,000"
+    },
+    {
+      "id": 117900,
+      "title": "Supply of Laboratory Equipment - Lot 3",
+      "status": "Closed",
+      "deadline": "2026-02-01",
+      "locations": [{"name": "Uganda"}],
+      "donorIds": [4455]
+    }
+  ]
+}

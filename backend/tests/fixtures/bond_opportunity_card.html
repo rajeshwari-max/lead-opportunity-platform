@@ -1,0 +1,34 @@
+<!-- SYNTHETIC. Shaped from the selectors bond.py documents
+     (article.opportunity-item, .opportunity-item__title, the dl/dt/dd meta
+     block, .opportunity-item__link a). Public listing markup only.
+
+     The SECOND card deliberately has no .opportunity-item__link. That is the
+     shape that makes bond.py fall back to start_url + "#post-NNN" — a link
+     is_usable_link() accepts and link_kind() calls "listing", so the row is
+     stored and opens the index the reader came from. -->
+<div class="facetwp-template">
+  <article class="opportunity-item" id="post-90211">
+    <h3 class="opportunity-item__title">Wellcome Trust Climate and Health Award</h3>
+    <dl>
+      <dt>Location</dt><dd>Worldwide</dd>
+      <dt>Grant size</dt><dd>500</dd>
+      <dt>Closing date</dt><dd>31 January 2027</dd>
+    </dl>
+    <div class="opportunity-item__content">
+      <p>Funding for research partnerships examining the health impacts of climate change in low- and middle-income countries, with a strong preference for locally led consortia.</p>
+    </div>
+    <div class="js-eligibility-content">Open to registered charities and research institutions headquartered outside the UK.</div>
+    <div class="opportunity-item__link"><a href="https://wellcome.org/grant-funding/schemes/climate-and-health-award">Apply</a></div>
+  </article>
+  <article class="opportunity-item" id="post-90212">
+    <h3 class="opportunity-item__title">Tudor Trust Core Costs Fund</h3>
+    <dl>
+      <dt>Location</dt><dd>United Kingdom</dd>
+      <dt>Closing date</dt><dd>Ongoing</dd>
+    </dl>
+    <div class="opportunity-item__content">
+      <p>Unrestricted core funding for smaller organisations working with people at the margins of society, awarded on a rolling basis throughout the year.</p>
+    </div>
+  </article>
+  <button class="facetwp-load-more">Load more</button>
+</div>

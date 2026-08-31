@@ -144,7 +144,9 @@ def _c(**kw) -> SourceContract:
 MANIFESTS: dict[str, SourceContract] = {
     "worldbank": _c(
         key="worldbank", display_name="World Bank",
-        listing_url="https://search.worldbank.org/api/v2/procnotices",
+        # Human-facing canonical source. The scraper observes the first-party
+        # data request made by this page instead of assuming an API endpoint.
+        listing_url="https://projects.worldbank.org/en/projects-operations/opportunities",
         expected_types=(RecordType.TENDER, RecordType.RFP, RecordType.EOI,
                         RecordType.ITB, RecordType.CONSULTANCY),
         # The feed is MOSTLY awards. Excluding them by title keyword fails —
@@ -205,6 +207,20 @@ MANIFESTS: dict[str, SourceContract] = {
         deadline_format="dayfirst",
         scope_status=ScopeStatus.CONFIRMED,
         owner_note="Active tender and procurement notices only.",
+        known_defect=(
+            "PAGINATION DID NOT ADVANCE. The 2026-08-30 verification run walked "
+            "three pages and got 36 rows of which 12 were distinct — the same "
+            "twelve, three times. searchstax[page]=N is a parameter the widget "
+            "accepts and ignores on a fresh navigation, exactly like World "
+            "Bank's os={offset}. Only 24 rows have ever been stored, which is "
+            "what one page of this source looks like. The same-results guard "
+            "now compares the RESULT ROWS instead of the first 4,000 characters "
+            "of body text (header, nav and facet counts, which do change), so "
+            "the walk stops and says so — but stopping is not paging. If page 2 "
+            "still repeats page 1, the fix is to click the pager in the live "
+            "page rather than re-navigate, the same reasoning that made "
+            "_select_status_facet tick the box instead of building a URL."
+        ),
     ),
     "undp_procurement": _c(
         key="undp_procurement", display_name="UNDP Procurement",
@@ -217,6 +233,19 @@ MANIFESTS: dict[str, SourceContract] = {
             "Procurement notices and open opportunities only. Currently served by "
             "the GENERIC heuristic scraper — whether that is reliable enough or "
             "needs a documented API scraper is an open question, not a settled one."
+        ),
+        known_defect=(
+            "THE OPEN QUESTION ABOVE IS NOW ANSWERED, AND THE ANSWER IS NO. The "
+            "2026-08-30 verification run took 568 rows off a single page and "
+            "0.4% of them carried a deadline string — two rows out of 568, of "
+            "which one parsed. This is a procurement notice board: essentially "
+            "every notice has a closing date. The generic heuristic reads the "
+            "block around each anchor, and UNDP puts the deadline in its own "
+            "table cell, so the date is never seen. 562 of those rows would "
+            "have been stored, every one of them deadline-less and therefore in "
+            "the UNKNOWN state, which never expires on its own. 1,274 rows are "
+            "already stored under this source. It needs a bespoke scraper that "
+            "reads the notice table by column, not a wider heuristic."
         ),
     ),
     "devex": _c(
@@ -263,6 +292,73 @@ MANIFESTS: dict[str, SourceContract] = {
         deadline_format="dayfirst",
         scope_status=ScopeStatus.CONFIRMED,
     ),
+    "bond": _c(
+        key="bond", display_name="Bond UK",
+        listing_url="https://www.bond.org.uk/funding-opportunities/",
+        expected_types=(RecordType.GRANT, RecordType.CALL_FOR_PROPOSALS),
+        excluded_types=(RecordType.NEWS, RecordType.JOB, RecordType.ORGANISATION),
+        # The cards print "Closing date: 31 January 2027" or "Ongoing"; both are
+        # unambiguous, so no day/month question arises.
+        deadline_format="dayfirst",
+        curated=True,
+        scope_status=ScopeStatus.CONFIRMED,
+        owner_note=(
+            "A curated directory of funding opportunities for UK NGOs. Every "
+            "card is a funder's open call, so rows are exempt from the "
+            "funding-vocabulary test in opportunity_gate.py."
+        ),
+        known_defect=(
+            "A card with no apply link is stored pointing at the listing page "
+            "with an anchor (start_url + '#post-NNN'). is_usable_link() accepts "
+            "that, so the row is NOT dropped — but link_kind() calls it "
+            "'listing', and the reader lands on the index they came from. This "
+            "is the same class of defect that produced DevNetJobsIndia's 86 "
+            "index-linked rows. Measure the share with "
+            "scripts/verify_source.py bond, which holds this source to 90% "
+            "deep links. MEASURED 2026-08-30: 50.9%. Half of what this source "
+            "puts on the dashboard opens the index it was scraped from. "
+            "Separately, the same run extracted 448 rows from ONE page of which "
+            "354 were distinct — 94 repeats with no pagination involved, so the "
+            "parser is reading some cards twice (most likely the rendered "
+            "article path and the headings fallback both firing). 83 more rows "
+            "were dropped by the gates, 35 of them as 'page type is never an "
+            "opportunity'."
+        ),
+    ),
+    "clean_air_fund": _c(
+        key="clean_air_fund", display_name="Clean Air Fund",
+        listing_url="https://www.cleanairfund.org/what-we-do/our-grants/",
+        expected_types=(RecordType.GRANT, RecordType.CALL_FOR_PROPOSALS),
+        # This is the whole reason this source needed a manifest. The page is
+        # titled "Our grants" and most of what it lists is money ALREADY GIVEN
+        # — a portfolio, not a call board. Those records are contract awards in
+        # everything but name, and nobody can apply to them.
+        excluded_types=(RecordType.CONTRACT_AWARD, RecordType.PROJECT,
+                        RecordType.NEWS, RecordType.ORGANISATION),
+        deadline_format="dayfirst",
+        # NOT curated: unlike NGOBOX or UNDP, this page is not a notice board,
+        # so a row DOES have to look like an open call to be stored.
+        curated=False,
+        scope_status=ScopeStatus.CONFIRMED,
+        owner_note=(
+            "Open calls only. The grants page is largely a portfolio of awards "
+            "already made; those are excluded. Served by the GENERIC heuristic "
+            "scraper from sources.json with no selectors configured, so what it "
+            "extracts is whatever the heuristic finds — verify before trusting."
+        ),
+        known_defect=(
+            "FETCHES NOTHING. The 2026-08-30 verification run got 0 pages in "
+            "3.7 seconds — too fast to be a timeout, so the request failed "
+            "outright rather than being slow or blocked. No login is involved, "
+            "so this is a URL, a redirect or a status code, not access. The "
+            "configured listing is "
+            "https://www.cleanairfund.org/what-we-do/our-grants/ and the most "
+            "likely cause is that it has moved. Diagnose with "
+            "'python scripts/check_scraper.py clean_air_fund --pages 1' and "
+            "read the HTTP status and final URL in the log; "
+            "scripts/find_listing_url.py finds the new path if it moved."
+        ),
+    ),
     "fundsforngos": _c(
         key="fundsforngos", display_name="FundsForNGOs",
         expected_types=(RecordType.GRANT, RecordType.CALL_FOR_PROPOSALS),
@@ -277,6 +373,21 @@ MANIFESTS: dict[str, SourceContract] = {
             "deadlines on nothing. Settle it with "
             "scripts/deadline_convention_audit.py --source FundsForNGOs, which "
             "measures the day/month distribution of its ambiguous dates."
+        ),
+        known_defect=(
+            "THE FUNDER IS ALMOST NEVER NAMED. The 2026-08-30 verification run "
+            "found an organisation on 2.7% of 150 rows — four of them. The "
+            "WordPress record has no funder field, so the name has to come out "
+            "of the post's prose via extract_organization(), and on this "
+            "source's phrasing it almost never does. 48,350 rows — 45% of the "
+            "database — are stored under this source, so the Organization "
+            "column and its filter are effectively empty for nearly half of "
+            "everything. Separately: an all-numeric closing date "
+            "(09-01-2027) is not extracted at all, because _DEADLINE requires "
+            "three or more word characters in the month position. Fix the date "
+            "convention FIRST, then the pattern — widening it before the "
+            "convention is settled decides the meaning of those dates by "
+            "accident."
         ),
     ),
 }

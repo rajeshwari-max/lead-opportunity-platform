@@ -19,7 +19,11 @@ from app.schemas.opportunity import (
     PaginatedOpportunities,
     StatsOut,
 )
-from app.services.actionable import actionable_clause, expired_clause
+from app.services.actionable import (
+    actionable_clause,
+    expired_clause,
+    strict_actionable_clause,
+)
 from app.services.verticals import VERTICALS
 
 _SORTABLE = {
@@ -73,6 +77,11 @@ class FilterService:
         return list(self.db.execute(stmt).scalars().all())
 
     def _base_statement(self, f: OpportunityFilters) -> Select:
+        live_clause = (
+            actionable_clause()
+            if getattr(f, "include_undated", False)
+            else strict_actionable_clause()
+        )
         if getattr(f, "approved", False):
             # The approved set used to skip the deadline predicate entirely.
             # The reasoning was that a curated hand-off should not "silently
@@ -87,7 +96,7 @@ class FilterService:
             # what someone opening a working view is asking.
             stmt = select(Opportunity).where(Opportunity.approved.is_(True))
             if not getattr(f, "include_expired", False):
-                stmt = stmt.where(actionable_clause())
+                stmt = stmt.where(live_clause)
         elif getattr(f, "archived", False):
             # Explicit opt-in to the historical archive. It holds tens of
             # thousands of closed calls, so it stays out of the default view and
@@ -98,7 +107,7 @@ class FilterService:
             # here and another in matching_service. The old inline version read
             # `deadline IS NULL` as "ongoing", which also swept up every row
             # whose date simply could not be parsed.
-            stmt = select(Opportunity).where(actionable_clause())
+            stmt = select(Opportunity).where(live_clause)
         if getattr(f, "new_today", False):
             # Matches the "New Today" stat card. Clicking it used to only change
             # the sort order, so the table looked identical and the card seemed
