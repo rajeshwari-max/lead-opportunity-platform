@@ -24,6 +24,24 @@ log = logging.getLogger("scraper")
 
 _JOB_ID = "scheduled-scrape"
 _DIGEST_JOB_ID = "daily-digest"
+
+# APScheduler's defaults already give max_instances=1 and coalesce=True, but
+# they are spelled out on every job below because "the default happens to be
+# right" is not something the next person should have to look up — and because
+# misfire_grace_time is the one default that is NOT right here.
+#
+# It defaults to ONE SECOND. If the event loop is busy when a job's fire time
+# arrives — and this loop runs an 85-source scrape in-process — the job is
+# silently skipped rather than run late. A missed digest that nothing reports
+# looks exactly like a digest nobody wanted.
+#
+# max_instances=1  a scrape cannot start while the previous one is running.
+#                  There is a cross-process database lease as well; this is the
+#                  in-process half of the same rule.
+# coalesce=True    several missed fire times collapse into one run, so a
+#                  restart after downtime does not queue up a backlog.
+_JOB_GUARDS = {"max_instances": 1, "coalesce": True, "misfire_grace_time": 300}
+
 _STATE_FILE: Path = BASE_DIR / "data" / "schedule.json"
 
 
@@ -165,7 +183,7 @@ class ScrapeScheduler:
 
         self._scheduler.add_job(
             _run, CronTrigger(hour=0, minute=15),
-            id="deadline-audit", replace_existing=True,
+            id="deadline-audit", replace_existing=True, **_JOB_GUARDS,
         )
         log.info("Scheduler: nightly deadline audit at 00:15")
 
@@ -189,7 +207,7 @@ class ScrapeScheduler:
         self._scheduler.add_job(
             _daily_digest_and_reminders,
             CronTrigger(hour=cfg.digest_hour, minute=cfg.digest_minute),
-            id=_DIGEST_JOB_ID, replace_existing=True,
+            id=_DIGEST_JOB_ID, replace_existing=True, **_JOB_GUARDS,
         )
         log.info("Scheduler: daily digest + reminders at %02d:%02d (reminders at %s days)",
                  cfg.digest_hour, cfg.digest_minute,
@@ -278,7 +296,8 @@ class ScrapeScheduler:
             if trigger is None:
                 raise ValueError(f"Unknown schedule mode: {req.mode}")
 
-        self._scheduler.add_job(self._scrape_all, trigger, id=_JOB_ID, replace_existing=True)
+        self._scheduler.add_job(self._scrape_all, trigger, id=_JOB_ID,
+                                replace_existing=True, **_JOB_GUARDS)
         log.info("Scheduler: %s scrape configured (%02d:%02d)", req.mode, req.hour, req.minute)
         if persist:
             self._save_state()

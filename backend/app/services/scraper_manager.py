@@ -406,6 +406,31 @@ class ScraperManager:
             prog["errors"] += 1
             crash = f"{type(exc).__name__}: {exc}"
         finally:
+            # THE ONE LINE THAT STOPS AN ORPHANED WORKER THREAD.
+            #
+            # Four scrapers do their fetching in a daemon thread that feeds an
+            # unbounded Queue, and the only way to ask that thread to stop is
+            # this Event — every one of them checks `stop_event.is_set()`
+            # between pages.
+            #
+            # `_guarded` wraps this coroutine in
+            # `asyncio.wait_for(..., source_timeout_s)`. When that fires the
+            # coroutine is cancelled and this `finally` runs, but until now it
+            # only cancelled the mirror task. The Event was never set, so the
+            # thread never learned the run was over: it carried on fetching and
+            # parsing, and carried on `queue.put()`-ing into a queue nobody was
+            # draining any more.
+            #
+            # That is one thread's worth of CPU and an unbounded queue of page
+            # payloads, per timed-out source, held until the process restarts.
+            # It is the reason a worker that starts at ~150 MB reaches 1.6 GB
+            # while `ps` shows no browser — the JSON sources need no Chromium.
+            #
+            # Setting it here is safe on every path. On normal completion the
+            # crawl has already finished and this is a no-op; on timeout or
+            # crash it is what lets the thread reach its own `finally`, close
+            # its browser or HTTP client, and exit.
+            source_stop.set()
             mirror.cancel()
             # What the run actually observed. Scrapers that record transport
             # detail expose it as `last_probe`; the ones that do not yet leave
