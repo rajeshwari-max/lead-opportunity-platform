@@ -451,9 +451,14 @@ def backfill_geography() -> int:
 
     log = logging.getLogger("scraper")
     updated = 0
+    # Chunked rather than `.scalars().all()` — see services/backfill.py.
+    # No WHERE here on purpose: this pass reads country, region AND location
+    # and can rewrite any of them, so there is no single column whose presence
+    # proves the row needs nothing.
+    from app.services.backfill import iter_opportunities
+
     with session_scope() as db:
-        rows = db.execute(select(Opportunity)).scalars().all()
-        for opp in rows:
+        for opp in iter_opportunities(db):
             # Some sources only ever fill `location` (DevelopmentAid's API stores
             # "Malawi, Zambia" there and nothing in country), which left the
             # Country filter and the By Region chart empty for tens of thousands

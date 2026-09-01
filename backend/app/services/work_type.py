@@ -109,8 +109,12 @@ def backfill_work_types() -> int:
     from app.database.models import Opportunity
 
     updated = 0
+    # See services/backfill.py: `.scalars().all()` here loaded the whole table
+    # into memory on every worker start.
+    from app.services.backfill import iter_opportunities
+
     with session_scope() as db:
-        for opp in db.execute(select(Opportunity)).scalars().all():
+        for opp in iter_opportunities(db):
             body = " ".join(filter(None, [opp.summary, opp.eligibility, opp.vertical]))
             new = classify_work_type(opp.title, body)
             if new != (opp.work_type or ""):

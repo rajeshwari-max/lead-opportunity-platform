@@ -126,8 +126,13 @@ def backfill_amounts() -> int:
 
     log = logging.getLogger("scraper")
     updated = 0
+    # Chunked, not `.scalars().all()`. The old form materialised all 279,129
+    # rows as ORM objects in one list — 1.5 GB of a Gunicorn worker, on every
+    # boot, before a single request was served. Same rows, same result.
+    from app.services.backfill import iter_opportunities
+
     with session_scope() as db:
-        for opp in db.execute(select(Opportunity)).scalars().all():
+        for opp in iter_opportunities(db):
             current = opp.funding_amount or ""
             new = clean_amount(current)
             if not new:

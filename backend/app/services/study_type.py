@@ -125,8 +125,28 @@ def backfill_study_types() -> int:
 
     log = logging.getLogger("scraper")
     updated = 0
+    # Two changes, both about not reading what we do not need.
+    #
+    # The loop already skipped rows that have a study_type — but it skipped
+    # them AFTER the database had returned them and SQLAlchemy had hydrated
+    # them into ORM objects. On a table where most rows are already classified
+    # that is almost the whole table read to do nothing. The same condition as
+    # a WHERE means the database never sends them.
+    #
+    # And the walk is chunked, so the identity map cannot grow to hold the
+    # whole result. See services/backfill.py for the measurement that prompted
+    # this.
+    #
+    # The `continue` below stays: it is the same rule stated where the work
+    # happens, and it keeps this correct if the WHERE is ever changed.
+    from sqlalchemy import func, or_
+
+    from app.services.backfill import iter_opportunities
+
+    needs_one = or_(Opportunity.study_type.is_(None),
+                    func.trim(Opportunity.study_type) == "")
     with session_scope() as db:
-        for opp in db.execute(select(Opportunity)).scalars():
+        for opp in iter_opportunities(db, where=needs_one):
             if (opp.study_type or "").strip():
                 continue
             label = classify_study_type(opp.title or "", opp.summary or "")
