@@ -176,6 +176,7 @@ export const VERTICALS = [
   "Climate/Sustainability(ESG)",
   "Worker Wellbeing",
   "Innovative Finance",
+  "Social Business",
 ] as const;
 
 export const VERTICAL_DESCRIPTIONS: Record<string, string> = {
@@ -185,6 +186,7 @@ export const VERTICAL_DESCRIPTIONS: Record<string, string> = {
   "Climate/Sustainability(ESG)": "Climate / Sustainability",
   "Worker Wellbeing": "Worker Wellbeing (WWB)",
   "Innovative Finance": "Innovative Finance",
+  "Social Business": "Social Business and Market Systems",
 };
 
 export interface ScheduleStatus {

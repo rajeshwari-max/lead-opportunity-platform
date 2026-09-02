@@ -22,6 +22,7 @@ VERTICAL_E4C = "E4C(Evidence for Change)"
 VERTICAL_CLIMATE = "Climate/Sustainability(ESG)"
 VERTICAL_WWB = "Worker Wellbeing"
 VERTICAL_FINANCE = "Innovative Finance"
+VERTICAL_SOCIAL_BUSINESS = "Social Business"
 
 VERTICALS: list[str] = [
     VERTICAL_LIVELIHOOD,
@@ -30,6 +31,7 @@ VERTICALS: list[str] = [
     VERTICAL_CLIMATE,
     VERTICAL_WWB,
     VERTICAL_FINANCE,
+    VERTICAL_SOCIAL_BUSINESS,
 ]
 
 # Human-readable descriptions (used by /verticals endpoint and tooltips).
@@ -40,6 +42,7 @@ VERTICAL_DESCRIPTIONS: dict[str, str] = {
     VERTICAL_CLIMATE: "Climate / Sustainability",
     VERTICAL_WWB: "Worker Wellbeing (WWB)",
     VERTICAL_FINANCE: "Innovative Finance",
+    VERTICAL_SOCIAL_BUSINESS: "Social Business and Market Systems",
 }
 
 # Keyword rules. Title hits weigh 3x, body hits 1x; every vertical whose score
@@ -214,6 +217,62 @@ _VERTICAL_KEYWORDS: dict[str, list[str]] = {
         # routed here from the Livelihood row (funding/economic terms)
         r"fundraising", r"grant\s+management",
         r"macro[\s-]economy", r"public\s+finance",
+    ],
+    # Social Business — enterprise-led development: ventures, market systems,
+    # agribusiness value chains and the capital that funds them.
+    #
+    # The 23 terms below were supplied by the platform owner on 2026-09-02.
+    # Most are transcribed as given. Three are NOT, and the difference matters
+    # more than the twenty that are:
+    #
+    #   "Equity"      -> equity in the CAPITAL sense only. In development
+    #                    writing "equity" almost always means fairness —
+    #                    gender equity, health equity, equitable access. A bare
+    #                    \bequity\b would tag a large share of the Health and
+    #                    Worker Wellbeing corpus into this vertical, and the
+    #                    reader would have no way to tell why.
+    #   "Markets"     -> market SYSTEMS, not the word "market". Bare \bmarkets?\b
+    #                    matches "market research", "labour market", "emerging
+    #                    markets" and "go-to-market" — this is the same shape as
+    #                    the keyword bug that matched "ict" inside "District".
+    #   "Commodity"   -> commodity trading/prices/markets. Alone it matches
+    #                    "commodity" in any procurement boilerplate.
+    #
+    # Everything else — agribusiness, post-harvest, revolving fund, NPM,
+    # residue-free, farmer incomes — is specific enough to stand as written.
+    #
+    # Deliberate overlap: value chain, market access, cooperatives and
+    # post-harvest already belong to Livelihood, and blended/innovative
+    # financing and revolving grant already belong to Innovative Finance.
+    # Classification is multi-label by design, so a row can carry both. That is
+    # the intent — Social Business is a second lens on the same corpus, not a
+    # slice carved out of it — but it does mean these rows will now appear for
+    # members routed to either vertical.
+    VERTICAL_SOCIAL_BUSINESS: [
+        # ventures
+        r"impact\s+venture(s)?", r"social\s+venture(s)?", r"social\s+business(es)?",
+        r"social\s+entrepreneur(ship)?",
+        # agribusiness and the food economy
+        r"agri[\s-]?business(es)?", r"food\s+business(es)?",
+        r"organic\s+food\s+business(es)?", r"organic\s+food",
+        r"farmers?\s+market(s)?", r"farmer\s+income(s)?",
+        r"residue[\s-]free\s+(product|produce)", r"\bnpm\b",
+        r"non[\s-]pesticidal\s+management",
+        # market systems — scoped: see the note above on bare "markets"
+        r"market\s+system(s)?", r"market\s+linkage(s)?", r"market\s+development",
+        r"market\s+access", r"access\s+to\s+market(s)?",
+        r"commodit(y|ies)\s+(market|price|trad|exchange|value)",
+        r"(agricultural|soft)\s+commodit(y|ies)",
+        # chains
+        r"value\s+chain(s)?", r"supply\s+chain(s)?", r"post[\s-]?harvest",
+        r"post[\s-]?harvest\s+management",
+        # capital
+        r"debt\s+capital", r"equity\s+(capital|financ|invest|stake|infusion)",
+        r"(private|growth|venture)\s+equity", r"quasi[\s-]equity",
+        r"blended\s+financ", r"innovative\s+financ",
+        r"revolving\s+fund(s)?", r"revolving\s+grant(s)?",
+        # producer organisations
+        r"cooperative(s)?", r"\bco[\s-]operative(s)?\b", r"producer\s+organi[sz]ation",
     ],
 }
 

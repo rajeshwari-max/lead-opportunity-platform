@@ -23,6 +23,7 @@ const verticalPalette: Array<[string, string]> = [
   ["Climate/Sustainability", "bg-teal-500/15 text-teal-700 dark:text-teal-400 border-teal-500/30"],
   ["Worker Wellbeing", "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30"],
   ["Innovative Finance", "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 border-cyan-500/30"],
+  ["Social Business", "bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-400 border-fuchsia-500/30"],
 ];
 
 function verticalTone(vertical: string): string {

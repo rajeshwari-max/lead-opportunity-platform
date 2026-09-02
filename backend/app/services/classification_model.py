@@ -69,6 +69,10 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "Climate/Sustainability(ESG)": 0.55,
     "Worker Wellbeing": 0.45,             # 2% base rate; specific vocabulary
     "Innovative Finance": 0.50,
+    # No measured base rate yet — this vertical has never been scored against
+    # labelled data. Set level with Livelihood rather than invented tighter or
+    # looser; scripts/classifier_eval.py --tune replaces it with a fitted value.
+    "Social Business": 0.55,
 }
 
 # Below the threshold but above this, the row is UNCERTAIN rather than

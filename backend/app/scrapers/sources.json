@@ -429,5 +429,77 @@
     "stale_page_streak": 0,
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published tender or procurement notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py."
+  },
+  {
+    "name": "brainforest_global",
+    "display_name": "Brainforest",
+    "url": "https://brainforest.global/",
+    "website": "https://brainforest.global"
+  },
+  {
+    "name": "gef",
+    "display_name": "Global Environment Facility (GEF)",
+    "url": "https://www.thegef.org/",
+    "website": "https://www.thegef.org"
+  },
+  {
+    "name": "cisco_foundation",
+    "display_name": "Cisco Foundation",
+    "url": "https://www.cisco.com/site/us/en/about/purpose/community-resilience/cisco-foundation/index.html",
+    "website": "https://www.cisco.com"
+  },
+  {
+    "name": "green_climate_fund",
+    "display_name": "Green Climate Fund",
+    "url": "https://www.greenclimate.fund/",
+    "website": "https://www.greenclimate.fund"
+  },
+  {
+    "name": "rippleworks",
+    "display_name": "Rippleworks",
+    "url": "https://www.rippleworks.org/",
+    "website": "https://www.rippleworks.org"
+  },
+  {
+    "name": "drk_foundation",
+    "display_name": "Draper Richards Kaplan Foundation",
+    "url": "https://www.drkfoundation.org/",
+    "website": "https://www.drkfoundation.org"
+  },
+  {
+    "name": "wfp_innovation",
+    "display_name": "WFP Innovation Accelerator",
+    "url": "https://innovation.wfp.org/relief-and-resilience",
+    "website": "https://innovation.wfp.org"
+  },
+  {
+    "name": "ifad_moonshots",
+    "display_name": "IFAD Moonshots for Development",
+    "url": "https://www.ifad.org/en/w/events/moonshots-for-development-open-innovation-challenge-winners",
+    "website": "https://www.ifad.org"
+  },
+  {
+    "name": "dbs_foundation",
+    "display_name": "DBS Foundation",
+    "url": "https://www.dbs.com/foundation/index.html",
+    "website": "https://www.dbs.com"
+  },
+  {
+    "name": "hundredx_impact",
+    "display_name": "100x Impact Accelerator",
+    "url": "https://www.100ximpact.org/",
+    "website": "https://www.100ximpact.org"
+  },
+  {
+    "name": "agroecology_fund",
+    "display_name": "Agroecology Fund",
+    "url": "https://agroecology-fund.org/service/grant-for-agroecology-program-gap-challenge-fund/",
+    "website": "https://agroecology-fund.org"
+  },
+  {
+    "name": "raising_impact",
+    "display_name": "Raising Impact",
+    "url": "https://raisingimpact.org/",
+    "website": "https://raisingimpact.org"
   }
 ]
