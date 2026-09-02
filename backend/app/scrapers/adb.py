@@ -108,6 +108,115 @@ _TOTAL = re.compile(r"of\s+([\d,]+)", re.I)
 # Each result carries these labels. They are the only stable anchors: class
 # names on this widget are generated and change between deploys, whereas the
 # labels are the visible content and change only if ADB redesigns the page.
+# Read the result rows inside the browser, keyed the same way
+# `_results_signature` keys them in Python — link plus first line of text. One
+# expression, used both to snapshot before a click and to wait for the change,
+# so the wait and the verification cannot disagree about what "the page moved"
+# means.
+#
+# They disagreed before, and it was not a subtle disagreement: the wait compared
+# `document.body.innerText.slice(0, 4000)` against a value that had been changed
+# to a 16-character sha256 prefix. A 4,000-character text slice is never equal
+# to a 16-character hash, so `!==` was true on the predicate's first evaluation
+# and `wait_for_function` returned immediately, having waited for nothing.
+_ROWS_JS = f"""(() => Array.from(document.querySelectorAll({RESULT_BLOCK!r})).map(b => {{
+    const a = b.querySelector('a[href]');
+    return (a ? a.getAttribute('href').split('?')[0] : '') + '|'
+         + (b.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 120);
+}}).join('\\n'))"""
+# Rows present AND different from the snapshot. Requiring rows to be present
+# matters: the widget empties the container while it fetches, and an empty
+# container is "different" without being the next page.
+_ROWS_CHANGED_JS = f"prev => {{ const now = {_ROWS_JS}(); return !!now && now !== prev; }}"
+
+# The Next control, as ADB actually renders it. Read off a captured page
+# (logs/adb_no_results.html, kept as tests/fixtures/adb_pagination_bar.html)
+# rather than guessed, because every guess here was wrong in a way that would
+# have shipped looking correct:
+#
+#     <a class="searchstax-pagination-next " tabindex="0"
+#        id="searchstax-pagination-next">Next &gt;</a>
+#
+#   * There are no numbered page buttons. Previous and Next are the whole bar,
+#     so "click the button labelled 3" was never going to match anything.
+#   * The label is "Next >", not "Next". An exact-match on "Next" finds nothing.
+#   * It is an <a> with no href and a tabindex — a JS handler, not a link, so
+#     a[rel=next] and friends never applied either.
+#
+# The id is stable and unambiguous, so it leads. The class and the label follow
+# it only as insurance against an ADB redeploy that renames the id.
+_NEXT_SELECTORS = (
+    "#searchstax-pagination-next",
+    "a.searchstax-pagination-next",
+    '[class*="pagination"] a[id*="next" i]',
+)
+# How this widget says "there is no next page". Not the disabled attribute and
+# not aria-disabled — both absent here — but a class plus inline
+# pointer-events:none. Every stock disabled-check reads this control as live,
+# which would mean clicking a dead anchor on the last page and waiting the full
+# 30s for rows that were never going to change.
+_DISABLED_CLASS = "disabled"
+
+# Last-resort control finder, for a redeploy that renames the id. Prefix match,
+# not equality — the label is "Next >".
+_FIND_BY_LABEL_JS = """
+(wanted) => {
+  const bars = Array.from(document.querySelectorAll(
+      '[class*="pagination"], [class*="pager"], nav[aria-label*="agination"]'));
+  const scope = bars.length ? bars : [document.body];
+  const want = wanted.trim().toLowerCase();
+  for (const bar of scope) {
+    for (const el of bar.querySelectorAll('a, button, [role="button"]')) {
+      if (el.classList.contains('disabled')) continue;
+      if (getComputedStyle(el).pointerEvents === 'none') continue;
+      const t = (el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim();
+      if (t.toLowerCase().startsWith(want)) return el;
+    }
+  }
+  return null;
+}
+"""
+
+
+class PagingMode:
+    """Which mechanism moves this widget forward — and it only decides once.
+
+    Extracted from the walk so the fallback rule can be tested without a
+    browser, because "the walk never reached its own fallback" is precisely the
+    bug that shipped, and nothing could see it from outside Playwright.
+
+    The latch is the important part. Trying the URL again after it has been
+    shown not to page would reset the widget to page 1 on every iteration, so
+    the walk would re-yield page 1 forever while looking like it was making
+    progress. Once CLICK, always CLICK.
+    """
+
+    UNTESTED, URL, CLICK = "untested", "url", "click"
+
+    def __init__(self) -> None:
+        self.mode = self.UNTESTED
+
+    def should_try_url(self) -> bool:
+        return self.mode in (self.UNTESTED, self.URL)
+
+    def url_result(self, attempted: bool, changed: bool) -> str:
+        """What the walk should do next: "continue", "click" or "end".
+
+        `attempted` is whether the navigation itself succeeded — a blocked or
+        failed load is not evidence that the parameter does not page, so it
+        falls through to clicking without condemning the URL mechanism.
+        """
+        if changed:
+            self.mode = self.URL
+            return "continue"
+        if self.mode == self.URL and attempted:
+            # It paged on earlier iterations and has stopped changing now, so
+            # this really is the end of the list rather than a broken parameter.
+            return "end"
+        self.mode = self.CLICK
+        return "click"
+
+
 _STATUS = re.compile(r"Status:\s*(\w+)", re.I)
 _DEADLINE = re.compile(r"Deadline:\s*([0-9]{1,2}\s+\w{3,9}\s+[0-9]{4})", re.I)
 _COUNTRY = re.compile(r"Country/Economy:\s*([^|\n]+)", re.I)
@@ -322,8 +431,8 @@ class AdbTendersScraper(BaseScraper):
                 # by an invisible character.
                 try:
                     page.wait_for_function(
-                        "() => document.querySelectorAll("
-                        "'div.searchstax-search-result').length > 0",
+                        f"() => document.querySelectorAll({RESULT_BLOCK!r})"
+                        ".length > 0",
                         timeout=45_000,
                     )
                 except Exception:
@@ -381,77 +490,70 @@ class AdbTendersScraper(BaseScraper):
                         f"{total:,}", pages, pages * per_page,
                     )
 
+                mode = PagingMode()
                 for n in range(1, pages + 1):
                     if stop_event.is_set() or done.is_set():
                         return
-                    queue.put(page.content())
-                    before = self._results_signature(page.content())
+                    html = page.content()
+                    queue.put(html)
                     if n >= pages:
                         log.info("[adb] reached page %s of %s — done", n, pages)
                         return
+                    before = self._results_signature(html)
 
-                    # Preferred: ask for the next page by URL. searchstax[page]
-                    # is the widget's own parameter, so this is the same request
-                    # clicking would make — minus the DOM archaeology of finding
-                    # a control whose class names change between ADB deploys.
-                    if self._goto_page(page, search_url, n + 1):
-                        if self._results_signature(page.content()) == before:
-                            # Same RESULTS, which is not the same as the same
-                            # page. The previous version compared
-                            # page.inner_text("body")[:4000], and the first four
-                            # thousand characters of this page are header, nav
-                            # and facet counts — chrome that changes between
-                            # navigations while the twelve result rows stay
-                            # identical. So the guard passed, the walk carried
-                            # on, and a 2026-08-30 verification run recorded 36
-                            # rows extracted over three pages of which 12 were
-                            # unique: the same twelve, three times.
-                            #
-                            # That is the World Bank `os={offset}` failure in a
-                            # different source — a paging parameter that is
-                            # present, accepted, and does nothing — and it is
-                            # the shape that looks most like success.
-                            if n == 1:
-                                log.warning(
-                                    "[adb] page 2 returned the SAME %s result(s) "
-                                    "as page 1. searchstax[page] is not paging "
-                                    "this widget on a fresh navigation. The "
-                                    "walk is stopping with one page rather than "
-                                    "yielding the same rows repeatedly — but "
-                                    "this is a pagination defect, not the end "
-                                    "of a %s-record list.",
-                                    per_page, f"{total:,}" if total else "?")
-                            else:
-                                log.info("[adb] page %s returned the same results "
-                                         "as page %s — end of the list", n + 1, n)
+                    # Mechanism one: ask for the next page by URL. searchstax
+                    # [page] is the widget's own parameter, so on a site where
+                    # it works this is the same request clicking would make,
+                    # minus the DOM archaeology.
+                    #
+                    # On this site it does NOT work: the widget re-runs its
+                    # default query on a fresh navigation and re-serves page 1.
+                    # The URL is still tried once, because it is cheaper and
+                    # because a fixed ADB deploy should be picked up
+                    # automatically rather than needing this file edited again.
+                    if mode.should_try_url():
+                        moved = self._goto_page(page, search_url, n + 1)
+                        changed = (moved
+                                   and self._results_signature(page.content()) != before)
+                        action = mode.url_result(attempted=moved, changed=changed)
+                        if action == "continue":
+                            if n % 10 == 0:
+                                log.info("[adb] page %s of %s", n, pages)
+                            page.wait_for_timeout(
+                                int(settings.rate_limit_delay * 1000))
+                            continue
+                        if action == "end":
+                            log.info("[adb] page %s returned the same results as "
+                                     "page %s — end of the list", n + 1, n)
                             return
-                        if n % 10 == 0:
-                            log.info("[adb] page %s of %s", n, pages)
-                        page.wait_for_timeout(int(settings.rate_limit_delay * 1000))
-                        continue
+                        # action == "click": the URL never paged at all.
+                        #
+                        # This is where the walk used to give up, and it is the
+                        # whole defect. `_goto_page` returns True whenever the
+                        # URL *loads* — it loads fine, it just serves page 1 —
+                        # so the guard below it saw unchanged rows and returned
+                        # out of the walk entirely. The click path underneath
+                        # was unreachable on every healthy run, and ADB yielded
+                        # 12 of ~489 Active tenders while reporting success.
+                        #
+                        # The failed navigation has left the widget showing
+                        # page 1, which is exactly where clicking next has to
+                        # start from, so falling through here is safe. It is
+                        # only safe ONCE, which is why PagingMode latches: a
+                        # later navigation would reset the widget to page 1 and
+                        # silently restart the walk.
+                        log.warning(
+                            "[adb] searchstax[page]=%s re-served page 1's %s "
+                            "result(s) on a fresh navigation — the parameter is "
+                            "accepted and ignored. Switching to the widget's own "
+                            "next control for the rest of this walk (%s record(s) "
+                            "to go).",
+                            n + 1, per_page, f"{total:,}" if total else "?")
 
-                    # Fallback: drive the widget's own control, as before.
-                    nxt = self._next_control(page)
-                    if nxt is None:
-                        log.info("[adb] no further page control after page %s", n)
+                    if not self._click_next(page, n + 1):
                         return
-                    try:
-                        nxt.click(timeout=10_000)
-                    except Exception:
-                        log.info("[adb] next-page control not clickable — stopping")
-                        return
-                    # Wait for the list to actually change rather than a fixed
-                    # sleep: the widget swaps content in place, so there is no
-                    # navigation event to wait on.
-                    try:
-                        page.wait_for_function(
-                            "prev => document.body.innerText.slice(0, 4000) !== prev",
-                            arg=before, timeout=30_000,
-                        )
-                    except Exception:
-                        log.info("[adb] page %s did not change after clicking next "
-                                 "— assuming the end of the list", n)
-                        return
+                    if n % 10 == 0:
+                        log.info("[adb] page %s of %s", n, pages)
                     page.wait_for_timeout(int(settings.rate_limit_delay * 1000))
             finally:
                 # close_owned also closes the Browser that owns this
@@ -624,27 +726,141 @@ class AdbTendersScraper(BaseScraper):
             pass
         return not AdbTendersScraper._blocked(page)
 
+    @classmethod
+    def _click_next(cls, page, page_nr: int) -> bool:
+        """Advance one page by driving the widget, and verify that it moved.
+
+        Returns True only when the RESULT ROWS changed. "The DOM changed" is
+        not enough — the widget empties its container while it fetches, and a
+        spinner is a change.
+
+        Three things happen in order, and each has to hold:
+          1. snapshot the rows as they are now;
+          2. click a control, preferring the target page NUMBER over "next"
+             (a numbered button says which page it goes to, where a "next"
+             that is really a disabled decoration says nothing);
+          3. wait for the rows to differ from the snapshot, then confirm with
+             the same signature the URL path is judged by.
+        """
+        try:
+            before_rows = page.evaluate(_ROWS_JS)
+        except Exception as exc:                                # noqa: BLE001
+            log.info("[adb] could not read the result rows (%s) — stopping", exc)
+            return False
+        before_sig = cls._results_signature(page.content())
+
+        # Ask the bar whether there IS a next page before touching it. On the
+        # last page the anchor is still present and still says "Next >"; only
+        # its class and pointer-events say otherwise. Clicking it would do
+        # nothing and the walk would then wait the full 30 seconds for rows
+        # that were never going to change, once per source, every run.
+        state = cls._pagination_state(page.content())
+        if state == "end":
+            log.info("[adb] the Next control is disabled — end of the list at "
+                     "page %s", page_nr - 1)
+            return False
+
+        control, how = cls._pagination_control(page, page_nr)
+        if control is None:
+            if page_nr == 2:
+                # On page 2 this is not the end of anything — it means neither
+                # mechanism works and the walk is about to return twelve rows
+                # out of hundreds. Saving the page is what turns that from a
+                # guess into a fact: the labels this build actually uses are in
+                # the HTML, and no amount of reading this file supplies them.
+                log.error(
+                    "[adb] neither searchstax[page] nor any pagination control "
+                    "advanced the list, so this run holds ONE page of a source "
+                    "with hundreds of Active tenders. Saved "
+                    "logs/adb_pagination.html — the pagination markup in it is "
+                    "what _pagination_control needs to match.")
+                cls._dump(page, "adb_pagination")
+            else:
+                log.info("[adb] no usable pagination control for page %s — "
+                         "treating this as the end of the list", page_nr)
+            return False
+        try:
+            control.click(timeout=10_000)
+        except Exception as exc:                                # noqa: BLE001
+            log.info("[adb] the %s control was not clickable (%s) — stopping",
+                     how, exc)
+            return False
+
+        # Wait for the list to actually change rather than sleeping a fixed
+        # time: the widget swaps content in place, so there is no navigation
+        # event to wait on.
+        try:
+            page.wait_for_function(_ROWS_CHANGED_JS, arg=before_rows,
+                                   timeout=30_000)
+        except Exception:
+            log.info("[adb] the result rows did not change within 30s of using "
+                     "the %s control — assuming the end of the list", how)
+            return False
+        if cls._results_signature(page.content()) == before_sig:
+            log.info("[adb] the rows re-rendered identical after the %s control "
+                     "— end of the list", how)
+            return False
+        if page_nr == 2:
+            # Said once, on the first successful click, because it is the fact
+            # that resolves how this widget actually pages. The log is the only
+            # place that can answer it from production.
+            log.info("[adb] pagination is working via the %s control", how)
+        return True
+
     @staticmethod
-    def _next_control(page):
-        """The pagination 'next' control, however this build labels it."""
-        for sel in ('a[rel="next"]', '[aria-label="Next page"]', '[aria-label="Next"]',
-                    'a.pager__item--next a', 'li.pager__item--next a',
-                    '.pagination .next a', 'button.next'):
+    def _pagination_state(html: str) -> str:
+        """"next", "end" or "missing", read from the pagination bar.
+
+        Pure and takes HTML, for the same reason `_results_signature` is: the
+        last defect in this file survived because it lived inside a Playwright
+        loop where no test could reach it. This one is checked against a real
+        captured bar in tests/fixtures/adb_pagination_bar.html.
+
+        "missing" is deliberately distinct from "end". A bar that is not there
+        at all means the page did not render what we think it renders, which is
+        a defect to report; a bar whose Next is disabled means the walk
+        finished, which is success.
+        """
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html or "", "lxml")
+        nxt = soup.find(id="searchstax-pagination-next")
+        if nxt is None:
+            nxt = soup.select_one("a.searchstax-pagination-next")
+        if nxt is None:
+            return "missing"
+        classes = nxt.get("class") or []
+        style = (nxt.get("style") or "").replace(" ", "").lower()
+        if _DISABLED_CLASS in classes or "pointer-events:none" in style:
+            return "end"
+        return "next"
+
+    @classmethod
+    def _pagination_control(cls, page, page_nr: int):
+        """(element, description) for the control that advances the list.
+
+        Selectors, not label text, because the id here is stable and the label
+        is "Next >" — a space and an entity away from every exact-match guess.
+        The label search stays as a last resort for a redeploy that renames the
+        id, and matches on a prefix rather than equality for that same reason.
+        """
+        for sel in _NEXT_SELECTORS:
             try:
                 el = page.query_selector(sel)
-                if el and el.is_enabled() and el.is_visible():
-                    return el
             except Exception:
                 continue
-        # Fall back to a link whose text is exactly "Next" or "›".
-        for label in ("Next", "next", "›", "»"):
-            try:
-                el = page.get_by_role("link", name=label, exact=True).first
-                if el and el.is_visible():
-                    return el
-            except Exception:
-                continue
-        return None
+            if el is not None:
+                return el, f"Next control ({sel})"
+        # Last resort: an anchor or button whose visible label STARTS WITH
+        # "next". Startswith, because this one reads "Next >".
+        try:
+            handle = page.evaluate_handle(_FIND_BY_LABEL_JS, "next")
+            el = handle.as_element()
+            if el is not None:
+                return el, "control labelled Next"
+        except Exception:
+            pass
+        return None, ""
 
     @staticmethod
     def _dump(page, stem: str) -> None:

@@ -52,6 +52,7 @@ python scripts/check_scraper.py <source> --pages 1 --json /tmp/<source>.json
 | `cleanairfund_grants_listing.html` | Clean Air Fund | SYNTHETIC | an open call mixed in with grants already awarded |
 | `undp_procurement_listing.html` | UNDP Procurement | SYNTHETIC | the notice table and its published total |
 | `devex_paywall.html` | Devex | SYNTHETIC | the wall itself — AUTH_REQUIRED, never "empty source" |
+| `adb_pagination_bar.html` | ADB Tenders | CAPTURED (page 1) + DERIVED (last page) | the Next control as ADB really renders it: no numbered buttons, the label `Next >`, and "disabled" expressed as a class plus inline `pointer-events:none`. The first bar is verbatim from `logs/adb_no_results.html`; the second is the same bar with the disabled class moved to Next, because the capture only covers page 1 — so the "end of list" test is derived, not observed, and would not catch ADB changing how it marks the last page. |
 
 `test_parser_fixtures.py` asserts this table lists every file in this directory,
 so a fixture cannot be added without declaring where it came from.

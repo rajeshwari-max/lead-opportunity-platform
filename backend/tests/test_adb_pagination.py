@@ -129,14 +129,167 @@ def test_the_walk_compares_results_and_no_longer_compares_the_body():
         "the body comparison is the defect; it must not come back")
 
 
-def test_an_immediate_repeat_is_reported_as_a_defect_not_as_the_end_of_the_list():
-    """Stopping is right either way, but a walk that stops on page 2 of a
-    489-record list has not finished — and logging 'end of the list' would
-    record a pagination failure as a completed walk."""
+def test_an_immediate_repeat_falls_back_instead_of_ending_the_walk():
+    """Catching the repeat was only half the job.
+
+    The guard was fixed and ADB still returned twelve rows, because catching
+    the repeat made the walk `return`. `_goto_page` reports success whenever
+    the URL *loads* — it loads fine, it just re-serves page 1 — so on every
+    healthy run the walk stopped at page 1 and the click path underneath it was
+    unreachable. A 489-record source yielded twelve and reported success.
+    """
     import inspect
 
     from app.scrapers.adb import AdbTendersScraper
 
     src = inspect.getsource(AdbTendersScraper._walk)
-    assert "pagination defect" in src
-    assert "if n == 1:" in src
+    assert "_click_next" in src, "the walk must be able to reach the click path"
+    code = "\n".join(line for line in src.splitlines()
+                     if not line.lstrip().startswith("#"))
+    assert "PagingMode" in code
+
+
+# ------------------------------------------------------- the fallback rule
+
+def test_a_url_that_pages_is_used_for_the_whole_walk():
+    from app.scrapers.adb import PagingMode
+
+    mode = PagingMode()
+    assert mode.should_try_url()
+    assert mode.url_result(attempted=True, changed=True) == "continue"
+    assert mode.should_try_url()
+
+
+def test_a_url_that_never_paged_falls_back_to_clicking():
+    """The bug, as a rule: unchanged rows on the FIRST attempt mean the
+    parameter is accepted and ignored, not that a 489-record list ended."""
+    from app.scrapers.adb import PagingMode
+
+    mode = PagingMode()
+    assert mode.url_result(attempted=True, changed=False) == "click"
+
+
+def test_a_url_that_paged_and_then_stopped_really_is_the_end():
+    """The same observation means the opposite thing once the parameter has
+    been shown to work, and conflating the two is how a broken walk reports
+    success — or a finished one reports a defect."""
+    from app.scrapers.adb import PagingMode
+
+    mode = PagingMode()
+    mode.url_result(attempted=True, changed=True)
+    assert mode.url_result(attempted=True, changed=False) == "end"
+
+
+def test_the_fallback_latches():
+    """Once clicking, never navigate again. A navigation resets the widget to
+    page 1, so retrying the URL each iteration would re-yield page 1 forever
+    while the page counter climbed — a worse failure than the original, because
+    it looks like progress."""
+    from app.scrapers.adb import PagingMode
+
+    mode = PagingMode()
+    mode.url_result(attempted=True, changed=False)
+    assert not mode.should_try_url()
+
+
+def test_a_failed_navigation_does_not_condemn_the_url_mechanism():
+    """A blocked or timed-out load is not evidence about the parameter. It
+    still falls through to clicking — there is nothing else to try — but it
+    must not be recorded as 'the list ended'."""
+    from app.scrapers.adb import PagingMode
+
+    mode = PagingMode()
+    mode.url_result(attempted=True, changed=True)          # it works
+    assert mode.url_result(attempted=False, changed=False) == "click"
+
+
+# ------------------------------------------------- the wait actually waits
+
+# ------------------------------------- the control, as ADB actually renders it
+
+def bars() -> tuple[str, str]:
+    """(page 1 bar, last page bar) from the captured markup."""
+    html = (FIXTURES / "adb_pagination_bar.html").read_text(encoding="utf-8")
+    first, last = html.split('<hr id="last-page-below">')
+    return first, last
+
+
+def state(html: str) -> str:
+    from app.scrapers.adb import AdbTendersScraper
+
+    return AdbTendersScraper._pagination_state(html)
+
+
+def test_a_live_next_control_is_recognised():
+    assert state(bars()[0]) == "next"
+
+
+def test_a_disabled_next_control_means_the_end_not_a_broken_walk():
+    """ADB marks the dead control with a CLASS and inline pointer-events, not
+    the disabled attribute and not aria-disabled. Every stock check reads it as
+    live, so the walk would click a dead anchor on the last page and then wait
+    the full 30 seconds for rows that were never going to change."""
+    assert state(bars()[1]) == "end"
+
+
+def test_a_missing_bar_is_not_reported_as_the_end():
+    """"There is no pagination bar" means the page did not render what we think
+    it renders, which is a defect. "Next is disabled" means the walk finished.
+    Collapsing the two is how a broken run reports success."""
+    assert state("<html><body><p>No results found.</p></body></html>") == "missing"
+
+
+def test_the_control_is_found_by_id_not_by_its_label():
+    """The label is "Next >" — a space and an HTML entity away from every
+    exact-match guess. Matching "Next" exactly finds nothing at all."""
+    from app.scrapers.adb import _NEXT_SELECTORS
+
+    first = bars()[0]
+    assert 'id="searchstax-pagination-next"' in first
+    assert ">Next &gt;<" in first, "the label really is not plain 'Next'"
+    assert _NEXT_SELECTORS[0] == "#searchstax-pagination-next"
+
+
+def test_there_are_no_numbered_page_buttons_to_click():
+    """Previous and Next are the whole bar. A strategy of "click the button
+    labelled 3" had nothing to match, and would have failed silently."""
+    from bs4 import BeautifulSoup
+
+    bar = BeautifulSoup(bars()[0], "lxml").select_one(".searchstax-pagination-content")
+    labels = [a.get_text(" ", strip=True) for a in bar.find_all("a")]
+    assert labels == ["< Previous", "Next >"]
+
+
+def test_the_label_fallback_matches_on_a_prefix():
+    from app.scrapers.adb import _FIND_BY_LABEL_JS
+
+    assert "startsWith" in _FIND_BY_LABEL_JS
+    assert "classList.contains('disabled')" in _FIND_BY_LABEL_JS, \
+        "the fallback must honour this widget's disabled convention too"
+
+
+def test_the_click_wait_compares_rows_against_rows():
+    """The regression that made the click path useless even when reached.
+
+    `before` had been changed to a 16-character sha256 prefix while the wait
+    predicate still read `document.body.innerText.slice(0, 4000)`. A 4,000
+    character slice is never equal to a 16-character hash, so the predicate was
+    true on its first evaluation and the wait returned immediately, having
+    waited for nothing.
+    """
+    from app.scrapers.adb import _ROWS_CHANGED_JS, _ROWS_JS, RESULT_BLOCK
+
+    assert "innerText.slice(0, 4000)" not in _ROWS_CHANGED_JS
+    assert RESULT_BLOCK in _ROWS_JS, \
+        "the wait must look at the same rows the signature does"
+    assert _ROWS_JS.strip() in _ROWS_CHANGED_JS, \
+        "one expression, so the wait and the verification cannot disagree"
+
+
+def test_an_empty_container_does_not_count_as_the_next_page():
+    """The widget empties its results while it fetches. An empty container is
+    different from the previous rows without being the next page, and treating
+    it as arrival would capture a spinner."""
+    from app.scrapers.adb import _ROWS_CHANGED_JS
+
+    assert "!!now" in _ROWS_CHANGED_JS

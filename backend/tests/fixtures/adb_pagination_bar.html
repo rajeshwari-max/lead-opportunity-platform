@@ -1,0 +1,21 @@
+<!--
+Lifted verbatim from logs/adb_no_results.html, a real ADB tenders page captured
+on the user's machine. Kept because every guess this scraper made about the
+pagination markup was wrong in a way that would have shipped:
+
+  * there are no numbered page buttons at all — only Previous and Next;
+  * the Next label is "Next >", not "Next", so an exact-match on "Next" finds
+    nothing;
+  * "disabled" is a CLASS plus an inline pointer-events:none, not the disabled
+    attribute and not aria-disabled, so the usual checks all read it as live.
+
+The first block below is page 1 (Previous disabled, Next live). The second is
+the same bar as it appears on the last page, with the roles reversed — that one
+is hand-derived from the first by swapping which anchor carries the disabled
+class, because the capture only covers page 1.
+-->
+<div id="searchstax-pagination-container0.9590782842931314"><div class="searchstax-pagination-container"><div class="searchstax-pagination-content"><a class="searchstax-pagination-previous disabled" tabindex="0" id="searchstax-pagination-previous" style="pointer-events: none;"> &lt; Previous </a><div class="searchstax-pagination-details"> 1 - 12 of 51013</div><a class="searchstax-pagination-next " tabindex="0" id="searchstax-pagination-next">Next &gt;</a></div></div></div>
+
+<hr id="last-page-below">
+
+<div id="searchstax-pagination-container0.1234567890123456"><div class="searchstax-pagination-container"><div class="searchstax-pagination-content"><a class="searchstax-pagination-previous " tabindex="0" id="searchstax-pagination-previous">&lt; Previous </a><div class="searchstax-pagination-details"> 51001 - 51013 of 51013</div><a class="searchstax-pagination-next disabled" tabindex="0" id="searchstax-pagination-next" style="pointer-events: none;">Next &gt;</a></div></div></div>
