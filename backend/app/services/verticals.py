@@ -429,9 +429,14 @@ def backfill_verticals() -> int:
 
     updated = 0
     protected = 0
+    # Chunked. This pass is the expensive one: it loaded all 279,129 rows AND
+    # ran the vertical classifier over each. Measured on 2026-09-01 it was the
+    # bulk of a Gunicorn worker sitting at 1.5 GB and 100% CPU within ten
+    # seconds of boot, before a single request was served.
+    from app.services.backfill import iter_opportunities
+
     with session_scope() as db:
-        rows = db.execute(select(Opportunity)).scalars().all()
-        for opp in rows:
+        for opp in iter_opportunities(db):
             if is_human_labeled(opp):
                 protected += 1
                 continue

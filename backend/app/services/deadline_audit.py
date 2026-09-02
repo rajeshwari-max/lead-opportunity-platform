@@ -80,7 +80,12 @@ def audit_deadlines() -> dict:
         }
         skipped_unhealthy = 0
 
-        for opp in db.execute(select(Opportunity)).scalars():
+        # `.scalars()` streams rather than building a list, which looks safe —
+        # but the session's identity map still holds every row it has yielded,
+        # so peak memory is the same. iter_opportunities expunges each chunk.
+        from app.services.backfill import iter_opportunities
+
+        for opp in iter_opportunities(db):
             if is_sentinel(opp.deadline):
                 # NULL means "ongoing", which is what the source meant.
                 opp.deadline = None

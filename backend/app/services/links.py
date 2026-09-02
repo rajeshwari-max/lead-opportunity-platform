@@ -177,8 +177,13 @@ def repair_links() -> dict:
     log = logging.getLogger("scraper")
     stats = {"checked": 0, "cleared": 0, "kept": 0, "rewritten": 0}
 
+    # Chunked — see services/backfill.py. `.scalars()` streams the rows but the
+    # session keeps every one it has yielded, so peak memory was still the whole
+    # table.
+    from app.services.backfill import iter_opportunities
+
     with session_scope() as db:
-        for opp in db.execute(select(Opportunity)).scalars():
+        for opp in iter_opportunities(db):
             stats["checked"] += 1
             if not (opp.opportunity_url or "").strip():
                 continue
@@ -311,9 +316,11 @@ def junk_rows() -> list[tuple[int, str, str, str]]:
     from app.database.db import session_scope
     from app.database.models import Opportunity
 
+    from app.services.backfill import iter_opportunities
+
     out = []
     with session_scope() as db:
-        for opp in db.execute(select(Opportunity)).scalars():
+        for opp in iter_opportunities(db):
             if is_furniture(opp.title or "", opp.opportunity_url or ""):
                 out.append((opp.id, opp.source_website, opp.title or "",
                             opp.opportunity_url or ""))
@@ -339,10 +346,12 @@ def purge_junk_rows() -> int:
 
     log = logging.getLogger("scraper")
     with session_scope() as db:
-        ids = [
-            opp.id for opp in db.execute(select(Opportunity)).scalars()
-            if is_furniture(opp.title or "", opp.opportunity_url or "")
-        ]
+        from app.services.backfill import iter_opportunities
+
+        # Only the ids of the rows that ARE junk are kept — previously every
+        # row was hydrated to build this list.
+        ids = [opp.id for opp in iter_opportunities(db)
+               if is_furniture(opp.title or "", opp.opportunity_url or "")]
         if ids:
             for chunk in (ids[i:i + 500] for i in range(0, len(ids), 500)):
                 db.execute(delete(Opportunity).where(Opportunity.id.in_(chunk)))

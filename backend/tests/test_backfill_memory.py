@@ -145,10 +145,19 @@ def test_a_where_narrows_what_is_read(db):
 
 # ------------------------------------ the call sites actually use it
 
-@pytest.mark.parametrize("module", ["amounts", "work_type", "study_type", "geography"])
-def test_no_startup_backfill_loads_the_whole_table(module):
-    """The regression guard. `select(Opportunity)).scalars().all()` in a
-    backfill is the exact line that put 1.5 GB in a Gunicorn worker."""
+# ALL EIGHT passes main.py runs at startup — not the four I happened to grep
+# for the first time. Fixing half of them changed nothing measurable, because
+# `backfill_verticals` (the second pass, which also runs the classifier over
+# every row) was in the half I missed.
+STARTUP_PASSES = ["deadline_audit", "verticals", "links", "geography",
+                  "organization", "amounts", "work_type", "study_type"]
+
+
+@pytest.mark.parametrize("module", STARTUP_PASSES)
+def test_no_startup_pass_loads_the_whole_table(module):
+    """The regression guard. A full-table load in a startup pass is the exact
+    shape that put 1.5 GB and 100% CPU in a Gunicorn worker ten seconds after
+    boot, before a single request was served."""
     import inspect
 
     mod = __import__(f"app.services.{module}", fromlist=["x"])
@@ -156,8 +165,25 @@ def test_no_startup_backfill_loads_the_whole_table(module):
     assert "iter_opportunities" in src, f"{module} does not use the chunked walk"
     code = "\n".join(l for l in src.splitlines()
                      if not l.lstrip().startswith("#"))
-    assert "select(Opportunity)).scalars().all()" not in code, (
-        f"{module} still materialises the entire table")
+    for bad in ("select(Opportunity)).scalars().all()",
+                "select(Opportunity)).scalars():"):
+        assert bad not in code, (
+            f"{module} still walks the whole table with `{bad}` — note that "
+            f"`.scalars()` without `.all()` is NOT safe either: it streams, "
+            f"but the session's identity map keeps every row it yields")
+
+
+def test_the_count_of_startup_passes_matches_main():
+    """If someone adds a ninth pass, this list must grow with it — otherwise
+    the guard silently stops covering the new one."""
+    import inspect
+
+    from app import main
+
+    src = inspect.getsource(main)
+    for module in STARTUP_PASSES:
+        stem = module.replace("_audit", "").replace("_", "")
+        assert any(k in src for k in (module, stem)), module
 
 
 def test_startup_still_runs_all_eight_passes():

@@ -254,7 +254,9 @@ def backfill_organizations() -> int:
         # a source (DevelopmentAid's `donorIds` did exactly this, filling the
         # column with values like "118391"). Clear them so the next scrape can
         # store the real name instead of leaving a number on screen.
-        for opp in db.execute(select(Opportunity)).scalars().all():
+        from app.services.backfill import iter_opportunities
+
+        for opp in iter_opportunities(db):
             value = (opp.organization or "").strip()
             if value and value.replace(",", "").replace(" ", "").isdigit():
                 opp.organization = ""
