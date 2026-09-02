@@ -74,6 +74,34 @@ SEARCH_URL = (
     "&searchstax[order]=ds_date_closing%20desc"
 )
 
+# The facets, applied IN THE URL rather than by clicking checkboxes.
+#
+# Supplied by the platform owner on 2026-09-02 from their own signed-out
+# browser session, which is the only reason these are here. The comment below
+# _select_status_facet says the widget's facet encoding is undocumented and
+# that guessing it would silently return all 51,013 records with nothing in the
+# output to say the filter had been ignored — that reasoning still stands, and
+# is exactly why an OBSERVED encoding is worth more than the clicking path it
+# replaces. Clicking survives as the fallback, not the primary.
+#
+#   or:sm_fct_status:Active    open for bidding — the ~489 records that matter
+#   or:ss_fct_group:consulting Consulting Services only
+#
+# The consulting facet is a SCOPE DECISION, not a technical one: it excludes
+# ADB's goods, works and civil-works tenders entirely. Confirmed deliberate on
+# 2026-09-02 — the team bids consulting assignments and the rest would be noise
+# in the digest. Widen it by setting LOP_ADB_TENDER_FACETS (drop the group
+# entry) rather than editing this file; the count in the log is what tells you
+# the change took effect.
+DEFAULT_FACETS = ("or:ss_fct_group:consulting", "or:sm_fct_status:Active")
+# The Solr field that carries the open/closed distinction, checked against the
+# rendered rows to prove the facet actually applied.
+_STATUS_FACET_FIELD = "sm_fct_status"
+# Backstop only, used when the plain listing publishes no count to compare
+# against. ADB's facet counts are ~489 Active and ~396 Advance Notice against
+# 51,013 total, so anything in the thousands means no filter was applied.
+_MAX_PLAUSIBLE_FILTERED = 5_000
+
 # The Status facet, ticked before paging. This is the difference between a
 # viable crawl and an unusable one:
 #
@@ -96,6 +124,37 @@ SEARCH_URL = (
 STATUS_FACET = "Active"
 
 _PAGE_PARAM = re.compile(r"(searchstax(?:%5B|\[)page(?:%5D|\])=)(\d+)", re.I)
+
+
+def configured_facets() -> tuple[str, ...]:
+    """The facets to apply, from settings, falling back to DEFAULT_FACETS.
+
+    Read at call time rather than import time so the setting can be changed
+    without a redeploy of this module's constants.
+    """
+    raw = getattr(settings, "adb_tender_facets", "") or ""
+    chosen = tuple(f.strip() for f in raw.split(",") if f.strip())
+    return chosen or DEFAULT_FACETS
+
+
+def search_url(page: int, facets: tuple[str, ...] | None = None) -> str:
+    """The faceted search URL for page `page`.
+
+    Built rather than stored as a template, because the facet list is variable
+    length and each entry needs its own indexed parameter:
+
+        &searchstax[facets][0]=or:ss_fct_group:consulting
+        &searchstax[facets][1]=or:sm_fct_status:Active
+
+    Pure, so the exact URL this scraper requests can be asserted in a test
+    instead of inferred from a live run — the same reasoning that produced
+    scripts/devaid_urls.py after DevelopmentAid was found requesting a URL
+    nobody had checked.
+    """
+    url = SEARCH_URL.format(page=page)
+    for i, facet in enumerate(configured_facets() if facets is None else facets):
+        url += f"&searchstax[facets][{i}]={facet}"
+    return url
 
 # The container the results live in. Named once, because the pagination guard
 # and the per-page count both have to agree with the parser about what a
@@ -414,6 +473,12 @@ class AdbTendersScraper(BaseScraper):
                     self._dump(page, "adb_blocked")
                     return
 
+                # The unfiltered count, read here while the plain listing is
+                # still on screen. It is the baseline the facet check compares
+                # against, and reading it now is the only chance — after the
+                # faceted navigation there is nothing left to compare with.
+                baseline = self._read_total(page)
+
                 # Step two: move to the sorted search, carrying the page we just
                 # loaded as the referer. Navigating straight here from a cold
                 # context is what used to be refused.
@@ -445,24 +510,59 @@ class AdbTendersScraper(BaseScraper):
                     self._dump(page, "adb_no_results")
                     return
 
-                # Narrow to open tenders before paging anything. Unfiltered this
-                # is 51,013 records over 4,251 pages, of which parse_listing
-                # throws away all but the ~489 Active ones.
-                filtered = self._select_status_facet(page)
-                # The site rewrites its own URL when the facet is ticked, so
-                # this now carries whatever encoding the widget uses — no need
-                # to reverse-engineer it.
-                search_url = page.url if filtered else None
+                # The facets arrived in the URL above. Prove it, rather than
+                # assume it: a facet parameter that is accepted and ignored
+                # looks exactly like one that worked, and this scraper has
+                # already been bitten twice by precisely that shape
+                # (searchstax[page], and World Bank's os={offset}).
+                #
+                # The proof is the rendered rows themselves — if every row says
+                # Status: Active, the status facet applied.
+                faceted_total = self._read_total(page)
+                filtered = self._facet_applied(faceted_total, baseline)
+                if filtered:
+                    log.info(
+                        "[adb] facets applied via URL (%s): %s of %s tender(s). "
+                        "Row statuses on this page: %s",
+                        ", ".join(configured_facets()),
+                        f"{faceted_total:,}",
+                        f"{baseline:,}" if baseline else "?",
+                        dict(self._status_mix(page.content())))
+                    walk_url = page.url
+                else:
+                    log.warning(
+                        "[adb] the URL facets did NOT take — still %s record(s) "
+                        "against an unfiltered %s. Falling back to ticking the "
+                        "Status checkbox.",
+                        f"{faceted_total:,}" if faceted_total else "?",
+                        f"{baseline:,}" if baseline else "?")
+                    filtered = self._select_status_facet(page)
+                    # The site rewrites its own URL when the facet is ticked, so
+                    # this carries whatever encoding the widget uses.
+                    walk_url = page.url if filtered else None
+                search_url = walk_url
 
                 total = self._read_total(page)
                 per_page = len(page.query_selector_all("div.searchstax-search-result")) or 12
                 # Unfiltered runs get a bigger page budget, because the SORT is
                 # doing the filtering's job — see below.
                 budget = self.max_pages if filtered else self.unfiltered_max_pages
-                pages = min(budget, -(-total // per_page)) if total else budget
+                needed = -(-total // per_page) if total else 0
+                pages = min(budget, needed) if total else budget
                 log.info("[adb] %s tender(s) to walk at %s per page -> %s page(s)%s",
                          f"{total:,}" if total else "?", per_page, pages,
                          "" if filtered else " (Status facet NOT applied)")
+                if filtered and needed > budget:
+                    # "All the active tenders should be scraped" is the whole
+                    # requirement, and a budget that silently truncates the walk
+                    # is how it stops being true without anyone noticing. The
+                    # cap stays — an unbounded walk against a control that never
+                    # disables itself is worse — but it says so now.
+                    log.warning(
+                        "[adb] the page budget TRUNCATES this walk: %s page(s) "
+                        "needed for %s filtered record(s), cap is %s, so ~%s "
+                        "tender(s) will not be reached. Raise max_pages.",
+                        needed, f"{total:,}", budget, (needed - budget) * per_page)
                 if total and not filtered:
                     # This used to warn that an unfiltered run sees "only the
                     # first 720 of 51,013" and was therefore nearly useless.
@@ -715,7 +815,7 @@ class AdbTendersScraper(BaseScraper):
         passed explicitly.
         """
         try:
-            page.goto(SEARCH_URL.format(page=page_nr), timeout=90_000,
+            page.goto(search_url(page_nr), timeout=90_000,
                       wait_until="domcontentloaded", referer=LISTING_URL)
         except Exception as exc:                                # noqa: BLE001
             log.info("[adb] search page %s did not load (%s)", page_nr, exc)
@@ -806,6 +906,56 @@ class AdbTendersScraper(BaseScraper):
             # place that can answer it from production.
             log.info("[adb] pagination is working via the %s control", how)
         return True
+
+    @staticmethod
+    def _status_mix(html: str):
+        """Counter of the Status value on each rendered row.
+
+        Pure and takes HTML, so "did the facet apply" is a question a test can
+        ask. The clicking path could only answer it by watching a number change
+        in a browser, which is why it could never be checked in CI.
+        """
+        from collections import Counter
+
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html or "", "lxml")
+        mix: Counter = Counter()
+        for block in soup.select(RESULT_BLOCK):
+            m = _STATUS.search(block.get_text(" ", strip=True))
+            mix[m.group(1).strip() if m else "unlabelled"] += 1
+        return mix
+
+    @staticmethod
+    def _facet_applied(total: int, baseline: int = 0) -> bool:
+        """True when the RESULT COUNT dropped — the only honest evidence.
+
+        The obvious test is "are all the rendered rows Active", and it is
+        wrong. Checked against the captured page on 2026-09-02: it reads
+        "1 - 12 of 51013" — the whole unfiltered universe — and all twelve of
+        its rows say Status: Active. The sort is ds_date_closing DESC, so open
+        tenders come first by construction, and page 1 of an UNFILTERED walk
+        looks exactly like page 1 of a filtered one.
+
+        A row-level check would therefore have passed on an unfiltered crawl,
+        taken the 60-page budget and covered 720 of 51,013 records while
+        reporting success — the same "accepted and ignored" shape as
+        searchstax[page] and World Bank's os={offset}, produced by the guard
+        written to catch it.
+
+        The count is the discriminator, because the count is the one thing a
+        filter cannot leave unchanged. `baseline` is the unfiltered total read
+        off the plain listing page moments earlier, so this is a comparison
+        rather than a threshold.
+        """
+        if not total:
+            return False                    # nothing read; cannot claim either
+        if baseline:
+            return total < baseline
+        # No baseline (the listing page did not publish a count). Fall back to
+        # plausibility: ADB's filtered sets are hundreds, the unfiltered one is
+        # 51,013. This is a backstop, not the test.
+        return total <= _MAX_PLAUSIBLE_FILTERED
 
     @staticmethod
     def _pagination_state(html: str) -> str:

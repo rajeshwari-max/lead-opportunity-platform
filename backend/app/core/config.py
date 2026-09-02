@@ -354,6 +354,17 @@ class Settings(BaseSettings):
     # instead of one flat list. Off keeps the ordering but not the headings.
     digest_group_by_geography: bool = True
 
+    # ADB's tender search facets, comma-separated, applied in the request URL.
+    # Empty falls back to adb.DEFAULT_FACETS.
+    #
+    #   or:sm_fct_status:Active     open for bidding (keep this one)
+    #   or:ss_fct_group:consulting  Consulting Services only
+    #
+    # Dropping the group entry widens the crawl to goods, works and civil works
+    # as well — a scope decision, not a tuning knob. The tender count in the
+    # scrape log is what confirms a change took effect.
+    adb_tender_facets: str = ""
+
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
     # When true (set via LOP_READ_ONLY=true), scrape/schedule endpoints are

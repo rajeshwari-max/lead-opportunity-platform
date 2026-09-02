@@ -205,6 +205,114 @@ def test_a_failed_navigation_does_not_condemn_the_url_mechanism():
 
 # ------------------------------------------------- the wait actually waits
 
+# --------------------------------------------- the URL we actually request
+
+# Supplied by the platform owner on 2026-09-02, copied from their own browser.
+# Asserted verbatim, because "which URL does this scraper request" was answered
+# for two other sources by reading config rather than by checking, and both
+# times the answer was wrong.
+OWNER_URL = (
+    "https://www.adb.org/projects/tenders"
+    "?searchstax[query]=*"
+    "&searchstax[page]=1"
+    "&searchstax[order]=ds_date_closing%20desc"
+    "&searchstax[facets][0]=or:ss_fct_group:consulting"
+    "&searchstax[facets][1]=or:sm_fct_status:Active"
+)
+
+
+def test_the_scraper_requests_exactly_the_url_the_owner_gave():
+    from app.scrapers.adb import search_url
+
+    assert search_url(1) == OWNER_URL
+
+
+def test_the_page_number_is_the_only_thing_that_moves():
+    from app.scrapers.adb import search_url
+
+    assert search_url(7) == OWNER_URL.replace("[page]=1", "[page]=7")
+
+
+def test_the_facets_are_indexed_separately():
+    """Each facet needs its own [n] parameter. Joining them into one would be
+    accepted and ignored — the failure shape this source keeps producing."""
+    from app.scrapers.adb import search_url
+
+    url = search_url(1)
+    assert "searchstax[facets][0]=" in url and "searchstax[facets][1]=" in url
+
+
+def test_the_status_facet_is_not_optional():
+    """Widening the group is a supported change. Dropping Active is not: it
+    turns a 41-page walk into a 4,251-page one that gets truncated at 60."""
+    from app.scrapers.adb import DEFAULT_FACETS
+
+    assert any("sm_fct_status:Active" in f for f in DEFAULT_FACETS)
+
+
+def test_the_facets_can_be_widened_without_editing_code(monkeypatch):
+    # Patch the settings object THIS MODULE holds, not the one importable from
+    # app.core.config. Other tests in the suite reload that module, which swaps
+    # the object — so patching the importable one lands on a different instance
+    # and the test passes alone and fails in the suite. It did exactly that.
+    from app.scrapers import adb
+
+    monkeypatch.setattr(adb.settings, "adb_tender_facets",
+                        "or:sm_fct_status:Active", raising=False)
+    url = adb.search_url(1)
+    assert "sm_fct_status:Active" in url
+    assert "consulting" not in url, "the group restriction must be droppable"
+
+
+# --------------------------------------------- proving the facet applied
+
+def applied(total: int, baseline: int = 0) -> bool:
+    from app.scrapers.adb import AdbTendersScraper
+
+    return AdbTendersScraper._facet_applied(total, baseline)
+
+
+def test_all_rows_reading_active_is_not_evidence_the_facet_applied():
+    """The check I wrote first, and the captured page disproves it.
+
+    logs/adb_no_results.html reads "1 - 12 of 51013" — the entire unfiltered
+    universe — and all twelve of its rows say Status: Active. The sort is
+    ds_date_closing DESC, so open tenders come first by construction and page 1
+    of an unfiltered walk is indistinguishable from page 1 of a filtered one.
+
+    A row-level check would have passed on an unfiltered crawl, taken the
+    60-page budget and covered 720 of 51,013 records while reporting success.
+    """
+    from app.scrapers.adb import AdbTendersScraper
+
+    mix = AdbTendersScraper._status_mix(listing())
+    assert set(mix) == {"Active"}, \
+        "every row in the fixture taken from that page is Active"
+    assert not applied(total=51013, baseline=51013), (
+        "...and the count says the facet did nothing. The count is the test.")
+
+
+def test_a_dropped_count_is_the_evidence():
+    assert applied(total=489, baseline=51013)
+
+
+def test_an_unchanged_count_means_the_facet_was_ignored():
+    assert not applied(total=51013, baseline=51013)
+
+
+def test_no_count_read_claims_nothing():
+    """Cannot-tell must not read as yes. The fallback click costs one action;
+    a wrong yes costs 98.6% of the source."""
+    assert not applied(total=0, baseline=51013)
+
+
+def test_without_a_baseline_it_falls_back_to_plausibility():
+    """A backstop, not the test — used only when the plain listing published no
+    count to compare against."""
+    assert applied(total=489)
+    assert not applied(total=51013)
+
+
 # ------------------------------------- the control, as ADB actually renders it
 
 def bars() -> tuple[str, str]:
