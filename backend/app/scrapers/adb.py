@@ -540,7 +540,6 @@ class AdbTendersScraper(BaseScraper):
                     # The site rewrites its own URL when the facet is ticked, so
                     # this carries whatever encoding the widget uses.
                     walk_url = page.url if filtered else None
-                search_url = walk_url
 
                 total = self._read_total(page)
                 per_page = len(page.query_selector_all("div.searchstax-search-result")) or 12
@@ -612,7 +611,7 @@ class AdbTendersScraper(BaseScraper):
                     # because a fixed ADB deploy should be picked up
                     # automatically rather than needing this file edited again.
                     if mode.should_try_url():
-                        moved = self._goto_page(page, search_url, n + 1)
+                        moved = self._goto_page(page, walk_url, n + 1)
                         changed = (moved
                                    and self._results_signature(page.content()) != before)
                         action = mode.url_result(attempted=moved, changed=changed)
@@ -663,17 +662,21 @@ class AdbTendersScraper(BaseScraper):
                 site_auth.close_owned(context)
 
     @classmethod
-    def _goto_page(cls, page, search_url: str | None, page_nr: int) -> bool:
+    def _goto_page(cls, page, walk_url: str | None, page_nr: int) -> bool:
         """Go to page N, preserving the facet the walk ticked.
 
-        `search_url` is the URL the SITE produced after the Status facet was
+        `walk_url` is the URL the SITE settled on once the facets were applied.
+        Named apart from the module-level `search_url()` deliberately: one is the
+        URL we construct, the other is the URL the widget ended up on, and a
+        single name for both is one edit away from an UnboundLocalError.
+        The old wording follows. It was the URL the SITE produced after the facet was
         applied. Paging from it keeps the filter; paging from the module-level
         SEARCH_URL would silently drop it and quietly walk all 51,013 records
         instead of 489.
         """
-        if search_url:
+        if walk_url:
             try:
-                page.goto(cls._with_page(search_url, page_nr), timeout=90_000,
+                page.goto(cls._with_page(walk_url, page_nr), timeout=90_000,
                           wait_until="domcontentloaded", referer=LISTING_URL)
             except Exception as exc:                            # noqa: BLE001
                 log.info("[adb] page %s did not load (%s)", page_nr, exc)
