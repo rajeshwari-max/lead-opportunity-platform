@@ -139,9 +139,11 @@ export function ScraperPanel({ sources, progress }: Props) {
             <Layers className="h-3.5 w-3.5" /> Verticals
             <span className="font-normal">(none = all)</span>
           </p>
-          {/* No height cap: the list is a fixed six items, and max-h-36 was
-              cutting the last one ("Innovative Finance") off behind a scroll
-              that read as the option simply not existing. */}
+          {/* No height cap: the list is a fixed seven items, and max-h-36 was
+              cutting the last one off behind a scroll that read as the option
+              simply not existing. Keep it uncapped as verticals are added —
+              the newest one is always the one that would disappear, and it is
+              also the one nobody has learned to expect yet. */}
           <div className="space-y-0.5">
             {VERTICALS.map((s) => (
               <Checkbox key={s} label={s}
