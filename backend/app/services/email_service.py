@@ -10,6 +10,7 @@ from email.mime.text import MIMEText
 
 from app.core.config import settings
 from app.database.models import Opportunity, TeamMember
+from app.services import geo_priority
 from app.services.links import link_kind, resolve_link
 
 log = logging.getLogger("scraper")
@@ -84,12 +85,24 @@ def _approve_cell(o: Opportunity, member: TeamMember) -> str:
 
 # Sections appear in this order regardless of size, so the same email always
 # reads the same way. Anything unrecognised falls to the end under "Other".
-_REGION_ORDER = [
-    "South Asia",          # home region — always first, whatever the counts say
+#
+# The leading entries are no longer written here: the home region order comes
+# from settings (see geo_priority), and this list supplies only the tail. Two
+# hard-coded orderings — one here, one in geo_priority — would drift, and the
+# first symptom would be an email whose sections disagree with the order the
+# matcher chose.
+_REGION_TAIL = [
     "Southeast Asia", "East Asia", "Central Asia", "Middle East",
     "Africa", "Europe", "North America", "Latin America", "Oceania", "Global",
 ]
 _UNPLACED = "Other / unspecified"
+
+
+def _region_order(priority) -> list[str]:
+    """Configured home regions first, then the fixed tail, no repeats."""
+    ordered = [r for r in priority.regions]
+    ordered += [r for r in _REGION_TAIL if r not in ordered]
+    return ordered
 
 # Gmail clips any message over ~102 KB behind a "[Message clipped]" link, and
 # other clients get slow or refuse outright. A row costs roughly 1.7 KB with its
@@ -114,24 +127,42 @@ _CAP_LADDER = (25, 15, 10, 6, 4, 2)
 _SIZE_BUDGET = 95 * 1024      # Gmail clips at ~102 KB; leave headroom for MIME
 
 
-def _group_by_region(opportunities: list[Opportunity]) -> list[tuple[str, list[Opportunity]]]:
-    """Bucket by region, soonest deadline first inside each bucket.
+def _group_for_digest(opportunities: list[Opportunity]) -> list[tuple[str, list[Opportunity]]]:
+    """Home countries first, then regions, soonest deadline inside each bucket.
 
     A single flat list of several hundred rows can only be read by scrolling
-    through all of it. Region is the coarsest split that stays useful — there
-    are 11 of them, against 220+ countries, which would just replace one long
-    list with a long index.
+    through all of it, so the digest has always been sectioned. It sectioned by
+    region alone, and that had a specific failure: India and Bangladesh and
+    Nepal all landed in one "South Asia" block, and because each section is
+    capped (see _CAP_LADDER) an Indian call could be pushed below the cap by
+    Nepalese ones and never appear at all. For a team that bids in India, that
+    is the worst row to hide.
+
+    So the configured home countries are lifted out into their own sections
+    above the regions. Everything else groups by region exactly as before —
+    country-level sections for the whole world would replace one long list with
+    a 220-entry index.
     """
+    priority = geo_priority.load()
+    country_names = list(priority.countries)
+    # casefolded name -> the display spelling, so "india" and "INDIA" land in
+    # the same bucket and the heading still reads "India".
+    home = {name.casefold(): name for name in country_names}
+
     buckets: dict[str, list[Opportunity]] = {}
     for o in opportunities:
-        buckets.setdefault((o.region or "").strip() or _UNPLACED, []).append(o)
+        key = home.get((o.country or "").strip().casefold())
+        if key is None:
+            key = (o.region or "").strip() or _UNPLACED
+        buckets.setdefault(key, []).append(o)
 
     for items in buckets.values():
         # Ongoing calls (no deadline) sort last: they can be acted on any time,
         # so they shouldn't push a closing deadline down the page.
         items.sort(key=lambda x: (x.deadline is None, x.deadline or date.max))
 
-    ordered = [(r, buckets.pop(r)) for r in _REGION_ORDER if r in buckets]
+    ordered = [(c, buckets.pop(c)) for c in country_names if c in buckets]
+    ordered += [(r, buckets.pop(r)) for r in _region_order(priority) if r in buckets]
     # Anything not in the known list, then the unplaced bucket, always last.
     tail = sorted((r for r in buckets if r != _UNPLACED))
     ordered += [(r, buckets[r]) for r in tail]
@@ -142,7 +173,7 @@ def _group_by_region(opportunities: list[Opportunity]) -> list[tuple[str, list[O
 
 def _digest_html(member: TeamMember, opportunities: list[Opportunity]) -> str:
     """Grouped digest, rendered small enough that no mail client clips it."""
-    groups = _group_by_region(opportunities)
+    groups = _group_for_digest(opportunities)
     n = len(opportunities)
     if n <= _COMPACT_ABOVE:
         html = _render_digest(member, groups, n, compact=False, cap=None)

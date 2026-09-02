@@ -16,7 +16,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.database.models import Category, Opportunity, SentLog, Status, TeamMember
-from app.services import geo_routing, relevance
+from app.services import geo_priority, geo_routing, relevance
 from app.services.actionable import strict_actionable_clause
 from app.services.vertical_names import normalize_vertical_csv
 from app.services.verticals import VERTICALS
@@ -45,6 +45,12 @@ class MatchingService:
         # Was a third copy of the "still open" rule, and it had drifted from
         # the other two: `deadline IS NULL` counted as open, so every row whose
         # date could not be parsed was emailed as a live opportunity.
+        #
+        # STRICT, the same rule the dashboard shows. "Dashboard totals,
+        # pagination, exports and automatic emails must use the same rule" —
+        # and email is the one place where being broader is worst: a person
+        # cannot tell from an inbox that a row is undated, so an unanswerable
+        # call arrives looking exactly like a live one.
         stmt = select(Opportunity).where(strict_actionable_clause())
 
         keywords = _csv(member.keywords)
@@ -139,16 +145,42 @@ class MatchingService:
         # survived — so a member's single best match could be dropped before
         # anything had judged it.
         rows = list(self.db.execute(stmt).scalars().all())
+
+        # Home geography decides the ORDER from here on, and only the order.
+        # Nothing below drops a row: everything in `rows` already satisfies the
+        # member's own country/region routing above, so re-filtering here would
+        # silently override a choice they made.
+        #
+        # The tier is the FIRST key in both branches, so every Indian row sorts
+        # above every South Asian one, which sorts above everything else. What
+        # each branch already sorted by then breaks ties inside a tier — where
+        # it is the right tool, because by then every candidate is equally
+        # close to home. A blended score would let a strong keyword match in
+        # Peru outrank a weaker one in Delhi, which is the exact thing this
+        # exists to stop.
+        priority = geo_priority.load()
+
         if not keywords:
             # No keywords means "send me everything", which is the documented
-            # behaviour and not something to score. Deadline order, as before.
-            rows.sort(key=lambda o: (o.deadline is None, o.deadline or date.max))
+            # behaviour and not something to score. Deadline order within a
+            # tier, as before.
+            rows.sort(
+                key=lambda o: (
+                    geo_priority.sort_key(o, priority),
+                    o.deadline is None,
+                    o.deadline or date.max,
+                )
+            )
             return rows[:limit] if limit is not None else rows
 
         scored = self.score_rows(rows, keywords)
         kept = [(row, m) for row, m in scored if m.is_match]
         ranked = relevance.rank(kept)
+        # `ranked` is already in relevance order. Sorting it again by tier alone
+        # is a STABLE sort, so relevance order survives untouched inside each
+        # tier — this reorders the groups, it does not re-rank the contents.
         result = [row for row, _ in ranked]
+        result.sort(key=lambda o: geo_priority.sort_key(o, priority))
         return result[:limit] if limit is not None else result
 
     def score_rows(self, rows, keywords) -> list[tuple[Opportunity, relevance.Match]]:

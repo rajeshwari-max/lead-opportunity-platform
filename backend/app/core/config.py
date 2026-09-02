@@ -337,6 +337,23 @@ class Settings(BaseSettings):
     digest_hour: int = 9
     digest_minute: int = 0
 
+    # Which geographies a reader should see FIRST in a digest. Ordering only —
+    # nothing is filtered out by these, because whatever reached the digest
+    # already passed the member's own country/region routing.
+    #
+    # Countries are checked before regions, because "India" is more specific
+    # than "South Asia". "Global" sits above the remaining regions because a
+    # worldwide call is open to an Indian bidder by definition, where a call
+    # scoped to Latin America is not.
+    #
+    # These are business facts, not code facts: a team working out of Nairobi
+    # sets LOP_DIGEST_PRIORITY_COUNTRIES=Kenya rather than editing a module.
+    digest_priority_countries: str = "India"
+    digest_priority_regions: str = "South Asia,Global"
+    # Show the tier headings ("India (4)", "South Asia (2)") inside the email
+    # instead of one flat list. Off keeps the ordering but not the headings.
+    digest_group_by_geography: bool = True
+
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
     # When true (set via LOP_READ_ONLY=true), scrape/schedule endpoints are
