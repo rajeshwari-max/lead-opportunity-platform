@@ -42,7 +42,7 @@ python scripts/check_scraper.py <source> --pages 1 --json /tmp/<source>.json
 | `worldbank_procnotice.json` | World Bank | CAPTURED | field names, the award record, the project-titled record |
 | `worldbank_empty.json` | World Bank | CAPTURED | `total: 0` as positive proof of emptiness |
 | `adb_listing_row.html` | ADB Tenders | CAPTURED | the Label: value spans; an award whose status still says Active |
-| `devnet_listing_row.html` | DevNetJobsIndia | CAPTURED | the direct-link row and the postback-only row |
+| `devnet_listing_row.html` | DevNetJobsIndia | CAPTURED (grid) + DERIVED (sidebar) | the direct-link row and the postback-only row. The sidebar block below them is DERIVED, not captured: it is the shape the recovery path matches against, with the `&nbsp;` an ASP.NET GridView really emits. So the NBSP defect it pins is real; the exact sidebar markup is reconstructed, and would not catch DevNet restructuring that widget. |
 | `developmentaid_tender_records.json` | DevelopmentAid | SYNTHETIC | `donorIds` never winning the URL; `Id` vs `id`; the 9999-12-31 sentinel |
 | `unpp_open_projects.json` | UN Partner Portal | SYNTHETIC | `count` as the coverage basis; a record with no deadline |
 | `unpp_empty.json` | UN Partner Portal | SYNTHETIC | `count: 0` as positive proof of emptiness |

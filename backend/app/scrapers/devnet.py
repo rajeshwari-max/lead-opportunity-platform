@@ -24,6 +24,27 @@ log = logging.getLogger("scraper")
 
 _JOB_ID = re.compile(r"joblogos/(\d+)\.\w{3,4}", re.IGNORECASE)
 _JOB_ID_HREF = re.compile(r"job_id=(\d+)", re.IGNORECASE)
+# How much of a title has to agree before two are treated as the same notice.
+# Long enough that unrelated calls do not collide, short enough to survive the
+# sidebar truncating a title mid-word.
+_PREFIX = 40
+
+
+def normalise_title(text: str) -> str:
+    """One spelling of a title, for comparing the grid against the sidebar.
+
+    Pure, so the matching rule can be tested without a page. The grid is an
+    ASP.NET GridView: it emits &nbsp; between words, and BeautifulSoup hands
+    that back as \\xa0, which is not a space to `startswith` and is a space to
+    every human reading the page. Non-breaking spaces have cost this project a
+    whole source once already (ADB's "Notice&nbsp;Type").
+
+    Also collapses runs of whitespace and drops the trailing ellipsis the
+    sidebar uses to truncate.
+    """
+    s = (text or "").replace("\xa0", " ").replace("​", "")
+    s = re.sub(r"\s+", " ", s).strip().lower()
+    return s.rstrip("… .")
 _APPLY_BY = re.compile(r"apply\s*by\s*:?\s*(.+)", re.IGNORECASE)
 _LOCATION = re.compile(r"location\s*:?\s*(.+)", re.IGNORECASE)
 _PAGE_POSTBACK = re.compile(r"__doPostBack\('([^']*grdJobs[^']*)','(Page\$\d+)'\)")
@@ -56,9 +77,9 @@ class DevNetScraper(BaseScraper):
         title_to_id: dict[str, str] = {}
         for a in soup.find_all("a", href=True):
             m = _JOB_ID_HREF.search(a["href"])
-            label = a.get_text(" ", strip=True).rstrip("….").rstrip(".")
+            label = normalise_title(a.get_text(" ", strip=True))
             if m and len(label) > 15:
-                title_to_id[label.lower()] = m.group(1)
+                title_to_id[label] = m.group(1)
 
         for row in grid.find_all("tr"):
             text = row.get_text("\n", strip=True)
@@ -158,11 +179,35 @@ class DevNetScraper(BaseScraper):
             m = _JOB_ID.search(img["src"])
             if m:
                 return f"{self.website}/jobdescription.aspx?job_id={m.group(1)}"
-        # postback-only row: recover job_id by matching sidebar link titles
-        low = title.lower()
-        for label, job_id in title_to_id.items():
-            if low.startswith(label[:40]) or label.startswith(low[:40]):
-                return f"{self.website}/jobdescription.aspx?job_id={job_id}"
+        # Postback-only row: recover the job_id by matching the sidebar's
+        # (truncated) link titles.
+        #
+        # Both sides are normalised first. The grid is an ASP.NET GridView and
+        # renders &nbsp; freely, so "Endline\xa0Evaluation" and "Endline
+        # Evaluation" are the same title to a reader and different strings to
+        # `startswith`. That exact character has defeated this project twice
+        # before — ADB writes "Notice&nbsp;Type" and a check looking for
+        # "Notice Type" never fired, throwing away a page of good tenders.
+        #
+        # The ambiguity guard is the other half, and it matters more than the
+        # normalisation. Prefix-matching on 40 characters can hit two different
+        # notices from the same organisation — "Request for Proposals for
+        # Baseline Survey in Odisha" and "...in Bihar" share 41. Attaching one
+        # row to the other's job_id produces a link that WORKS and opens the
+        # wrong call, which no count or test can see. Better to drop the row:
+        # a missing link is visible in link_loss, a wrong one is not.
+        low = normalise_title(title)
+        matches = {
+            job_id for label, job_id in title_to_id.items()
+            if low.startswith(label[:_PREFIX]) or label.startswith(low[:_PREFIX])
+        }
+        if len(matches) == 1:
+            return f"{self.website}/jobdescription.aspx?job_id={matches.pop()}"
+        if len(matches) > 1:
+            log.info("[%s] %r matches %s different sidebar entries — dropping "
+                     "rather than guessing which call it is",
+                     self.name, title[:60], len(matches))
+            return ""
 
         # No id recovered. Returning start_url here is what produced "86
         # different RFPs all pointing at rfp_assignments.aspx" — every one of
