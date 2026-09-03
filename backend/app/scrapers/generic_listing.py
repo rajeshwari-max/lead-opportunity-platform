@@ -86,12 +86,41 @@ _NAV_HREF = re.compile(
 # /page/2/, ?page=2, ?paged=2, ?p=2 — the number is group(2) so it can be bumped.
 _PAGE_IN_URL = re.compile(r"(/page/|[?&](?:page|paged|pg|p)=)(\d+)", re.IGNORECASE)
 
+# A month name, spelled out or abbreviated. Named rather than `\w{3,9}` so the
+# hyphenated shape below cannot match "2-year-2027" or a product code.
+_MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
+# 21-Feb-27 — day, month NAME and a two-digit year, joined by hyphens.
+#
+# This is how procurement-notices.undp.org prints every closing date, and not
+# one of the shapes below matched it: the spaced form wants `\s` separators and
+# a four-digit year, and the all-numeric form wants digits where the month name
+# is. So UNDP's dates were never extracted at all.
+#
+# The damage was hidden by WHERE it surfaced. The verification run reported
+# "50.0% of the deadline strings parse into a date, below 90%" — which reads
+# like a parser that mishandles UNDP's format. The parser handles it fine:
+# DeadlineParser().parse("21-Feb-27") returns 2027-02-21 today. Only 0.4% of
+# 555 rows carried a deadline string at all, so that 50% was measured over two
+# rows, and the real fault — 553 rows with no date extracted — was invisible
+# behind a percentage computed on a sample of two.
+#
+# Added as a NEW alternative rather than by loosening the existing ones, so
+# this cannot cost recall on any source that works today.
+_DMY_HYPHEN = rf"\d{{1,2}}[-/]{_MONTH}[-/]\d{{2,4}}"
+
 # A bare date, for cells that hold nothing else. Group 1 matches the same shapes
-# _DEADLINE captures, so both feed deadline_raw identically.
-_DATE_ONLY = re.compile(
-    r"(\d{1,2}\s+\w{3,9}\s+\d{4}|\w{3,9}\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2}|"
-    r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4})"
+# _DEADLINE captures, so both feed deadline_raw identically — and they are one
+# definition now rather than two hand-copied copies, because two copies of a
+# pattern that must agree is exactly how the ADB guard came to compare a text
+# slice against a hash.
+_DATE_SHAPES = (
+    r"\d{1,2}\s+\w{3,9}\s+\d{4}"          # 21 Feb 2027
+    r"|\w{3,9}\s+\d{1,2},?\s+\d{4}"       # February 21, 2027
+    r"|\d{4}-\d{2}-\d{2}"                 # 2027-02-21
+    r"|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}"   # 09-01-27
+    rf"|{_DMY_HYPHEN}"                    # 21-Feb-27   <- UNDP
 )
+_DATE_ONLY = re.compile(f"({_DATE_SHAPES})")
 
 
 def _same_page(url: str, page_url: str) -> bool:
@@ -131,8 +160,7 @@ def strip_field_label(title: str) -> str:
 _DEADLINE = re.compile(
     r"(?:deadline|closing date|closes?|apply by|due|submission[s]? (?:by|due)|"
     r"expires?)\s*[:\-–]?\s*"
-    r"(\d{1,2}\s+\w{3,9}\s+\d{4}|\w{3,9}\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2}|"
-    r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4})",
+    f"({_DATE_SHAPES})",
     re.IGNORECASE)
 
 
@@ -235,6 +263,12 @@ class GenericListingScraper(BaseScraper):
     # Whether the page just parsed yielded anything — guards URL-bumping so a
     # non-paginated site isn't walked into invented page numbers.
     _page_had_items: bool = False
+    # Signatures of the last two pages parsed, so a page that re-serves the
+    # previous one can be told apart from a page that legitimately ends the
+    # walk. Empty string means "no page parsed yet", which is not the same as
+    # "an empty page" — the guard must not fire on the first page.
+    _page_signature: str = ""
+    _prev_signature: str = ""
 
     # Per-source CSS overrides (optional, from sources.json):
     #   item_selector  — container for each listing
@@ -307,6 +341,30 @@ class GenericListingScraper(BaseScraper):
                         if raw:
                             m = _DATE_ONLY.search(raw) or m
 
+                # Still nothing, and this row is a table row: look for a cell
+                # that holds a date and NOTHING else.
+                #
+                # `deadline_selector` above is the precise answer and needs
+                # someone to read the real markup and write a selector. Until
+                # that happens a notice board yields 0% deadlines, and a row
+                # with no deadline becomes a permanently-open "Ongoing" that
+                # nothing can expire. UNDP Procurement sat at 0.4% for exactly
+                # this reason while the mechanism to fix it already existed.
+                #
+                # The guard is `len(dated) == 1`. A board that prints a posting
+                # date AND a closing date has two date cells, and there is no
+                # way to tell which is which from shape alone — so this declines
+                # rather than guessing. A wrong deadline is worse than none: it
+                # silently expires a live call, or keeps a dead one on the
+                # dashboard. `fullmatch` is what makes "its own cell" true —
+                # a cell of prose that merely contains a date is not a date
+                # column.
+                if m is None and getattr(block, "name", "") == "tr":
+                    dated = [c for c in block.find_all("td")
+                             if _DATE_ONLY.fullmatch(c.get_text(" ", strip=True))]
+                    if len(dated) == 1:
+                        m = _DATE_ONLY.search(dated[0].get_text(" ", strip=True))
+
                 # Positive test, applied last because it needs the block text.
                 # Without it a page with no open calls still yields whatever
                 # links it happens to contain — which is how Clean Air Fund
@@ -356,6 +414,11 @@ class GenericListingScraper(BaseScraper):
                     assume_active=_says_rolling(text),
                 ))
         self._page_had_items = bool(items)
+        # Remember WHAT this page produced, not just that it produced something.
+        # next_page() uses it to notice a "next" page that re-serves the
+        # previous one — see the note there.
+        self._prev_signature, self._page_signature = (
+            self._page_signature, rows_signature(items))
         if rejected:
             # Visible on purpose. A page that yields 0 kept and 40 rejected is a
             # page with no open calls; 0 kept and 0 rejected means the parser
@@ -389,6 +452,37 @@ class GenericListingScraper(BaseScraper):
         use numbered links, an arrow glyph, or a WordPress /page/N/ URL rather
         than a literal "Next" anchor.
         """
+        # -1. Did the page we just parsed actually MOVE?
+        #
+        # This guard exists because the failure it catches is the one that looks
+        # most like success. A "next" link that re-serves the current page is
+        # accepted by every branch below: the URL changes, the fetch succeeds,
+        # rows come back, and the crawl reports "every available page was
+        # scraped". ADB did exactly this — 36 rows over three pages of which 12
+        # were distinct, the same twelve three times — and World Bank did it
+        # with os={offset}. Both were found by hand, months apart, and both were
+        # in code that had no way to notice.
+        #
+        # ADB got a fix. The generic scraper serving the other 71 sources did
+        # not, and it is where the same bug is most likely to recur, because
+        # nothing here knows what any particular site's pagination is supposed
+        # to look like. The manager's stale-page counter does stop these runs
+        # eventually, but it reports them as "only older content ahead" — a
+        # confident and wrong explanation that sends the next person looking at
+        # the wrong thing.
+        #
+        # Two pages in a row with identical rows is not proof of a broken
+        # parameter, but it is proof that continuing is pointless.
+        if (self._page_signature
+                and self._page_signature == self._prev_signature):
+            log.warning(
+                "[%s] page %s returned the SAME row(s) as page %s. Pagination "
+                "is not advancing — the link or parameter is accepted and "
+                "ignored. Stopping here rather than re-yielding the same rows; "
+                "this is a pagination defect, NOT the end of the listing.",
+                self.name, page_number, page_number - 1)
+            return None
+
         # 0. An explicit template from sources.json wins over any guessing.
         #    Auto-detection only knows the common shapes (?page=N, /page/N/), and
         #    misses anything else — ADB paginates with searchstax%5Bpage%5D=N, so
@@ -447,6 +541,30 @@ class GenericListingScraper(BaseScraper):
             if nxt != page_url:
                 return PageRequest(nxt)
         return None
+
+
+def rows_signature(items) -> str:
+    """A fingerprint of the ROWS a page produced, and nothing else.
+
+    Keyed on link plus title, because those are what identifies an opportunity.
+    Deliberately not the page HTML: two genuinely different pages share almost
+    all of their markup, and two identical result sets can arrive inside
+    different chrome — a page counter, a "showing 13-24 of 40" line, a rotating
+    banner. ADB's first guard compared `body.innerText[:4000]` and passed three
+    times running on re-served rows for exactly that reason.
+
+    An empty page returns "" so the caller can tell "no rows" apart from "the
+    same rows as last time"; those mean opposite things.
+    """
+    parts = []
+    for it in items or []:
+        link = (getattr(it, "opportunity_url", "") or "").split("?")[0]
+        parts.append(f"{link}|{(getattr(it, 'title', '') or '').strip()[:120]}")
+    if not parts:
+        return ""
+    import hashlib
+
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
 def _load_config() -> list[dict]:

@@ -428,7 +428,9 @@
     "website": "https://procurement-notices.undp.org",
     "stale_page_streak": 0,
     "curated": true,
-    "_curated_note": "A dedicated notice board: every row is a published tender or procurement notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py."
+    "_curated_note": "A dedicated notice board: every row is a published tender or procurement notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "require_funding_signal": false,
+    "_funding_signal_note": "OFF because this board is curated: every row is a published notice, so a row does not have to contain funding vocabulary to be one. With it on, 'Individual Consultant: Gender Mainstreaming Adviser' — a real UNDP consultancy notice — is discarded for saying nothing about money. is_furniture, the same-page test and the nav-href test still reject navigation, so this admits notices, not chrome."
   },
   {
     "name": "brainforest_global",
