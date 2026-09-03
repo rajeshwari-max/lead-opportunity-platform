@@ -160,3 +160,48 @@ def db_mod(monkeypatch):
     importlib.reload(db_module)
     db_module.init_db()
     return db_module
+
+
+# ----------------------------------------- and back into the live list
+
+def test_a_row_retired_for_having_no_date_returns_when_it_gains_one(db_mod):
+    """Filling the date is not enough on its own.
+
+    audit_deadlines() marks an UNDATED row EXPIRED once it has gone unseen for
+    longer than LOP_ONGOING_MAX_AGE_DAYS, and the ordinary view requires
+    status == ACTIVE. Without this, a repaired row carries a perfectly good
+    future deadline and stays invisible — the exact shape of the bug the
+    repair exists to undo. UNDP hit it: 529 rows repaired, none visible.
+    """
+    from app.database.models import Status
+
+    url = "https://procurement-notices.undp.org/view_notice.cfm?notice_id=7"
+    ingest(db_mod, [raw("Request for Proposals: Solar Mini-Grid Study", url)])
+
+    # The stale-row sweep retires it for having no closing date.
+    with db_mod.session_scope() as db:
+        row = db.query(type(stored(db_mod, "notice_id=7"))).filter_by(
+            opportunity_url=url).first()
+        row.status = Status.EXPIRED
+    assert stored(db_mod, "notice_id=7").status is Status.EXPIRED
+
+    # The source is still publishing it, and now we can read the date.
+    ingest(db_mod, [raw("Request for Proposals: Solar Mini-Grid Study", url,
+                        deadline_raw="21-Feb-27")])
+    row = stored(db_mod, "notice_id=7")
+    assert row.deadline == date(2027, 2, 21)
+    assert row.status is Status.ACTIVE, "a future date means live again"
+
+
+def test_a_row_whose_new_date_has_already_passed_stays_expired(db_mod):
+    """The other direction. Reading a date that closed last year is not a
+    reason to put the row back in front of anyone."""
+    from app.database.models import Status
+
+    url = "https://procurement-notices.undp.org/view_notice.cfm?notice_id=8"
+    ingest(db_mod, [raw("Request for Proposals: Archived Programme", url)])
+    ingest(db_mod, [raw("Request for Proposals: Archived Programme", url,
+                        deadline_raw="01-Jan-20")])
+    row = stored(db_mod, "notice_id=8")
+    assert row.deadline == date(2020, 1, 1)
+    assert row.status is Status.EXPIRED

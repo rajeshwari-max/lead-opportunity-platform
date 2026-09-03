@@ -704,6 +704,32 @@ class ScraperManager:
                                 deadline_checked_at=datetime.now(timezone.utc),
                             )
                             dated_late += 1
+
+                            # And put it back in the live list if a stale-row
+                            # sweep had already retired it.
+                            #
+                            # Filling the date is not enough on its own.
+                            # audit_deadlines() marks an UNDATED row EXPIRED
+                            # once it has gone unseen for longer than
+                            # LOP_ONGOING_MAX_AGE_DAYS, and the ordinary view
+                            # requires status == ACTIVE. So a repaired row
+                            # would carry a perfectly good future deadline and
+                            # remain invisible — which is exactly the shape of
+                            # the bug this whole repair exists to undo.
+                            #
+                            # Safe because this branch only runs when the
+                            # stored deadline was NULL: there was no earlier
+                            # date, so the row cannot have been expired ON a
+                            # date. It was retired for having none. The rule
+                            # applied here is the audit's own — a future date
+                            # means live — so the two cannot disagree.
+                            # Set from the date in BOTH directions. Only
+                            # reactivating left the mirror case broken: a row
+                            # repaired with a date that has already passed
+                            # stayed ACTIVE, carrying a closed deadline, until
+                            # the next nightly audit corrected it.
+                            fields["status"] = (Status.EXPIRED if is_expired
+                                                else Status.ACTIVE)
                         db.execute(
                             update(Opportunity)
                             .where(Opportunity.id == exists)
