@@ -503,6 +503,11 @@ class ScraperManager:
         """
         saved = expired = dupes = spam = rejected = 0
         undated = rolling_rows = unassessed = 0
+        # Rows that were already stored WITHOUT a deadline and gained one on
+        # this pass. Counted and logged because it is otherwise invisible: the
+        # run reports "0 new saved" either way, and a fix that repairs 1,274
+        # rows would look exactly like a fix that repaired none.
+        dated_late = 0
         out_of_scope = 0
         expired_samples: list[str] = []
         today = date.today()
@@ -652,9 +657,11 @@ class ScraperManager:
 
                 uid = make_unique_id(raw.title, raw.organization, deadline, raw.opportunity_url)
 
-                exists = db.execute(
-                    select(Opportunity.id).where(Opportunity.unique_id == uid)
-                ).scalar_one_or_none()
+                existing = db.execute(
+                    select(Opportunity.id, Opportunity.deadline)
+                    .where(Opportunity.unique_id == uid)
+                ).one_or_none()
+                exists = existing[0] if existing else None
                 if uid in batch_uids or exists is not None:
                     dupes += 1
                     if exists is not None:
@@ -663,10 +670,44 @@ class ScraperManager:
                         # what lets an undated "Ongoing" row be retired later,
                         # once the source stops returning it. Before this, a
                         # duplicate was simply dropped and no row ever aged.
+                        fields = {"last_seen": datetime.now(timezone.utc)}
+
+                        # A newly-readable deadline is the same kind of fact,
+                        # and without this it was thrown away.
+                        #
+                        # The deadline is deliberately not part of unique_id —
+                        # it is an attribute, not identity — so a row whose date
+                        # we could not read before and can read now arrives here
+                        # as a duplicate, gets its last_seen bumped, and loses
+                        # the date. UNDP Procurement made that concrete: fixing
+                        # extraction took its rows from 0.4% dated to 100%, and
+                        # not one of the 1,274 already stored would have gained
+                        # a deadline, because every one of them comes back as a
+                        # duplicate. The dashboard would have looked identical
+                        # after the fix.
+                        #
+                        # ONLY fills a gap. It never overwrites a date already
+                        # stored, because the reverse — a source that stops
+                        # printing a date, or a page that renders it late —
+                        # would silently erase a good deadline, and a row whose
+                        # deadline disappears becomes immortal. Correcting an
+                        # existing date is a different decision with a different
+                        # risk, and it is not this one.
+                        if existing[1] is None and deadline is not None:
+                            fields.update(
+                                deadline=deadline,
+                                deadline_state=d_state.value,
+                                deadline_raw=(raw.deadline_raw or "")[:256],
+                                deadline_confidence=d_confidence,
+                                deadline_convention=("dayfirst" if raw.dayfirst
+                                                     else "monthfirst"),
+                                deadline_checked_at=datetime.now(timezone.utc),
+                            )
+                            dated_late += 1
                         db.execute(
                             update(Opportunity)
                             .where(Opportunity.id == exists)
-                            .values(last_seen=datetime.now(timezone.utc))
+                            .values(**fields)
                         )
                     continue
                 batch_uids.add(uid)
@@ -757,6 +798,16 @@ class ScraperManager:
                 f"  ↳ {unassessed} row(s) stored as UNASSESSED — a closing date "
                 f"could not be determined. They are held for review, not shown "
                 f"as live and not archived."
+            )
+        if dated_late:
+            # The only place this is visible. A run that repairs rows reports
+            # "0 new saved" exactly like a run that repairs none, so without
+            # this line a fix that gave 1,274 stored notices their closing
+            # dates would leave no trace that anything had happened.
+            self._log(
+                f"  ↳ {dated_late} row(s) already stored WITHOUT a deadline "
+                f"gained one from this scrape — they were held out of every "
+                f"dashboard view until now"
             )
         if out_of_scope:
             # Counted separately from the prose gate. "the source says this is
