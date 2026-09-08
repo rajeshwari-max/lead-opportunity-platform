@@ -189,6 +189,7 @@ def filters_dep(
     # was no way to send a value. Defaults match the model.
     english_only: bool = True,
     has_vertical: bool = True,
+    unclassified_only: bool = False,
     include_undated: bool = False,
     page: int = 1,
     page_size: int = 25,
@@ -204,6 +205,7 @@ def filters_dep(
         archived=archived, new_today=new_today, approved=approved,
         work_type=work_type, study_type=study_type,
         english_only=english_only, has_vertical=has_vertical,
+        unclassified_only=unclassified_only,
         include_undated=include_undated,
         categories=categories, verticals=verticals, countries=countries, regions=regions,
         sources=sources, organizations=organizations, deadline_before=deadline_before,

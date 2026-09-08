@@ -119,6 +119,7 @@ export interface FilterState {
   english_only: boolean;
   /** Hide rows with no vertical. Default on. */
   has_vertical: boolean;
+  unclassified_only?: boolean;
   page: number;
   page_size: number;
   sort_by: string;
@@ -141,6 +142,7 @@ export const emptyFilters: FilterState = {
   study_type: "",
   english_only: true,
   has_vertical: true,
+  unclassified_only: false,
   page: 1,
   page_size: 25,
   sort_by: "deadline",

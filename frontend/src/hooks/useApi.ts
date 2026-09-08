@@ -9,16 +9,17 @@ export function useOpportunities(filters: FilterState, refreshKey: number) {
   const timer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       api
         .opportunities(filters)
-        .then(setData)
-        .catch(console.error)
-        .finally(() => setLoading(false));
+        .then((result) => { if (!cancelled) setData(result); })
+        .catch((error) => { if (!cancelled) { setData(null); console.error(error); } })
+        .finally(() => { if (!cancelled) setLoading(false); });
     }, 200); // debounce keystrokes in the search box
-    return () => clearTimeout(timer.current);
+    return () => { cancelled = true; clearTimeout(timer.current); };
   }, [filters, refreshKey]);
 
   return { data, loading };
@@ -38,6 +39,11 @@ export function useDashboardData(filters: FilterState, refreshKey: number) {
         c: filters.categories, se: filters.verticals, co: filters.countries,
         r: filters.regions, so: filters.sources, q: filters.search,
         db: filters.deadline_before, da: filters.deadline_after,
+        archived: filters.archived, new_today: filters.new_today,
+        approved: filters.approved, work_type: filters.work_type,
+        study_type: filters.study_type, english_only: filters.english_only,
+        has_vertical: filters.has_vertical,
+        unclassified_only: filters.unclassified_only,
       }),
     [filters]
   );
@@ -45,16 +51,17 @@ export function useDashboardData(filters: FilterState, refreshKey: number) {
   filtersRef.current = filters;
 
   useEffect(() => {
+    let cancelled = false;
     setStatsLoading(true);
     clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       api
         .stats(filtersRef.current)
-        .then(setStats)
-        .catch(console.error)
-        .finally(() => setStatsLoading(false));
+        .then((result) => { if (!cancelled) setStats(result); })
+        .catch((error) => { if (!cancelled) { setStats(null); console.error(error); } })
+        .finally(() => { if (!cancelled) setStatsLoading(false); });
     }, 200); // debounce so typing in search doesn't spam the stats endpoint
-    return () => clearTimeout(timer.current);
+    return () => { cancelled = true; clearTimeout(timer.current); };
   }, [statsKey, refreshKey]);
 
   // Facets now follow the active filters, so a Source dropdown under a chosen
@@ -63,11 +70,12 @@ export function useDashboardData(filters: FilterState, refreshKey: number) {
   // firing it per keystroke would queue up ~800ms queries behind each other.
   const facetTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
+    let cancelled = false;
     clearTimeout(facetTimer.current);
     facetTimer.current = setTimeout(() => {
-      api.facets(filtersRef.current).then(setFacets).catch(console.error);
+      api.facets(filtersRef.current).then((result) => { if (!cancelled) setFacets(result); }).catch(console.error);
     }, 200);
-    return () => clearTimeout(facetTimer.current);
+    return () => { cancelled = true; clearTimeout(facetTimer.current); };
   }, [statsKey, refreshKey]);
 
   // The scraper's own source list is a fixed catalogue of what CAN be scraped,

@@ -138,13 +138,21 @@ class FilterService:
                            ("\u0e00", "\u0e7f"), ("\u4e00", "\u9fff"),
                            ("\u3040", "\u30ff"), ("\uac00", "\ud7af")):
                 stmt = stmt.where(~Opportunity.title.op("GLOB")(f"*[{lo}-{hi}]*"))
-        if f.has_vertical:
+        if f.unclassified_only:
+            # Reading unclassified listings uses the ordinary authenticated
+            # opportunity API. Human decisions and admin review remain separate.
+            from app.services.verticals import HUMAN
+            stmt = stmt.where(
+                or_(Opportunity.verticals.is_(None), Opportunity.verticals == ""),
+                or_(Opportunity.verticals_source.is_(None), Opportunity.verticals_source != HUMAN),
+            )
+        elif f.has_vertical:
             stmt = stmt.where(
                 Opportunity.verticals.is_not(None), Opportunity.verticals != ""
             )
         if f.categories:
             stmt = stmt.where(Opportunity.category.in_([Category(c) for c in f.categories]))
-        if f.verticals:
+        if f.verticals and not f.unclassified_only:
             stmt = stmt.where(self._vertical_clause(f.verticals))
         if f.countries:
             stmt = stmt.where(Opportunity.country.in_(f.countries))

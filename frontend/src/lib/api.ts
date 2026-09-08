@@ -21,6 +21,7 @@ export function filterParams(f: FilterState): URLSearchParams {
   // omitting them when off would silently re-enable them.
   p.set("english_only", String(f.english_only));
   p.set("has_vertical", String(f.has_vertical));
+  if (f.unclassified_only) p.set("unclassified_only", "true");
   p.set("page", String(f.page));
   p.set("page_size", String(f.page_size));
   p.set("sort_by", f.sort_by);

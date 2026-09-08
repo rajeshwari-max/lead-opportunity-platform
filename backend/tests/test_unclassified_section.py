@@ -239,6 +239,36 @@ def test_defaults_are_unchanged_so_no_existing_view_moved(db):
     assert f.english_only is True and f.has_vertical is True
 
 
+def test_user_unclassified_filter_excludes_classified_and_human_decisions(db):
+    from app.schemas.opportunity import OpportunityFilters
+    from app.services.filter_service import FilterService
+    from app.services import vertical_assignment as va
+
+    va.assign(db, [1], ["Livelihood"], reviewer="admin@example.org")
+    va.assign(db, [2], [], reviewer="admin@example.org")
+    service = FilterService(db)
+    # The tab wins over a stale classified-only / vertical selection.
+    filters = OpportunityFilters(unclassified_only=True, verticals=["Livelihood"])
+    result = service.query(filters)
+    assert {o.id for o in result.items} == {3, 4, 5}
+    assert {o.id for o in service.rows_for_export(filters)} == {3, 4, 5}
+    assert service.query(OpportunityFilters()).total == 1
+
+
+def test_user_unclassified_filter_supports_pagination_and_source(db):
+    from app.schemas.opportunity import OpportunityFilters
+    from app.services.filter_service import FilterService
+
+    service = FilterService(db)
+    filters = OpportunityFilters(unclassified_only=True, sources=["World Bank"], page_size=1)
+    first = service.query(filters)
+    second = service.query(filters.model_copy(update={"page": 2}))
+    assert first.total == second.total == 2
+    assert first.pages == second.pages == 2
+    assert first.items[0].id != second.items[0].id
+    assert first.items[0].source_website == second.items[0].source_website == "World Bank"
+
+
 # ------------------------------------------- classification fields recorded
 
 def test_a_human_assignment_records_the_classification_trail(db):

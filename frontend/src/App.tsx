@@ -7,6 +7,7 @@ import { Header } from "@/components/Header";
 import { AutoEmailPanel } from "@/components/AutoEmailPanel";
 import { LoginScreen } from "@/components/LoginScreen";
 import { UserMenu } from "@/components/UserMenu";
+import { UserDashboard } from "@/components/UserDashboard";
 import { OpportunitiesTable } from "@/components/OpportunitiesTable";
 import { ReviewQueueCard } from "@/components/ReviewQueueCard";
 import { ScraperHealthCard } from "@/components/ScraperHealthCard";
@@ -44,6 +45,8 @@ function loadFilters(): FilterState {
   delete (saved as Partial<FilterState>).work_type;
 
   const params = new URLSearchParams(window.location.search);
+  // Switching layouts must not clear the saved opportunity filters.
+  params.delete("view");
   if (![...params.keys()].length) return { ...emptyFilters, ...saved };
 
   // A link is an explicit request for one view, so start from a clean slate
@@ -114,11 +117,22 @@ export default function App() {
   if (authed === null) return null;
   if (!authed) return <LoginScreen onSuccess={() => setRefreshKey((k) => k + 1)} />;
 
+  const userView = new URLSearchParams(window.location.search).get("view") === "user";
+  const viewUrl = (view: string) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("view", view);
+    return `${window.location.pathname}?${params}`;
+  };
+  if (!isAdmin || userView) return <UserDashboard filters={filters} onChange={setFilters}
+    onRefresh={resetAndRefresh} onDataRefresh={refresh} data={data} loading={loading}
+    stats={stats} statsLoading={statsLoading} facets={facets} readOnly={readOnly}
+    user={user} adminViewUrl={isAdmin ? viewUrl("admin") : undefined} />;
+
   return (
     <div className="min-h-screen">
       <Header filters={filters} onChange={setFilters} onRefresh={resetAndRefresh} stats={stats}
-              userMenu={<UserMenu name={user.name} email={user.email} isAdmin={isAdmin}
-                                  authRequired={user.authRequired} />} />
+              userMenu={<div className="flex items-center gap-3"><a href={viewUrl("user")} className="whitespace-nowrap rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-accent">User dashboard</a><UserMenu name={user.name} email={user.email} isAdmin={isAdmin}
+                                  authRequired={user.authRequired} /></div>} />
 
       <main className="mx-auto flex max-w-[1600px] flex-col gap-6 p-4 sm:p-6">
         <StatCards stats={stats} loading={statsLoading} filters={filters} onChange={setFilters} />

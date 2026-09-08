@@ -10,11 +10,12 @@ interface Props {
   facets: Facets | null;
   filters: FilterState;
   onChange: (f: FilterState) => void;
+  hideVerticals?: boolean;
 }
 
 type ListKey = "categories" | "verticals" | "countries" | "regions" | "sources";
 
-export function FiltersSidebar({ facets, filters, onChange }: Props) {
+export function FiltersSidebar({ facets, filters, onChange, hideVerticals = false }: Props) {
   // One search box per long list. Source Website is ~90 entries and Country is
   // 220+, so finding one by scrolling a 44px-tall box is impractical. Category,
   // Vertical and Region are short enough to read at a glance and don't get one.
@@ -77,7 +78,7 @@ export function FiltersSidebar({ facets, filters, onChange }: Props) {
           reads as the filters being lost rather than as "this source has no
           countries recorded". A stable sidebar that explains itself is worth
           more than a tidy one that rearranges under you. */}
-      {sections.map(
+      {sections.filter(s => !hideVerticals || s.key !== "verticals").map(
         (s) => (
             <section key={s.key} className="space-y-1">
               <div className="mb-1 flex items-baseline justify-between gap-2">
