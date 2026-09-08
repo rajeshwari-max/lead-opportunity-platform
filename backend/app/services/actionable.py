@@ -103,7 +103,7 @@ def is_actionable(
     """
     today = today or application_today()
 
-    active = status == Status.ACTIVE or str(status).upper().endswith("ACTIVE")
+    active = status == Status.ACTIVE or str(status) == "Active"
     if not active:
         return False
 
@@ -141,6 +141,7 @@ def actionable_clause(today: date | None = None):
     today = today or application_today()
     return and_(
         Opportunity.status == Status.ACTIVE,
+        Opportunity.unique_id.not_like("merged:%"),
         or_(
             # Rolling, and no stored date has already passed. The date wins
             # even for a rolling row — see is_actionable.
@@ -174,6 +175,7 @@ def strict_actionable_clause(today: date | None = None):
     today = today or application_today()
     return and_(
         Opportunity.status == Status.ACTIVE,
+        Opportunity.unique_id.not_like("merged:%"),
         Opportunity.deadline.is_not(None),
         Opportunity.deadline >= today,
         or_(
@@ -207,6 +209,7 @@ def unassessed_clause():
     """
     return and_(
         Opportunity.status == Status.ACTIVE,
+        Opportunity.unique_id.not_like("merged:%"),
         Opportunity.deadline_state == DeadlineState.UNKNOWN.value,
     )
 

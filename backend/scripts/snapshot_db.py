@@ -52,8 +52,15 @@ def snapshot(source: Path, destination: Path, *, only_source: str = "",
         if active_only:
             keep.append("status = 'Active'")
         with sqlite3.connect(destination) as destination_db:
+            cols = {r[1] for r in destination_db.execute('PRAGMA table_info(opportunities)')}
+            if active_only and 'deadline' in cols:
+                from app.services.actionable import application_today
+                keep.append('deadline IS NOT NULL AND deadline >= ?')
+                params.append(application_today().isoformat())
+            if 'unique_id' in cols:
+                keep.append("unique_id NOT LIKE 'merged:%'")
             destination_db.execute(
-                f"DELETE FROM opportunities WHERE NOT ({' AND '.join(keep)})",
+                f"DELETE FROM opportunities WHERE NOT COALESCE(({' AND '.join(keep)}), 0)",
                 params,
             )
             destination_db.commit()

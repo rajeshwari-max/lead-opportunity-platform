@@ -38,7 +38,8 @@ def is_sentinel(value: date | None) -> bool:
         return False
     if value in SENTINELS:
         return True
-    return value > date.today() + timedelta(days=365 * MAX_YEARS_AHEAD)
+    from app.services.actionable import application_today
+    return value > application_today() + timedelta(days=365 * MAX_YEARS_AHEAD)
 
 
 def audit_deadlines() -> dict:
@@ -52,7 +53,8 @@ def audit_deadlines() -> dict:
     from app.database.models import Opportunity, ScrapeRun, Status
 
     stats = {"sentinels_cleared": 0, "expired": 0, "reactivated": 0, "stale_ongoing": 0}
-    today = date.today()
+    from app.services.actionable import application_today
+    today = application_today()
     # An undated row has no deadline to expire by, so the only evidence that it
     # is over is that the source stopped listing it. That is what `last_seen`
     # records and what this retires on.
@@ -86,6 +88,9 @@ def audit_deadlines() -> dict:
         from app.services.backfill import iter_opportunities
 
         for opp in iter_opportunities(db):
+            if (opp.unique_id or "").startswith("merged:"):
+                opp.status = Status.EXPIRED
+                continue
             if is_sentinel(opp.deadline):
                 # NULL means "ongoing", which is what the source meant.
                 opp.deadline = None

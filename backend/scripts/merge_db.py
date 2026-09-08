@@ -36,6 +36,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.config import settings  # noqa: E402
+from app.services.deduplication import make_unique_id
+from app.services.actionable import application_today
 
 
 def target_path() -> Path:
@@ -92,14 +94,16 @@ def main() -> int:
 
     if not args.dry_run:
         backup = dst_path.with_name(
-            f"{dst_path.stem}.before-merge-{datetime.now():%Y%m%d-%H%M%S}.db"
+            f"{dst_path.stem}.before-merge-{datetime.now():%Y%m%d-%H%M%S%f}.db"
         )
         backup_database(dst_path, backup)
         print(f"backup : {backup}\n")
 
     src = sqlite3.connect(f"file:{src_path}?mode=ro", uri=True)
-    dst = sqlite3.connect(dst_path)
+    dst = sqlite3.connect(dst_path, timeout=60)
     src.row_factory = sqlite3.Row
+    # Serialize with scraping and other imports before checking existing rows.
+    dst.execute("BEGIN" if args.dry_run else "BEGIN IMMEDIATE")
 
     # Only columns both schemas share — the two databases may be at different
     # migration levels, and an older export shouldn't abort the whole merge.
@@ -107,13 +111,16 @@ def main() -> int:
               if c in columns(src, "opportunities") and c != "id"]
     print(f"merging {len(shared)} shared columns")
 
-    have = {r[0] for r in dst.execute("SELECT unique_id FROM opportunities")}
+    have = {make_unique_id(r[0], r[1], None, r[2], r[3]) for r in dst.execute(
+        "SELECT title,organization,opportunity_url,source_website FROM opportunities WHERE unique_id NOT LIKE 'merged:%'")}
+    have.update(r[0] for r in dst.execute("SELECT unique_id FROM opportunities"))
     print(f"target already holds : {len(have)}")
 
     filters: list[str] = []
     params: list[str] = []
     if args.active_only:
-        filters.append("status = 'Active'")
+        filters.append("status = 'Active' AND deadline IS NOT NULL AND deadline >= ?")
+        params.append(application_today().isoformat())
     if args.only_source:
         filters.append("lower(source_website) = lower(?)")
         params.append(args.only_source)
@@ -136,12 +143,19 @@ def main() -> int:
     new = []
     duplicates = 0
     for row in rows:
-        uid = row["unique_id"]
+        if (row['unique_id'] or '').startswith('merged:'):
+            duplicates += 1
+            continue
+        uid = make_unique_id(row['title'], row['organization'], None, row['opportunity_url'], row['source_website'])
         if uid in seen:
             duplicates += 1
             continue
         seen.add(uid)
-        new.append(tuple(row[c] for c in shared))
+        values = dict(row)
+        values['unique_id'] = uid
+        if values.get('deadline') and str(values['deadline']) < application_today().isoformat():
+            values['status'] = 'Expired'
+        new.append(tuple(values[c] for c in shared))
     print(f"duplicates skipped   : {duplicates}")
     print(f"genuinely new        : {len(new)}")
 

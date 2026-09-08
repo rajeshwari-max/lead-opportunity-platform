@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from datetime import date
 
 
@@ -10,7 +11,8 @@ def _norm(value: str) -> str:
     return re.sub(r"\s+", " ", value or "").strip().lower()
 
 
-def make_unique_id(title: str, organization: str, deadline: date | None, url: str) -> str:
+def make_unique_id(title: str, organization: str, deadline: date | None, url: str,
+                   source: str = "") -> str:
     """Stable SHA-256 fingerprint of an opportunity's IDENTITY.
 
     The deadline used to be part of this key, and that made the key unstable in
@@ -55,14 +57,30 @@ def make_unique_id(title: str, organization: str, deadline: date | None, url: st
     # have.
     from app.services.links import link_kind      # local: avoids a cycle
 
-    link = _norm(url)
-    if link and link_kind(url) == "deep":
+    from app.services.links import canonical_link
+    try:
+        parsed = urlsplit(canonical_link((url or '').strip()))
+    except ValueError:
+        parsed = urlsplit('')
+    query = [(k, v) for k, v in parse_qsl(parsed.query, keep_blank_values=True)
+             if not k.lower().startswith('utm_') and k.lower() not in {'fbclid', 'gclid'}]
+    link = urlunsplit((parsed.scheme.lower(), parsed.netloc.lower(),
+                       parsed.path, urlencode(sorted(query)), ''))
+    # DevelopmentAid's numeric notice ID survives slug/title edits and exports.
+    notice = re.search(r'/(tenders|grants|jobs)/view/(\d+)(?:/|$)', parsed.path)
+    if (parsed.hostname or '').lower() in {'developmentaid.org', 'www.developmentaid.org'} and notice:
+        link = f'https://www.developmentaid.org/{notice[1]}/view/{notice[2]}'
+    if link and parsed.scheme in {'http', 'https'} and parsed.netloc and link_kind(url) == "deep":
         key = f"url|{link}"
+        # UNDP's stored negotiation links can be shared by distinct lots.
+        # Preserve their distinct titles rather than collapse unrelated notices.
+        if (parsed.hostname or '').lower() == 'procurement-notices.undp.org':
+            key += f'|{_norm(title)}'
     else:
         # Includes the source-agnostic case AND the listing-url case. Two calls
         # from one funder with byte-identical titles still merge, which is the
         # accepted cost of having no better identifier for them.
-        key = "|".join(["ident", _norm(title), _norm(organization)])
+        key = "|".join(["ident", _norm(source), _norm(title), _norm(organization)])
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 

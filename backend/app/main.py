@@ -57,6 +57,9 @@ async def lifespan(_app: FastAPI):
 
         logging.getLogger("scraper").exception("startup recovery failed")
 
+    from app.services.data_integrity import maintain_database
+    await asyncio.to_thread(maintain_database)
+
     scheduler.start()  # restores any persisted daily/weekly/monthly/yearly schedule
 
     # ------------------------------------------------- background maintenance
@@ -98,6 +101,7 @@ async def lifespan(_app: FastAPI):
             ("amounts", backfill_amounts),
             ("work type", backfill_work_types),
             ("study type", backfill_study_types),
+            ("identity integrity", maintain_database),
         ):
             try:
                 result = fn()

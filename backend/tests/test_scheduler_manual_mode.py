@@ -22,6 +22,20 @@ class FakeJob:
     next_run_time = None
 
 
+def test_integrity_schedule_runs_in_manual_mode_in_india_time(sched, monkeypatch):
+    from app.services import data_integrity, deadline_audit
+    calls = []
+    monkeypatch.delattr(sched, '_install_deadline_audit')
+    monkeypatch.setattr(data_integrity, 'maintain_database', lambda: calls.append('identity'))
+    monkeypatch.setattr(deadline_audit, 'audit_deadlines', lambda: calls.append('deadlines'))
+    sched.start()
+    run, trigger = sched._scheduler.jobs['deadline-audit']
+    assert str(trigger.timezone) == 'Asia/Kolkata'
+    assert 'hour=\'0\'' in str(trigger) and 'minute=\'5\'' in str(trigger)
+    run()
+    assert calls == ['identity', 'deadlines']
+
+
 class RecordingScheduler:
     """Records what the real APScheduler would have been asked to do."""
 

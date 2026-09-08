@@ -108,6 +108,7 @@ class FilterService:
             # `deadline IS NULL` as "ongoing", which also swept up every row
             # whose date simply could not be parsed.
             stmt = select(Opportunity).where(live_clause)
+        stmt = stmt.where(Opportunity.unique_id.not_like("merged:%"))
         if getattr(f, "new_today", False):
             # Matches the "New Today" stat card. Clicking it used to only change
             # the sort order, so the table looked identical and the card seemed

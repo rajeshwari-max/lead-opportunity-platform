@@ -176,16 +176,21 @@ class ScrapeScheduler:
 
         def _run() -> None:
             try:
-                result = audit_deadlines()
+                from app.services.data_integrity import maintain_database
+                try:
+                    maintain_database()
+                finally:
+                    result = audit_deadlines()
                 log.info("Nightly deadline audit: %s", result)
             except Exception:
                 log.exception("Nightly deadline audit failed")
 
         self._scheduler.add_job(
-            _run, CronTrigger(hour=0, minute=15),
-            id="deadline-audit", replace_existing=True, **_JOB_GUARDS,
+            _run, CronTrigger(hour=0, minute=5, timezone="Asia/Kolkata"),
+            id="deadline-audit", replace_existing=True,
+            max_instances=1, coalesce=True, misfire_grace_time=86400,
         )
-        log.info("Scheduler: nightly deadline audit at 00:15")
+        log.info("Scheduler: nightly integrity and deadline audit at 00:05 Asia/Kolkata")
 
     def apply_email_settings(self) -> None:
         """(Re)install the daily digest job from the dashboard's settings.

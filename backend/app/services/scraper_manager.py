@@ -318,6 +318,9 @@ class ScraperManager:
         if junk:
             self._log(f"Maintenance: removed {junk} row(s) that were page furniture, not opportunities")
 
+        from app.services.data_integrity import maintain_database
+        self._log(f"Identity maintenance: {maintain_database()}")
+
     async def _run_source(self, scraper: BaseScraper) -> None:
         prog = self.progress[scraper.name]
         prog["status"] = "running"
@@ -510,7 +513,8 @@ class ScraperManager:
         dated_late = 0
         out_of_scope = 0
         expired_samples: list[str] = []
-        today = date.today()
+        from app.services.actionable import application_today
+        today = application_today()
         batch_uids: set[str] = set()  # catch duplicates within the same batch too
         contract = contract_for(source_key or "",
                                 batch[0].source_website if batch else "")
@@ -655,7 +659,7 @@ class ScraperManager:
                                   why, (raw.title or "")[:60])
                         continue
 
-                uid = make_unique_id(raw.title, raw.organization, deadline, raw.opportunity_url)
+                uid = make_unique_id(raw.title, organization, deadline, raw.opportunity_url, raw.source_website)
 
                 existing = db.execute(
                     select(Opportunity.id, Opportunity.deadline)
