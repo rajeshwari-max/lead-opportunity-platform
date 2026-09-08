@@ -114,6 +114,11 @@ def main() -> int:
     have = {make_unique_id(r[0], r[1], None, r[2], r[3]) for r in dst.execute(
         "SELECT title,organization,opportunity_url,source_website FROM opportunities WHERE unique_id NOT LIKE 'merged:%'")}
     have.update(r[0] for r in dst.execute("SELECT unique_id FROM opportunities"))
+    from app.services.cross_source_duplicates import CrossSourceIndex
+    cross_columns = ['title', 'deadline', 'country', 'category', 'organization', 'source_website',
+                     'summary', 'eligibility', 'funding_amount']
+    cross = CrossSourceIndex(dict(zip(cross_columns, r)) for r in dst.execute(
+        "SELECT " + ','.join(cross_columns) + " FROM opportunities WHERE unique_id NOT LIKE 'merged:%'"))
     print(f"target already holds : {len(have)}")
 
     filters: list[str] = []
@@ -147,10 +152,11 @@ def main() -> int:
             duplicates += 1
             continue
         uid = make_unique_id(row['title'], row['organization'], None, row['opportunity_url'], row['source_website'])
-        if uid in seen:
+        if uid in seen or cross.contains(dict(row)):
             duplicates += 1
             continue
         seen.add(uid)
+        cross.add(dict(row))
         values = dict(row)
         values['unique_id'] = uid
         if values.get('deadline') and str(values['deadline']) < application_today().isoformat():

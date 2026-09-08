@@ -11,7 +11,7 @@ from collections import deque
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, text
 
 from app.core.config import settings
 from app.database.db import session_scope
@@ -519,6 +519,8 @@ class ScraperManager:
         contract = contract_for(source_key or "",
                                 batch[0].source_website if batch else "")
         with session_scope() as db:
+            # Serialize the check-and-insert with concurrent scrapes/imports.
+            db.execute(text('BEGIN IMMEDIATE'))
             for raw in batch:
                 deadline = self.deadline_parser.parse(raw.deadline_raw, dayfirst=raw.dayfirst)
                 # 9999-12-31 is DevelopmentAid's "no closing date". Parsed
@@ -666,6 +668,15 @@ class ScraperManager:
                     .where(Opportunity.unique_id == uid)
                 ).one_or_none()
                 exists = existing[0] if existing else None
+                if exists is None and uid not in batch_uids:
+                    from app.services.cross_source_duplicates import already_present
+                    if already_present(db, dict(title=raw.title, organization=organization,
+                            deadline=deadline, country=clean_country, category=category,
+                            source_website=raw.source_website, summary=raw.summary,
+                            eligibility=raw.eligibility, funding_amount=amount)):
+                        dupes += 1
+                        log.info('Cross-source duplicate skipped: %s — %s', raw.source_website, raw.title)
+                        continue
                 if uid in batch_uids or exists is not None:
                     dupes += 1
                     if exists is not None:

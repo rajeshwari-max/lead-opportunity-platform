@@ -26,12 +26,42 @@ def maintain_database(path=None):
         db.execute('BEGIN IMMEDIATE')
         groups = defaultdict(list)
         for row in db.execute("SELECT id,unique_id,title,organization,deadline,opportunity_url,"
-                              "last_seen,date_scraped,source_website FROM opportunities WHERE unique_id NOT LIKE 'merged:%'"):
+                              "last_seen,date_scraped,source_website,country,category FROM opportunities WHERE unique_id NOT LIKE 'merged:%'"):
             key = make_unique_id(row['title'], row['organization'], None, row['opportunity_url'], row['source_website'])
             groups[key].append(dict(row))
+        # Compare full details only inside matching title/date/country/type buckets.
+        # Leave buckets with multiple distinct notices from one publisher alone:
+        # their IDs may describe different lots, even when their titles agree.
+        from app.services.cross_source_duplicates import match_key, same_cross_source, norm
+        buckets = defaultdict(list)
+        preferred = {}
+        for key, rows in groups.items():
+            representative = next((r for r in rows if r['unique_id'] == key),
+                                  max(rows, key=lambda r: (r['last_seen'] or r['date_scraped'] or '', r['id'])))
+            preferred[key] = representative['id']
+            bucket = match_key(representative)
+            if bucket:
+                buckets[bucket].append((key, representative))
+        cross_groups = 0
+        for bucket in buckets.values():
+            sources = [norm(r['source_website']) for _, r in bucket]
+            if len(bucket) < 2 or len(set(sources)) != len(sources):
+                continue
+            survivors = []
+            for key, r in sorted(bucket, key=lambda pair: pair[1]['id']):
+                full = dict(db.execute('SELECT * FROM opportunities WHERE id=?', (r['id'],)).fetchone())
+                matches = [k for k, members in survivors
+                           if all(same_cross_source(full, member) for member in members)]
+                if len(matches) == 1:
+                    keeper_key = matches[0]
+                    groups[keeper_key].extend(groups.pop(key))
+                    next(members for k, members in survivors if k == keeper_key).append(full)
+                    cross_groups += 1
+                else:
+                    survivors.append((key, [full]))
         changed = [(key, rows) for key, rows in groups.items()
                    if len(rows) > 1 or rows[0]['unique_id'] != key]
-        stats = {'rekeyed': 0, 'merged': 0, 'expired': 0}
+        stats = {'rekeyed': 0, 'merged': 0, 'expired': 0, 'cross_source_merged': cross_groups}
         if changed:
             folder = path.parent / 'integrity-backups'
             folder.mkdir(exist_ok=True)
@@ -48,8 +78,7 @@ def maintain_database(path=None):
                                [(f"migration:{r['id']}", r['id']) for r in rows])
             for key, rows in changed:
                 # Keep a stable canonical ID if it exists, preserving links to it.
-                keeper = next((r for r in rows if r['unique_id'] == key),
-                              max(rows, key=lambda r: (r['last_seen'] or r['date_scraped'] or '', r['id'])))
+                keeper = next(r for r in rows if r['id'] == preferred[key])
                 db.execute('UPDATE opportunities SET unique_id=? WHERE id=?', (key, keeper['id']))
                 stats['rekeyed'] += 1
                 if len(rows) == 1:
