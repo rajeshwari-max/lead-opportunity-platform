@@ -5,17 +5,19 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import type { Facets, FilterState } from "@/lib/types";
 import { emptyFilters } from "@/lib/types";
+import { BrandFilters } from './BrandFilters';
 
 interface Props {
   facets: Facets | null;
   filters: FilterState;
   onChange: (f: FilterState) => void;
   hideVerticals?: boolean;
+  brandHierarchy?: boolean;
 }
 
 type ListKey = "categories" | "verticals" | "countries" | "regions" | "sources";
 
-export function FiltersSidebar({ facets, filters, onChange, hideVerticals = false }: Props) {
+export function FiltersSidebar({ facets, filters, onChange, hideVerticals = false, brandHierarchy = false }: Props) {
   // One search box per long list. Source Website is ~90 entries and Country is
   // 220+, so finding one by scrolling a 44px-tall box is impractical. Category,
   // Vertical and Region are short enough to read at a glance and don't get one.
@@ -80,6 +82,8 @@ export function FiltersSidebar({ facets, filters, onChange, hideVerticals = fals
           more than a tidy one that rearranges under you. */}
       {sections.filter(s => !hideVerticals || s.key !== "verticals").map(
         (s) => (
+          s.key === 'verticals' && brandHierarchy ? <BrandFilters key="brands" selected={filters.verticals}
+            onChange={verticals => onChange({ ...filters, verticals, page: 1 })} /> :
             <section key={s.key} className="space-y-1">
               <div className="mb-1 flex items-baseline justify-between gap-2">
                 <h3 className="text-xs font-semibold text-muted-foreground">{s.title}</h3>

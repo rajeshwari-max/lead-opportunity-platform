@@ -1,0 +1,13 @@
+.ud-brand-tree h3 { font-size: 14px; font-weight: 700; }
+.ud-brand-tree details { margin-top: 10px; }
+.ud-brand-tree summary { cursor: pointer; font-weight: 600; padding: 7px 0; }
+.ud-brand-children { margin-left: 8px; padding-left: 10px; border-left: 2px solid var(--ud-border, #dbe4f4); }
+.ud-brand-option { display: flex; gap: 8px; align-items: flex-start; padding: 7px 2px; cursor: pointer; font-size: 13px; line-height: 1.5; }
+.ud-brand-option input { flex-shrink: 0; margin-top: 3px; accent-color: #2658d9; }
+.ud-brand-option span { overflow-wrap: anywhere; min-width: 0; }
+.ud-brand-option:hover { background: rgba(80,120,220,.06); border-radius: 5px; }
+.ud-brand-pending { cursor: default; opacity: .65; }
+.ud-brand-note { font-size: 11px; line-height: 1.5; margin-top: 16px; }
+
+.ud-brand-tree .ud-brand-branch { border: 1px solid hsl(var(--border)); border-radius: 8px; padding: 6px 8px; margin: 10px 0; background: hsl(var(--background)); }
+.ud-brand-social .ud-brand-option { font-weight: 600; }
