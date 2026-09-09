@@ -348,6 +348,9 @@ class WorldBankScraper(BaseScraper):
         worker = asyncio.create_task(asyncio.to_thread(
             self._browser_worker, messages, stop_event, pause_event))
         pending_ack: threading.Event | None = None
+        # Initialised here, not just inside the loop: pages_end has to
+        # report a page number even when the walk yielded nothing.
+        page_number = 0
         try:
             while True:
                 kind, payload, ack = await asyncio.to_thread(messages.get)
@@ -368,7 +371,8 @@ class WorldBankScraper(BaseScraper):
                 })
                 ack.set()
                 pending_ack = None
-            await progress("pages_end", {"source": self.name})
+            await progress("pages_end",
+                           {"source": self.name, "page": page_number})
         finally:
             stop_event.set()
             if pending_ack is not None:

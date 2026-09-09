@@ -337,6 +337,24 @@ class ScraperManager:
         mirror = asyncio.create_task(_mirror_global_stop())
 
         async def on_progress(event: str, payload: dict) -> None:
+            # Every branch below only WRITES A LOG LINE. None of it is
+            # allowed to fail the run.
+            #
+            # World Bank crashed here on every single run: its rewritten
+            # crawl() emitted pages_end without a "page" key, this read
+            # payload["page"], and KeyError propagated out of the source
+            # task. The scrape had already found and saved 601 records —
+            # the run was marked "failed" purely because the final
+            # progress message could not be formatted.
+            try:
+                await _on_progress(event, payload)
+            except Exception:                                  # noqa: BLE001
+                log.warning("[%s] progress event %r could not be reported "
+                            "(payload keys: %s) — the scrape itself is "
+                            "unaffected", scraper.display_name, event,
+                            ", ".join(sorted(payload)), exc_info=True)
+
+        async def _on_progress(event: str, payload: dict) -> None:
             if event == "page_start":
                 self._log(f"[{scraper.display_name}] scraping page {payload['page']}…")
             elif event == "page_done":
