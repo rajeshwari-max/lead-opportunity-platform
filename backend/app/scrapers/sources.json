@@ -433,42 +433,6 @@
     "_funding_signal_note": "OFF because this board is curated: every row is a published notice, so a row does not have to contain funding vocabulary to be one. With it on, 'Individual Consultant: Gender Mainstreaming Adviser' — a real UNDP consultancy notice — is discarded for saying nothing about money. is_furniture, the same-page test and the nav-href test still reject navigation, so this admits notices, not chrome."
   },
   {
-    "name": "brainforest_global",
-    "display_name": "Brainforest",
-    "url": "https://brainforest.global/",
-    "website": "https://brainforest.global"
-  },
-  {
-    "name": "gef",
-    "display_name": "Global Environment Facility (GEF)",
-    "url": "https://www.thegef.org/",
-    "website": "https://www.thegef.org"
-  },
-  {
-    "name": "cisco_foundation",
-    "display_name": "Cisco Foundation",
-    "url": "https://www.cisco.com/site/us/en/about/purpose/community-resilience/cisco-foundation/index.html",
-    "website": "https://www.cisco.com"
-  },
-  {
-    "name": "green_climate_fund",
-    "display_name": "Green Climate Fund",
-    "url": "https://www.greenclimate.fund/",
-    "website": "https://www.greenclimate.fund"
-  },
-  {
-    "name": "rippleworks",
-    "display_name": "Rippleworks",
-    "url": "https://www.rippleworks.org/",
-    "website": "https://www.rippleworks.org"
-  },
-  {
-    "name": "drk_foundation",
-    "display_name": "Draper Richards Kaplan Foundation",
-    "url": "https://www.drkfoundation.org/",
-    "website": "https://www.drkfoundation.org"
-  },
-  {
     "name": "wfp_innovation",
     "display_name": "WFP Innovation Accelerator",
     "url": "https://innovation.wfp.org/relief-and-resilience",
@@ -485,23 +449,5 @@
     "display_name": "DBS Foundation",
     "url": "https://www.dbs.com/foundation/index.html",
     "website": "https://www.dbs.com"
-  },
-  {
-    "name": "hundredx_impact",
-    "display_name": "100x Impact Accelerator",
-    "url": "https://www.100ximpact.org/",
-    "website": "https://www.100ximpact.org"
-  },
-  {
-    "name": "agroecology_fund",
-    "display_name": "Agroecology Fund",
-    "url": "https://agroecology-fund.org/service/grant-for-agroecology-program-gap-challenge-fund/",
-    "website": "https://agroecology-fund.org"
-  },
-  {
-    "name": "raising_impact",
-    "display_name": "Raising Impact",
-    "url": "https://raisingimpact.org/",
-    "website": "https://raisingimpact.org"
   }
 ]

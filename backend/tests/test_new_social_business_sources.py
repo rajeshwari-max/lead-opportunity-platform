@@ -32,18 +32,26 @@ CONFIG = Path(__file__).parents[1] / "app" / "scrapers" / "sources.json"
 # find_listing_url.py; the domain may not, because that would silently turn one
 # funder's source into another's.
 ADDED = {
-    "brainforest_global": "brainforest.global",
-    "gef": "thegef.org",
-    "cisco_foundation": "cisco.com",
-    "green_climate_fund": "greenclimate.fund",
-    "rippleworks": "rippleworks.org",
-    "drk_foundation": "drkfoundation.org",
     "wfp_innovation": "innovation.wfp.org",
     "ifad_moonshots": "ifad.org",
     "dbs_foundation": "dbs.com",
-    "hundredx_impact": "100ximpact.org",
-    "agroecology_fund": "agroecology-fund.org",
-    "raising_impact": "raisingimpact.org",
+}
+
+# Removed on 2026-09-15 after the owner reviewed each site by hand and marked
+# them "No leads/grants section" in the source spreadsheet. The health endpoint
+# agreed independently: 14 runs each over 30 days, and eight of the nine had
+# never saved a single row.
+#
+# This is the outcome the original note in this file anticipated — that
+# registering a source proves the platform will VISIT a URL, not that the URL
+# lists open calls. Eight of these were still pointed at a homepage.
+#
+# Kept as a list rather than deleted so the next person to propose one of these
+# funders can see it was assessed and why, instead of re-adding it.
+REMOVED = {
+    "brainforest_global", "gef", "cisco_foundation", "green_climate_fund",
+    "rippleworks", "drk_foundation", "hundredx_impact", "agroecology_fund",
+    "raising_impact",
 }
 
 
@@ -98,7 +106,7 @@ def test_no_two_sources_scrape_the_same_url():
 
 
 def test_none_of_the_twelve_displaced_an_existing_source():
-    """71 config sources existed before these were added."""
+    """71 config sources existed before any of these were added."""
     assert len(sources()) == 71 + len(ADDED)
 
 
@@ -111,15 +119,44 @@ def test_every_entry_has_the_four_fields_the_generic_scraper_needs(name):
 
 # ------------------------------------------------- what is not proven yet
 
-def test_the_homepage_urls_are_recorded_as_needing_discovery():
-    """Not a behaviour test — a standing reminder in executable form.
+def test_none_of_the_survivors_is_a_bare_homepage():
+    """The homepage problem left with the nine that were removed.
 
-    Eight of the twelve point at a site root. Until find_listing_url.py has run
-    against them with egress, "registered" and "scraping open calls" are
-    different claims, and only the first is true.
+    Eight of those nine pointed at a site root, which is why they never saved a
+    row: a homepage carries no repeated block of opportunity links for the
+    parser to find. All three kept here name a real path.
+
+    What is still NOT proven is the next thing along: that those paths list
+    OPEN calls. wfp_innovation and ifad_moonshots have run 14 times and saved
+    nothing, and ifad_moonshots points at a page of past challenge WINNERS.
+    Registering a source proves the platform visits a URL, not that the URL
+    lists what we want.
     """
-    roots = [n for n, _ in ADDED.items()
-             if urlparse(by_name()[n]["url"]).path.strip("/") in ("", "index.html")]
-    assert len(roots) >= 7, (
-        "if this drops, the URLs were repointed — update the count and the "
-        "note above so the file stops overstating what is unverified")
+    for name in ADDED:
+        path = urlparse(by_name()[name]["url"]).path.strip("/")
+        assert path not in ("", "index.html"), (
+            f"{name} is pointed at a site root — that was the defect the nine "
+            f"removed sources all shared")
+
+
+
+# ------------------------------------------------- and the ones taken out
+
+def test_the_removed_sources_are_really_gone():
+    """A source removed from the config must not still be registered.
+
+    sources.json is the only thing that builds a generic scraper, so this is
+    what makes "removed from the project" true rather than merely intended.
+    """
+    from app.scrapers.registry import SCRAPER_REGISTRY
+    import app.scrapers                                        # noqa: F401
+
+    names = set(by_name())
+    for key in REMOVED:
+        assert key not in names, f"{key} is still in sources.json"
+        assert key not in SCRAPER_REGISTRY, f"{key} still builds a scraper"
+
+
+def test_removed_and_kept_do_not_overlap():
+    """Guards the obvious editing mistake."""
+    assert not (REMOVED & set(ADDED))
