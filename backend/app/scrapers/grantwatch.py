@@ -1,35 +1,62 @@
 """GrantWatch International scraper (https://international.grantwatch.com/new-grants.php).
 
 Server-rendered cards (title link /grant/<id>/..., 'Deadline: MM/DD/YY' or
-'Ongoing', summary, GrantWatch ID#) but the pager is JavaScript-only, so with
-Playwright installed the rendered session clicks through pages and accumulates
-them. Dates are US-format (dayfirst=False). Detail pages are subscription-
-gated; the public listing already carries title/deadline/summary.
+'Ongoing', summary, GrantWatch ID#). Dates are US-format (dayfirst=False).
+Detail pages are subscription-gated; the public listing already carries
+title/deadline/summary.
+
+Pagination (re-measured 2026-09-21 in a real browser)
+-----------------------------------------------------
+The pager buttons call setPage('N'), which is a plain navigation to
+new-grants.php?pageNum=N — not an AJAX update. So every page is an ordinary
+URL, and this walks them by URL.
+
+It used to click the '›' button instead, and that capped the walk at page 4:
+the pager only ever renders buttons 1-4, and on page 4 there is no '›'. But
+the listing does NOT end there. pageNum=5 .. pageNum=11 each return 14 more
+grants (many with deadlines well into 2027), and pageNum=12 returns none.
+Measured: 154 unique grants by URL, against at most 56 reachable by clicking.
+The pager is lying about the size of the list, so it cannot be the stop rule.
+
+The stop rule is the result rows themselves: BaseScraper.crawl stops on a
+page with no grants (pageNum=12+ today) and on a page whose rows repeat one
+already walked. _MAX_PAGES is only a backstop against a site change that
+makes every page non-empty.
 """
 from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup
 
 from app.core.config import settings
 from app.database.models import Category
 from app.schemas.opportunity import RawOpportunity
-from app.scrapers.base_scraper import BaseScraper
+from app.scrapers.base_scraper import BaseScraper, PageRequest
 from app.scrapers.registry import register
 
 log = logging.getLogger("scraper")
 
 _GRANT_LINK = re.compile(r"/grant/(\d+)/", re.IGNORECASE)
 _DEADLINE = re.compile(r"Deadline\s*:?\s*([0-9/]{6,10}|Ongoing)", re.IGNORECASE)
-_MAX_PAGES = 30
+_MAX_PAGES = 40
 # How long to let a JS challenge resolve before calling it a hard block.
 # Cloudflare's own interstitial advertises ~5s; 45 allows for a slow round trip
 # and a retry, and stops well short of hanging the run.
 _CHALLENGE_WAIT_S = 45
 _CHALLENGE_TITLES = ("just a moment", "attention required", "checking your browser",
                      "verify you are human", "one moment", "please wait")
+
+
+
+def page_url_for(url: str, page: int) -> str:
+    """The same listing URL with pageNum set, every other parameter kept."""
+    parts = urlsplit(url)
+    query = {k: v[-1] for k, v in parse_qs(parts.query, keep_blank_values=True).items()}
+    query["pageNum"] = str(page)
+    return urlunsplit(parts._replace(query=urlencode(query)))
 
 
 @register
@@ -42,10 +69,21 @@ class GrantWatchScraper(BaseScraper):
     curated = True
     website = "https://international.grantwatch.com"
     start_url = "https://international.grantwatch.com/new-grants.php"
-    prefer_js = True   # pager is JS-only; plain HTTP still yields page 1 (~14 items)
+    # Rendered when Playwright is available, for Cloudflare's JS challenge —
+    # not for pagination, which is plain URLs (see the module docstring).
+    prefer_js = True
+    # ~11 pages. Walk all of them every run: the deeper pages carry grants
+    # the pager never exposes, and re-reading a page we already hold is what
+    # refreshes a deadline that was missing before.
+    stale_page_streak_override = 0
 
-    def next_page(self, html: str, page_url: str, page_number: int) -> None:
-        return None    # all pages accumulated in one rendered session
+    def next_page(self, html: str, page_url: str, page_number: int) -> PageRequest | None:
+        if page_number >= _MAX_PAGES:
+            log.warning("[grantwatch] stopped at the %s-page backstop — the "
+                        "listing has never been this long; check whether "
+                        "out-of-range pages stopped coming back empty", _MAX_PAGES)
+            return None
+        return PageRequest(page_url_for(page_url, page_number + 1))
 
     @staticmethod
     def _wait_out_challenge(page, seconds: int = _CHALLENGE_WAIT_S) -> bool:
@@ -74,7 +112,7 @@ class GrantWatchScraper(BaseScraper):
 
 
     def _fetch_rendered_sync(self, url: str) -> str:
-        """Render the listing and click through every pager page in one session."""
+        """Render ONE listing page, waiting out a Cloudflare challenge if shown."""
         from playwright.sync_api import sync_playwright
 
         from app.scrapers import site_auth
@@ -126,38 +164,10 @@ class GrantWatchScraper(BaseScraper):
                     )
                     return page.content()   # let parse_listing report it too
 
-                chunks: list[str] = []
-                first_link_js = (
-                    "(document.querySelector(\"a[href*='/grant/']\") || {}).href || ''"
-                )
-                for _ in range(_MAX_PAGES):
-                    chunks.append(page.content())
-                    marker = page.evaluate(first_link_js)
-                    # click the '›' (next) pager control, wherever it lives
-                    moved = page.evaluate(
-                        """() => {
-                            const els = Array.from(
-                                document.querySelectorAll('a, button, li'));
-                            const nxt = els.find(e =>
-                                e.textContent.trim() === '›' ||
-                                e.getAttribute?.('aria-label') === 'Next');
-                            if (!nxt) return false;
-                            const target = nxt.tagName === 'LI'
-                                ? (nxt.querySelector('a,button') || nxt) : nxt;
-                            target.click();
-                            return true;
-                        }"""
-                    )
-                    if not moved:
-                        break
-                    try:  # wait until the first grant link actually changes
-                        page.wait_for_function(
-                            f"{first_link_js} !== {marker!r}", timeout=12_000
-                        )
-                    except Exception:
-                        break  # no change — last page reached
-                log.info("[grantwatch] accumulated %s page snapshots", len(chunks))
-                return "<html><body>" + "".join(chunks) + "</body></html>"
+                # One page per call. Pagination is done by URL in
+                # next_page(); this used to click '›' through the pager here,
+                # which could never get past page 4.
+                return page.content()
             finally:
                 # context.close() left the owning Browser running — see
                 # site_auth.close_owned.
