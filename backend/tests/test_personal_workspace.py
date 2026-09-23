@@ -253,6 +253,27 @@ class WorkspaceTests(unittest.TestCase):
         self.unlock('bob')
         self.assertEqual(self.client.get('/api/my-leads').json()[0]['stage'],'Applied')
 
+    def test_unsave_is_private_and_preserves_progress(self):
+        self.unlock('bob')
+        lead = self.client.post('/api/my-leads', json={'opportunity_id': 1}).json()['id']
+        self.client.put(f'/api/my-leads/{lead}', json={'stage':'Applied','notes':'Keep this note'})
+        self.client.post('/api/my-leads/activity', json={'opportunity_id':1,'action':'viewed'})
+        self.unlock('alice')
+        self.assertEqual(self.client.delete(f'/api/my-leads/{lead}').status_code,404)
+        self.unlock('bob')
+        with patch.object(w.settings, 'read_only', True):
+            self.assertEqual(self.client.delete(f'/api/my-leads/{lead}').status_code,403)
+        self.assertEqual(self.client.delete(f'/api/my-leads/{lead}').status_code,200)
+        self.assertEqual(self.client.delete(f'/api/my-leads/{lead}').status_code,200)
+        self.unlock('bob')
+        self.assertEqual(self.client.get('/api/my-leads').json(),[])
+        self.assertEqual(self.client.get('/api/my-leads/activity').json()['viewed'],1)
+        restored = self.client.post('/api/my-leads',json={'opportunity_id':1}).json()
+        self.assertEqual(restored['id'],lead)
+        self.assertEqual(restored['notes'],'Keep this note')
+        self.assertEqual(restored['stage'],'Applied')
+        self.assertEqual(len(self.client.get('/api/my-leads').json()),1)
+
     def test_external_registration_and_change_password(self):
         with patch('app.services.email_service.is_configured',return_value=True), patch.object(a,'send_account_link') as send, patch.object(w.settings,'allowed_email_domains','catalysts.org'):
             response=self.client.post('/api/login/register',json={'email':'external@gmail.com','name':'External','password':'personal-password-123'})

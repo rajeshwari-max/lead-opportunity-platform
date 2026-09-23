@@ -362,6 +362,7 @@ class ApplicationJourney(Base):
     owner: Mapped[str] = mapped_column(String(320), index=True)
     opportunity_id: Mapped[int] = mapped_column(index=True)
     stage: Mapped[str] = mapped_column(String(32), default="Saved")
+    saved: Mapped[bool] = mapped_column(default=True, server_default="1")
     notes: Mapped[str] = mapped_column(Text, default="")
     factors: Mapped[str] = mapped_column(Text, default="[]")
     next_action: Mapped[str] = mapped_column(Text, default="")

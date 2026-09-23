@@ -126,6 +126,9 @@ def _run_migrations(conn) -> None:
             if name not in columns("workspace_credentials"):
                 conn.exec_driver_sql(f"ALTER TABLE workspace_credentials ADD COLUMN {name} {ddl}")
 
+    if "application_journeys" in _tables(conn) and "saved" not in columns("application_journeys"):
+        conn.exec_driver_sql("ALTER TABLE application_journeys ADD COLUMN saved BOOLEAN NOT NULL DEFAULT 1")
+
     renamed_vertical_column = False
 
     if "opportunities" in _tables(conn):

@@ -61,11 +61,22 @@ def save_preferences(body: Preferences, owner=Depends(storage.personal), db: Ses
 
 @router.get("")
 def saved(owner=Depends(storage.personal), db: Session=Depends(get_db)):
-    return storage.journeys(owner, db)
+    return [storage.journey_data(row, db) for row in db.scalars(select(ApplicationJourney).where(ApplicationJourney.owner == owner, ApplicationJourney.saved.is_(True)).order_by(ApplicationJourney.updated_at.desc()))]
 
 @router.post("")
 def save(body: storage.Track, owner=Depends(storage.personal), db: Session=Depends(get_db)):
-    return storage.track(body, owner, db)
+    result = storage.track(body, owner, db)
+    row = storage.owned(db, owner, result["id"])
+    row.saved = True
+    db.commit()
+    return result
+
+@router.delete("/{lead_id}")
+def unsave(lead_id: int, owner=Depends(storage.personal), db: Session=Depends(get_db)):
+    row = storage.owned(db, owner, lead_id)
+    row.saved = False
+    db.commit()
+    return {"saved": False}
 
 @router.put("/{lead_id}")
 def update(lead_id: int, body: storage.JourneyInput, owner=Depends(storage.personal), db: Session=Depends(get_db)):
@@ -78,7 +89,7 @@ def history(lead_id: int, owner=Depends(storage.personal), db: Session=Depends(g
 @router.get("/team/activity", dependencies=[Depends(administrator)])
 def activity(db: Session=Depends(get_db)):
     # Include users with no saved leads, so admins can see adoption too.
-    rows = db.scalars(select(ApplicationJourney).order_by(ApplicationJourney.updated_at.desc())).all()
+    rows = db.scalars(select(ApplicationJourney).where(ApplicationJourney.saved.is_(True)).order_by(ApplicationJourney.updated_at.desc())).all()
     grouped = {}
     for row in rows:
         grouped.setdefault(row.owner, []).append(storage.journey_data(row, db))

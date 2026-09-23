@@ -137,3 +137,10 @@ frontend backup printed by the deploy script and use the previous application
 commit in a separate checkout. Additive tables do not require deleting data to
 run the old code. Restoring a database snapshot discards newer writes; plan that
 separately rather than automatically overwriting the live database.
+
+## Unsave leads
+
+Save lead toggles to Unsave after loading the account saved list. Unsave hides the
+lead from saved lists while retaining its notes, stages, attachments, and viewed/reviewed
+activity. Saving again restores the same journey. The additive application_journeys.saved
+column is migrated at API startup; deploy backend and frontend together.
