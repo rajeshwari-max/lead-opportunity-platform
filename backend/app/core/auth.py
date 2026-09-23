@@ -1,25 +1,4 @@
-"""Named sessions for the dashboard.
-
-Sign-in is an email plus a shared password. The email must belong to an active
-team member, which is where the name and identity come from — the team table
-already exists and is already maintained, so a second user table would only
-create a list to keep in step with it.
-
-Two passwords, two tiers:
-
-  dashboard_password  read opportunities, approve them
-  admin_password      scraper controls, team routing, email schedule
-
-The signed cookie carries who you are, so the header can say it and — more
-usefully — an approval records the actual person rather than "dashboard".
-
-One thing stays exempt from all of this: ``/api/approve/{token}`` from a digest
-email. That link's HMAC is stronger proof than a shared password, and the
-recipient is in their inbox, not the dashboard.
-
-Leaving both passwords unset disables the gate, so local development is
-unchanged.
-"""
+"""Individual sign-in with live database roles and revocable sessions."""
 from __future__ import annotations
 
 import base64
@@ -35,7 +14,23 @@ SESSION_DAYS = 30
 
 
 def auth_required() -> bool:
-    return bool(settings.dashboard_password)
+    return settings.personal_login
+
+
+def validate_origin(request) -> None:
+    """Allow same-origin writes and exact configured frontend origins (Vite proxy)."""
+    from urllib.parse import urlsplit
+    from fastapi import HTTPException
+    origin = request.headers.get("origin")
+    if not origin or request.method in ("GET", "HEAD"):
+        return
+    allowed = {str(request.base_url).rstrip("/")}
+    allowed.update(o.rstrip("/") for o in settings.cors_origins if o != "*")
+    dashboard = urlsplit(settings.dashboard_url)
+    if dashboard.scheme in ("http", "https") and dashboard.netloc:
+        allowed.add(f"{dashboard.scheme}://{dashboard.netloc}")
+    if origin.rstrip("/") not in allowed:
+        raise HTTPException(403, "Cross-origin request blocked")
 
 
 def allowed_domains() -> list[str]:
@@ -58,7 +53,7 @@ def domain_allowed(email: str) -> bool:
 
 
 def admin_required() -> bool:
-    return bool(settings.admin_password)
+    return True
 
 
 def _sign(body: str) -> str:
@@ -70,9 +65,11 @@ def _b64(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
-def make_session_token(email: str, name: str, is_admin: bool) -> str:
+def make_session_token(email: str, name: str, is_admin: bool, version: str = "") -> str:
     payload = {
         "email": email,
+        "version": version,
+        "kind": "personal-v1",
         "name": name,
         "admin": bool(is_admin),
         "exp": int(time.time()) + SESSION_DAYS * 86400,
@@ -102,26 +99,46 @@ def read_session(token: str | None) -> dict | None:
     return payload
 
 
-def current_user(token: str | None) -> dict:
-    """Who this request is, in a shape the frontend can render directly.
-
-    With no password configured there is nobody to identify, so it reports a
-    local admin — that keeps single-user development working without pretending
-    someone is signed in.
-    """
+def current_user(token: str | None, db=None) -> dict:
+    denied = {"authenticated": False, "email": "", "name": "", "is_admin": False}
     if not auth_required():
         return {"authenticated": True, "email": "", "name": "Local", "is_admin": True}
     session = read_session(token)
-    if not session:
-        return {"authenticated": False, "email": "", "name": "", "is_admin": False}
-    return {
-        "authenticated": True,
-        "email": session.get("email", ""),
-        "name": session.get("name", ""),
-        # An admin password that is set but wasn't used still means "not admin",
-        # even for a valid session.
-        "is_admin": bool(session.get("admin")) or not admin_required(),
-    }
+    if not session or session.get("kind") != "personal-v1" or not session.get("version"):
+        return denied
+    from app.database.db import SessionLocal
+    from app.database.models import WorkspaceCredential, TeamMember
+    from sqlalchemy import select, func
+    owned = db is None
+    db = db or SessionLocal()
+    try:
+        email = session.get("email", "").strip().lower()
+        credential = db.get(WorkspaceCredential, email)
+        member = db.scalar(select(TeamMember).where(func.lower(TeamMember.email) == email))
+        if not credential or not member or not member.active or not credential.password_hash:
+            return denied
+        if not hmac.compare_digest(session["version"], password_version(credential.password_hash)):
+            return denied
+        return {"authenticated": True, "email": email, "name": member.name, "is_admin": credential.is_admin}
+    finally:
+        if owned:
+            db.close()
+
+
+def password_version(encoded: str) -> str:
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def hash_password(password: str) -> str:
+    import secrets
+    salt = secrets.token_hex(24)
+    return salt + ":" + hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 600000).hex()
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    salt, _, expected = (encoded or "not-configured:").partition(":")
+    actual = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 600000).hex()
+    return hmac.compare_digest(actual, expected)
 
 
 def password_matches(candidate: str) -> bool:
@@ -129,6 +146,6 @@ def password_matches(candidate: str) -> bool:
 
 
 def admin_password_matches(candidate: str) -> bool:
-    return bool(settings.admin_password) and hmac.compare_digest(
+    return True and hmac.compare_digest(
         candidate or "", settings.admin_password
     )

@@ -9,6 +9,7 @@ opened read-only and is never modified.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import sqlite3
 import sys
 from pathlib import Path
@@ -40,8 +41,8 @@ def snapshot(source: Path, destination: Path, *, only_source: str = "",
         )
     destination.parent.mkdir(parents=True, exist_ok=True)
     source_uri = f"file:{source.as_posix()}?mode=ro"
-    with sqlite3.connect(source_uri, uri=True) as source_db:
-        with sqlite3.connect(destination) as destination_db:
+    with closing(sqlite3.connect(source_uri, uri=True)) as source_db:
+        with closing(sqlite3.connect(destination)) as destination_db:
             source_db.backup(destination_db)
     if only_source or active_only:
         keep: list[str] = []
@@ -51,7 +52,16 @@ def snapshot(source: Path, destination: Path, *, only_source: str = "",
             params.append(only_source)
         if active_only:
             keep.append("status = 'Active'")
-        with sqlite3.connect(destination) as destination_db:
+        with closing(sqlite3.connect(destination)) as destination_db:
+            # A filtered opportunity transfer must not carry personal workspaces
+            # or password hashes to another environment. Full backups retain them.
+            for table in ('journey_attachments', 'journey_events', 'application_journeys',
+                          'workspace_contacts', 'workspace_profiles', 'workspace_credentials', 'dashboard_preferences', 'lead_activity'):
+                exists = destination_db.execute(
+                    'SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?', ('table', table)
+                ).fetchone()
+                if exists:
+                    destination_db.execute(f'DELETE FROM "{table}"')
             cols = {r[1] for r in destination_db.execute('PRAGMA table_info(opportunities)')}
             if active_only and 'deadline' in cols:
                 from app.services.actionable import application_today
@@ -81,7 +91,7 @@ def main() -> int:
     snapshot(source, destination, only_source=args.only_source,
              active_only=args.active_only)
 
-    with sqlite3.connect(f"file:{destination.resolve().as_posix()}?mode=ro", uri=True) as db:
+    with closing(sqlite3.connect(f"file:{destination.resolve().as_posix()}?mode=ro", uri=True)) as db:
         rows = db.execute("SELECT count(*) FROM opportunities").fetchone()[0]
         devaid = db.execute(
             "SELECT count(*) FROM opportunities "

@@ -1,3 +1,5 @@
+import { DashboardLeads, SaveLeadButton, ReviewLeadButton, recordLeadActivity } from "./DashboardLeads";
+import { WrikeTaskAction } from "./WrikeTaskAction";
 import { useEffect, useRef, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { Download, Moon, RefreshCw, Sun } from "lucide-react";
@@ -46,6 +48,8 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
   const [checked, setChecked] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState<number | null>(null);
   const [approval, setApproval] = useState<Opportunity | null>(null);
+  const [wrikeDialog, setWrikeDialog] = useState<Opportunity | null>(null);
+  const [wrikeRevision, setWrikeRevision] = useState(0);
   const [message, setMessage] = useState("");
   const [showInr, setShowInr] = useState(false);
   const [hovered, setHovered] = useState<{ name: string; value: number } | null>(null);
@@ -78,6 +82,14 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
+  useEffect(() => {
+    if (!wrikeDialog) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setWrikeDialog(null);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [wrikeDialog]);
   useEffect(() => { setApproval(null); }, [data]);
   const current = data?.items.find(o => o.id === selectedId) ?? data?.items[0];
   const selected = current && approval?.id === current.id ? approval : current;
@@ -89,6 +101,7 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
   const toggle = (key: "categories" | "regions" | "verticals", value: string) => change({ [key]: filters[key].length === 1 && filters[key][0] === value ? [] : [value] });
   const openBrief = (o: Opportunity) => {
     setSelectedId(o.id);
+    void recordLeadActivity(o.id,"viewed").catch(()=>setMessage("Activity could not be saved. Please try again."));
     setMessage(`Viewing ${o.title}`);
     // A previously scrolled brief must reveal the new title on every click,
     // including when the already-selected row is opened again.
@@ -135,7 +148,7 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
         <a className="ud-control" href={api.exportUrl("csv", filters)} download><Download size={14} /> CSV</a><a className="ud-control" href={api.exportUrl("xlsx", filters)} download>Excel</a>
         <button className="ud-control" onClick={resetView} aria-label="Clear filters and refresh"><RefreshCw size={16} /></button><button className="ud-control" onClick={() => setDark(!dark)} aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}>{dark ? <Sun size={16} /> : <Moon size={16} />}</button></div>
     </header>
-    <main className="ud-main"><div className="ud-heading"><div><h1>Your opportunity dashboard</h1><p>Explore funding. Track deadlines. Find your next opportunity.</p></div>{stats?.last_scraped && <span className="ud-updated">Updated {new Date(/Z$|[+-]\d{2}:\d{2}$/.test(stats.last_scraped) ? stats.last_scraped : stats.last_scraped + "Z").toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}</div>
+    <main className="ud-main"><DashboardLeads name={user.name} isAdmin={!!adminViewUrl} /><div className="ud-heading"><div><h1>Your opportunity dashboard</h1><p>Explore funding. Track deadlines. Find your next opportunity.</p></div>{stats?.last_scraped && <span className="ud-updated">Updated {new Date(/Z$|[+-]\d{2}:\d{2}$/.test(stats.last_scraped) ? stats.last_scraped : stats.last_scraped + "Z").toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}</div>
       <div className="ud-stats" aria-busy={statsLoading}>{statCards.map(card => <button key={card.label} className={`ud-stat ud-${card.tone}`} aria-pressed={card.active} onClick={card.action}><span>{card.label}</span><strong>{statsLoading || card.value == null ? "…" : count(card.value)}</strong><small>{card.note}</small></button>)}</div>
       <div className="ud-charts" aria-busy={statsLoading}>
         <section className="ud-panel ud-chart"><h2>By category</h2><p className="ud-sub">Distribution in your current view</p><div className="ud-donut">
@@ -143,7 +156,7 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
           <div className="ud-donut-label"><strong>{count(hovered?.value ?? stats?.total_active ?? 0)}</strong><span>{hovered?.name ?? (filters.archived ? "Archived" : "Active")}<br />{!hovered && "opportunities"}</span></div>
         </div><div className="ud-legend">{series.map(s => <button key={s.name} aria-pressed={filters.categories.includes(s.name)} onClick={() => toggle("categories", s.name)} onMouseEnter={() => setHovered(s)} onMouseLeave={() => setHovered(null)}><i style={{ background: colors[s.name] ?? "#8b9db7" }} />{s.name}</button>)}</div>{remaining > 0 && <p className="ud-sub">{count(remaining)} in other categories</p>}{!statsLoading && !stats && <p className="ud-sub">Overview unavailable. Please refresh.</p>}{stats && !series.length && <p className="ud-sub">No categories in this view.</p>}</section>
         <Bars title="By region" subtitle="Opportunities by location" values={stats?.by_region ?? {}} selected={filters.regions} onSelect={name => toggle("regions", name)} />
-        <Bars title="CMS classifications" subtitle={unclassified ? "These opportunities have no assigned vertical" : "Devsol verticals and Social Business � may overlap"} values={unclassified ? {} : stats?.by_vertical ?? {}} selected={filters.verticals} onSelect={name => toggle("verticals", name)} cyan />
+        <Bars title="CMS classifications" subtitle={unclassified ? "These opportunities have no assigned vertical" : "Devsol verticals and Social Business · may overlap"} values={unclassified ? {} : stats?.by_vertical ?? {}} selected={filters.verticals} onSelect={name => toggle("verticals", name)} cyan />
         <section className="ud-panel ud-chart"><h2>Upcoming deadlines</h2><p className="ud-sub">Plan your next application</p><ul className="ud-deadlines">{stats?.upcoming_deadlines.slice(0, 4).map(o => <li key={o.id}><span>{o.deadline ? new Date(o.deadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "Open"}</span><a href={o.link || o.opportunity_url} target="_blank" rel="noreferrer">{o.title}</a></li>)}</ul>{!stats?.upcoming_deadlines.length && <p className="ud-sub">No upcoming deadlines in this view.</p>}</section>
       </div>
       <div className="ud-workspace"><div className="ud-filter-panel ud-panel" role="region" aria-label="Opportunity filters" tabIndex={0}><FiltersSidebar brandHierarchy facets={facets} filters={filters} hideVerticals={unclassified} onChange={next => onChange({ ...next, unclassified_only: unclassified, has_vertical: unclassified ? false : next.has_vertical })} /></div>
@@ -158,16 +171,25 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
           <div className="ud-table-scroll"><table><thead><tr><th><input type="checkbox" aria-label="Select this page" checked={allChecked} disabled={loading} onChange={e => setChecked(previous => { const next = new Set(previous); data?.items.forEach(o => e.target.checked ? next.add(o.id) : next.delete(o.id)); return next; })} /></th><th>Opportunity / source / location</th><th>Deadline</th><th>Amount</th><th>Brief</th></tr></thead>
             <tbody>{loading ? <tr><td colSpan={5} className="ud-empty" role="status">Loading opportunities…</td></tr> : data?.items.map(o => <tr key={o.id} className={selected?.id === o.id ? "ud-selected" : ""}>
               <td><input type="checkbox" aria-label={`Select ${o.title}`} checked={checked.has(o.id)} onChange={e => setChecked(previous => { const next = new Set(previous); e.target.checked ? next.add(o.id) : next.delete(o.id); return next; })} /></td>
-              <td><button className="ud-title" onClick={() => openBrief(o)}>{o.title}</button><p className="ud-metadata">{[o.organization, o.source_website, o.country].filter(Boolean).join(" · ")}</p><div className="ud-tags"><span className={`ud-tag ud-tag-${o.category}`}>{o.category}</span>{unclassified && <span className="ud-tag ud-unclassified">Unclassified</span>}{tags(o).map(t => <span className="ud-tag" key={t} title={brandPath(t)}>{shortVertical(t)}</span>)}{o.approved && <span className="ud-tag ud-approved">Approved</span>}</div></td>
-              <td>{formatDate(o.deadline)}<span className="ud-urgent">{deadlineLabel(o.deadline)}</span></td><td>{o.funding_amount || "—"}{showInr && toInr(o.funding_amount) && <p className="ud-sub">{toInr(o.funding_amount)}</p>}</td><td><button className="ud-view" aria-label={`View brief for ${o.title}`} onClick={() => openBrief(o)}>View</button></td>
+              <td><button className="ud-title" onClick={() => openBrief(o)}>{o.title}</button><p className="ud-metadata">{[o.organization, o.source_website, o.country].filter(Boolean).join(" · ")}</p><div className="ud-tags"><span className={`ud-tag ud-tag-${o.category}`}>{o.category}</span>{unclassified && <span className="ud-tag ud-unclassified">Unclassified</span>}{tags(o).map(t => <span className="ud-tag" key={t} title={brandPath(t)}>{shortVertical(t)}</span>)}{o.approved && <span className="ud-tag ud-approved">Approved</span>}</div><div className="ud-row-save"><SaveLeadButton id={o.id} /></div></td>
+              <td>{formatDate(o.deadline)}<span className="ud-urgent">{deadlineLabel(o.deadline)}</span></td><td>{o.funding_amount || "—"}{showInr && toInr(o.funding_amount) && <p className="ud-sub">{toInr(o.funding_amount)}</p>}</td><td><button className="ud-view" aria-label={`View brief for ${o.title}`} onClick={() => openBrief(o)}>View</button><button className="ud-view ud-row-wrike" aria-label={`Create or view Wrike task for ${o.title}`} disabled={readOnly} onClick={() => setWrikeDialog(o)}>Wrike task</button></td>
             </tr>)}{!loading && !data?.items.length && <tr><td colSpan={5} className="ud-empty">{data ? "No opportunities match these filters." : "Opportunities could not be loaded."}<br /><button className="ud-view" onClick={data ? resetView : onDataRefresh}>{data ? "Clear filters" : "Retry"}</button></td></tr>}</tbody></table></div>{pager()}
         </section>
         <aside className="ud-rail" ref={railRef}><section className="ud-panel ud-brief" ref={briefRef} tabIndex={-1} aria-label="Opportunity brief"><div className="ud-brief-head">Opportunity brief</div><div className="ud-brief-body">{selected ? <><span className={`ud-tag ud-tag-${selected.category}`}>{selected.category}</span><h2 aria-live="polite">{selected.title}</h2><p className="ud-sub">{selected.organization || "Organisation not listed"}</p><dl><div><dt>Deadline</dt><dd>{selected.deadline ? formatDate(selected.deadline) : "Ongoing"}<span className="ud-urgent">{deadlineLabel(selected.deadline)}</span></dd></div><div><dt>Amount</dt><dd>{selected.funding_amount || "Not listed"}</dd></div><div><dt>Location</dt><dd>{selected.location || selected.country || "Not listed"}</dd></div><div><dt>Source</dt><dd>{selected.source_website || "Not listed"}</dd></div></dl><h3>Brands</h3>{unclassified && <p className="ud-sub">Not assigned</p>}<div className="ud-tags">{tags(selected).map(t => <span key={t} className="ud-tag">{brandPath(t)}</span>)}</div><h3>Source summary</h3><p className="ud-summary">{selected.summary || "No summary was provided by the source."}</p>{selected.eligibility && <><h3>Eligibility</h3><p className="ud-summary">{selected.eligibility}</p></>}{selected.work_type && <p className="ud-sub">Work type: {selected.work_type}</p>}{selected.study_type && <p className="ud-sub">Study: {selected.study_type}</p>}
-          {selected.link && selected.link_kind !== "none" ? <a className="ud-primary-button" href={selected.link} target="_blank" rel="noreferrer">{selected.link_kind === "search" ? `Search ${selected.source_website}` : selected.link_kind === "listing" ? "Open source listing page ↗" : "Open original source ↗"}</a> : <p className="ud-sub">No source link provided.</p>}
+          <SaveLeadButton id={selected.id} /><ReviewLeadButton id={selected.id} />
+          <WrikeTaskAction key={`${selected.id}-${wrikeRevision}`} opportunityId={selected.id} opportunityTitle={selected.title} readOnly={readOnly} onCreated={() => setWrikeRevision(value => value + 1)} />
+          {selected.link && selected.link_kind !== "none" ? <a className="ud-primary-button" href={selected.link} onClick={()=>void recordLeadActivity(selected.id,"source_opened").catch(()=>setMessage("Source opened, but activity could not be saved."))} target="_blank" rel="noreferrer">{selected.link_kind === "search" ? `Search ${selected.source_website}` : selected.link_kind === "listing" ? "Open source listing page ↗" : "Open original source ↗"}</a> : <p className="ud-sub">No source link provided.</p>}
           {/developmentaid|devex|globaltenders/i.test(selected.source_website) && <p className="ud-sub">Source membership or sign-in may be required.</p>}
           <button className="ud-approve" disabled={readOnly || busy !== null || loading} onClick={() => approve(selected)}>{busy === selected.id ? "Saving…" : selected.approved ? "Approved · Undo" : "Approve opportunity"}</button>{readOnly && <p className="ud-sub">Approvals unavailable on this read-only dashboard.</p>}<p role="status" className="ud-status">{message}</p></> : <p className="ud-sub">Select an opportunity to see its brief.</p>}</div></section><div className="ud-experts"><ExpertsCard readOnly={readOnly} isAdmin={false} /></div><section className="ud-signal"><h2>From discovery<br />to a decision.</h2><p>Select an opportunity to review its funding, eligibility and source details.</p><span>Discover → Review → Act</span></section></aside>
       </div>
     </main>
+    {wrikeDialog && <div className="ud-wrike-overlay">
+      <div className="ud-wrike-dialog" role="dialog" aria-modal="true" aria-labelledby="ud-wrike-dialog-title">
+        <div className="ud-wrike-dialog-head"><h2 id="ud-wrike-dialog-title">Add opportunity to Wrike</h2><button type="button" aria-label="Close Wrike dialog" onClick={() => setWrikeDialog(null)}>×</button></div>
+        <p className="ud-sub">{wrikeDialog.title}</p>
+        <WrikeTaskAction key={wrikeDialog.id} opportunityId={wrikeDialog.id} opportunityTitle={wrikeDialog.title} readOnly={readOnly} onCreated={() => setWrikeRevision(value => value + 1)} />
+      </div>
+    </div>}
   </div>;
 }
 

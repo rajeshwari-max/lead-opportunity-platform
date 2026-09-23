@@ -68,76 +68,12 @@ def _name_from_email(email: str) -> str:
     return " ".join(p.capitalize() for p in parts) or email
 
 
-@router.post("/login")
-def login(body: dict, response: Response, db: Session = Depends(get_db)) -> dict:
-    """Sign in as a named team member.
-
-    The email identifies who you are; the password authorises you. Supplying the
-    admin password instead of the dashboard one signs you in with admin rights,
-    so there is one form rather than two.
-    """
-    from sqlalchemy import func, select
-
-    from app.core.auth import (COOKIE_NAME, SESSION_DAYS, admin_password_matches,
-                               auth_required, domain_allowed, make_session_token,
-                               password_matches)
-
-    if not auth_required():
-        return {"authenticated": True, "name": "Local", "email": "", "is_admin": True}
-
-    email = (body.get("email") or "").strip().lower()
-    password = body.get("password") or ""
-    is_admin = admin_password_matches(password)
-    if not (is_admin or password_matches(password)):
-        raise HTTPException(status_code=401, detail="Incorrect password")
-
-    member = db.execute(
-        select(TeamMember).where(func.lower(TeamMember.email) == email)
-    ).scalar_one_or_none()
-
-    if member is not None and not member.active:
-        # Deactivating someone is how access is revoked, so it has to beat the
-        # domain rule below — otherwise removing a leaver would do nothing.
-        raise HTTPException(
-            status_code=403,
-            detail="This account has been deactivated. Ask an admin to re-enable it.",
-        )
-
-    if member is None:
-        # Anyone at a company domain may sign in with the dashboard password,
-        # without an admin adding them first. They are still recorded as a team
-        # member, because approvals are attributed by email and the digest
-        # needs somewhere to hang preferences.
-        if not domain_allowed(email):
-            raise HTTPException(
-                status_code=403,
-                detail="Sign in with your work email address, or ask an admin "
-                       "to add you in Team & Lead Routing.",
-            )
-        # auto_send stays off: a new member has no keywords, and a member with
-        # no keywords matches *everything*. Switching one on unattended would
-        # send them a digest of many thousands of rows at the next 09:00 run.
-        member = TeamMember(
-            name=_name_from_email(email), email=email, keywords="", categories="",
-            verticals="", auto_send=False, active=True,
-        )
-        db.add(member)
-        db.commit()
-        db.refresh(member)
-
-    response.set_cookie(
-        COOKIE_NAME, make_session_token(member.email, member.name, is_admin),
-        max_age=SESSION_DAYS * 86400, httponly=True, samesite="lax", path="/",
-    )
-    return {"authenticated": True, "name": member.name,
-            "email": member.email, "is_admin": is_admin}
-
-
 @router.post("/logout")
 def logout(response: Response) -> dict:
     from app.core.auth import COOKIE_NAME
 
     response.delete_cookie(COOKIE_NAME, path="/")
+    response.delete_cookie("lop_workspace", path="/api/workspace")
     return {"authenticated": False}
 
 
@@ -153,7 +89,7 @@ def require_admin(request: Request) -> None:
     if not current_user(request.cookies.get(COOKIE_NAME))["is_admin"]:
         raise HTTPException(
             status_code=403,
-            detail="Admin only. Sign in with the admin password to use this.",
+            detail="Admin access has not been granted to this account.",
         )
 
 

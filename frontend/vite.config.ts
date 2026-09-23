@@ -7,7 +7,7 @@ export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   server: {
     port: 5173,
-    proxy: { "/api": { target: "http://localhost:8000", changeOrigin: true } },
+    proxy: { "/api": { target: "http://localhost:8000", changeOrigin: false } },
     // Allow requests coming through a Cloudflare quick tunnel (trycloudflare.com)
     // so the dashboard can be shared via a public link without a hosting account.
     allowedHosts: ["localhost", ".trycloudflare.com"],

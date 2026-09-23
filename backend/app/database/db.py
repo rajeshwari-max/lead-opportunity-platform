@@ -121,6 +121,11 @@ def _run_migrations(conn) -> None:
     def index_names(table: str) -> set[str]:
         return {row[1] for row in conn.exec_driver_sql(f"PRAGMA index_list({table})")}
 
+    if "workspace_credentials" in _tables(conn):
+        for name, ddl in (("is_admin", "BOOLEAN NOT NULL DEFAULT 0"), ("invitation_hash", "VARCHAR(64)"), ("invitation_expires", "DATETIME")):
+            if name not in columns("workspace_credentials"):
+                conn.exec_driver_sql(f"ALTER TABLE workspace_credentials ADD COLUMN {name} {ddl}")
+
     renamed_vertical_column = False
 
     if "opportunities" in _tables(conn):

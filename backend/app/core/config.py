@@ -372,6 +372,14 @@ class Settings(BaseSettings):
     # session and no persistent disk, so it only ever displays a data snapshot
     # pushed from the primary machine — it must never attempt to scrape itself.
     read_only: bool = False
+    
+    # Wrike integration — values come from backend/.env
+    wrike_enabled: bool = False
+    wrike_client_id: str = ""
+    wrike_client_secret: str = ""
+    wrike_redirect_uri: str = ""
+    wrike_folder_id: str = ""
+    wrike_token_encryption_key: str = ""
 
     # Absolute base URL used to build one-click approval links in emails.
     # Relative links don't work in mail clients, so this must point at whatever
@@ -387,7 +395,9 @@ class Settings(BaseSettings):
 
     # Shared password protecting the whole dashboard. Empty = no gate, which
     # keeps local development unchanged; set it on any public instance.
-    dashboard_password: str = ""
+    personal_login: bool = True  # Disable only for isolated development demos.
+    workspace_enabled: bool = False  # Separate experimental workspace stays off production.
+    dashboard_password: str = ""  # Legacy setting; not accepted for personal login.
 
     # Email domains that may sign in with the dashboard password without an
     # admin adding them to the team list first. Comma separated, no "@".

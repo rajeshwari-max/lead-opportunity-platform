@@ -1,99 +1,49 @@
 import { useState } from "react";
-import { Loader2, Lock, Mail, Zap } from "lucide-react";
-import { Button } from "@/components/ui/button";
-
-/** Shown instead of the dashboard when a password is required and this browser
- *  doesn't have a session yet. */
-export function LoginScreen({ onSuccess }: { onSuccess: () => void }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      if (res.ok) {
-        onSuccess();
-      } else {
-        // 403 means the password was right but the email isn't on the team —
-        // worth saying, because the fix is different (ask an admin to add you).
-        const body = await res.json().catch(() => ({}));
-        setError(res.status === 403 ? body.detail : "Incorrect email or password");
-        setPassword("");
-      }
-    } catch {
-      setError("Could not reach the server");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-6">
-      {/* Two soft colour washes rather than a flat panel on a flat page. Pure
-          decoration, so pointer-events are off and it never eats a click. */}
-      <div aria-hidden
-           className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-primary/20 blur-3xl" />
-      <div aria-hidden
-           className="pointer-events-none absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-emerald-500/15 blur-3xl" />
-
-      <form
-        onSubmit={submit}
-        className="relative w-full max-w-sm rounded-2xl border border-border/60 bg-card/80 p-8 shadow-2xl backdrop-blur"
-      >
-        <div className="mb-7 flex flex-col items-center text-center">
-          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-emerald-500 shadow-lg">
-            <Zap className="h-6 w-6 text-white" />
-          </div>
-          <h1 className="text-lg font-semibold tracking-tight">Lead Scanning Platform</h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Sign in with your work email
-          </p>
-        </div>
-
-        <div className="space-y-3">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-muted-foreground">Email</span>
-            <div className="relative">
-              <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                type="email" autoFocus value={email} placeholder="you@catalysts.org"
-                onChange={(e) => setEmail(e.target.value)}
-                className="h-11 w-full rounded-lg border border-border bg-background pl-10 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20"
-              />
-            </div>
-          </label>
-
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-muted-foreground">Password</span>
-            <div className="relative">
-              <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                type="password" value={password} placeholder="••••••••"
-                onChange={(e) => setPassword(e.target.value)}
-                className="h-11 w-full rounded-lg border border-border bg-background pl-10 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary focus:ring-2 focus:ring-primary/20"
-              />
-            </div>
-          </label>
-        </div>
-
-        {/* Reserved height, so the form doesn't jump when an error appears. */}
-        <div className="min-h-[1.25rem] pt-2">
-          {error && <p className="text-xs text-red-500">{error}</p>}
-        </div>
-
-        <Button type="submit" className="h-11 w-full text-sm" disabled={busy || !password || !email}>
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign in"}
-        </Button>
-      </form>
-    </div>
-  );
+import "./login.css";
+export function LoginScreen({onSuccess}:{onSuccess:()=>void}) {
+ const [token]=useState(()=>new URLSearchParams(location.hash.slice(1)).get("setup")||"");
+ const [mode,setMode]=useState<"login"|"register"|"forgot">("login");
+ const [name,setName]=useState(""),[email,setEmail]=useState(""),[password,setPassword]=useState(""),[confirmation,setConfirmation]=useState(""),[show,setShow]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(""),[message,setMessage]=useState("");
+ function changeMode(next:typeof mode){setMode(next);setError("");setMessage("");setPassword("");setConfirmation("");}
+ async function submit(e:React.FormEvent){
+  e.preventDefault();setError("");setMessage("");
+  if((token||mode==="register")&&password!==confirmation){setError("Passwords do not match");return;}
+  setBusy(true);
+  try {
+   const path=token?"/activate":mode==="register"?"/register":mode==="forgot"?"/forgot-password":"";
+   const payload=token?{token,password}:mode==="register"?{email,name,password}:mode==="forgot"?{email}:{email,password};
+   const r=await fetch("/api/login"+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+   // Read as text first. r.json() throws "Unexpected end of JSON input" on an
+   // empty body, and the user sees that instead of what actually happened —
+   // the backend being down, or the endpoint not existing.
+   const raw=await r.text();
+   let data:any={};
+   try{data=raw?JSON.parse(raw):{};}catch{/* a proxy error page, not JSON */}
+   if(!raw)throw new Error("The server did not respond. Is the backend running on http://localhost:8000?");
+   if(r.status===404)throw new Error("This backend has no sign-in endpoint yet (POST /api/login"+path+" is missing).");
+   if(!r.ok)throw new Error(typeof data.detail==="string"?data.detail:`Sign-in failed — HTTP ${r.status}`);
+   if(!token&&mode==="forgot"){setMessage(data.message);return;}
+   history.replaceState({},"","?view=user");setPassword("");onSuccess();
+  }catch(e){setError(e instanceof Error?e.message:"Server unavailable");}finally{setBusy(false);}
+ }
+ return <main className="login-page">
+  <section className="login-story"><strong className="login-brand">CMS <small>LEAD SCANNING PLATFORM</small></strong><div><small>FROM DISCOVERY TO IMPACT</small><h1>Your next opportunity.<br/>Your own journey.</h1><p>Discover relevant funding, build stronger applications and save leads and keep your progress in your personal dashboard.</p><div className="login-preview">YOUR OPPORTUNITY JOURNEY<h3>Discover → Apply → Grow</h3><p>Discover · Save · Track</p></div></div><small>Funding & opportunity intelligence</small></section>
+  <section className="login-form-side"><form onSubmit={submit}>
+   <small>WELCOME TO YOUR DASHBOARD</small>
+   <h2>{token?"Set your password":mode==="register"?"Create your account":mode==="forgot"?"Forgot password?":"Welcome back"}</h2>
+   {token&&<p>Choose your personal password to continue.</p>}
+   {!token&&mode==="register"&&<p>Choose your password to create your account immediately. Your account starts with user access.</p>}
+   {!token&&mode==="forgot"&&<p>Enter your account email and we’ll send you a password reset link.</p>}
+   {!token&&mode==="register"&&<label>Your name<input required autoComplete="name" maxLength={200} value={name} onChange={e=>setName(e.target.value)}/></label>}
+   {!token&&<label>Work email<input type="email" required autoComplete="username" maxLength={320} value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@organisation.org"/></label>}
+   {(token||mode!=="forgot")&&<label>{token?"Choose password":"Your password"}<div className="login-password"><input required type={show?"text":"password"} minLength={token||mode==="register"?12:1} maxLength={200} autoComplete={token||mode==="register"?"new-password":"current-password"} value={password} onChange={e=>setPassword(e.target.value)}/><button type="button" aria-label={show?"Hide password":"Show password"} onClick={()=>setShow(!show)}>{show?"Hide":"Show"}</button></div></label>}
+   {(token||mode==="register")&&<><small>At least 12 characters.</small><label>Confirm password<input type="password" required autoComplete="new-password" value={confirmation} onChange={e=>setConfirmation(e.target.value)}/></label></>}
+   {!token&&mode==="login"&&<button type="button" className="login-text-button" disabled={busy} onClick={()=>changeMode("forgot")}>Forgot password?</button>}
+   <p role="alert" className="login-error">{error}</p>
+   {message&&<p role="status" className="login-success">{message}</p>}
+   <button className="login-submit" disabled={busy}>{busy?"Please wait…":token?"Save password & continue":mode==="register"?"Register":mode==="forgot"?"Send reset link":"Sign in"}</button>
+   {!token&&<div className="login-help">{mode==="login"?<>New here? <button type="button" disabled={busy} className="login-text-button" onClick={()=>changeMode("register")}>Register</button></>:<button type="button" disabled={busy} className="login-text-button" onClick={()=>changeMode("login")}>Already have an account? Sign in</button>}</div>}
+   <footer>Admin access is granted by your administrator.</footer>
+  </form></section>
+ </main>;
 }

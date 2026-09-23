@@ -1,4 +1,4 @@
-import type { DigestRunResult, ReviewQueueResponse, ScraperHealth, UnclassifiedQuery, UnclassifiedResponse, EmailSettings, Facets, FilterState, Opportunity, Paginated, Progress, ScheduleStatus, SourceInfo, Stats, TeamMember } from "./types";
+import type { DigestRunResult, ReviewQueueResponse, ScraperHealth, UnclassifiedQuery, UnclassifiedResponse, EmailSettings, Facets, FilterState, Opportunity, Paginated, Progress, ScheduleStatus, SourceInfo, Stats, TeamMember, WrikeAssignee, WrikeFolder, WrikeStatus, WrikeTaskLink } from "./types";
 
 const BASE = "/api";
 
@@ -52,6 +52,22 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export const api = {
+  wrikeStatus: () => get<WrikeStatus>("/wrike/status"),
+  wrikeFolder: () => get<WrikeFolder>("/wrike/folder"),
+  wrikeAssignees: () => get<WrikeAssignee[]>("/wrike/assignees"),
+  wrikeTaskForOpportunity: (id: number) => get<WrikeTaskLink>(`/wrike/opportunities/${id}`),
+  createWrikeTask: async (id: number, memberIds: number[]): Promise<WrikeTaskLink> => {
+    const res = await fetch(`${BASE}/wrike/opportunities/${id}/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ member_ids: memberIds }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(typeof data.detail === "string" ? data.detail : `Wrike request failed (${res.status})`);
+    }
+    return res.json() as Promise<WrikeTaskLink>;
+  },
   opportunities: (f: FilterState) => get<Paginated>(`/opportunities?${filterParams(f)}`),
   facets: (f?: FilterState) =>
     get<Facets>(f ? `/filters?${filterParams(f)}` : "/filters"),

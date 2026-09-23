@@ -165,6 +165,31 @@ export interface TeamMember {
   created_at: string;
 }
 
+export interface WrikeStatus {
+  enabled: boolean;
+  configured: boolean;
+  connected: boolean;
+}
+
+export interface WrikeAssignee {
+  id: number;
+  name: string;
+  email: string;
+  available: boolean;
+}
+
+export interface WrikeTaskLink {
+  status: "not_created" | "creating" | "created" | "uncertain";
+  task_id: string | null;
+  permalink: string | null;
+  assignment_warning: boolean;
+}
+
+export interface WrikeFolder {
+  id: string;
+  title: string;
+}
+
 /** Canonical six-vertical system — these strings must match backend
  *  services/verticals.py EXACTLY. The backend drops any vertical it doesn't
  *  recognise, so a mismatch here silently turns a vertical-filtered scrape

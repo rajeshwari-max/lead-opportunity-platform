@@ -136,7 +136,7 @@ app.add_middleware(
 async def _require_password(request, call_next):
     from fastapi.responses import JSONResponse
 
-    from app.core.auth import COOKIE_NAME, auth_required, read_session
+    from app.core.auth import COOKIE_NAME, auth_required, current_user
 
     if auth_required():
         path = request.url.path
@@ -149,15 +149,27 @@ async def _require_password(request, call_next):
             or path.startswith(f"{settings.api_prefix}/config")
             or path.startswith(f"{settings.api_prefix}/approve/")
         )
-        if not exempt and not read_session(request.cookies.get(COOKIE_NAME)):
+        if not exempt and not current_user(request.cookies.get(COOKIE_NAME))["authenticated"]:
             if path.startswith(settings.api_prefix):
                 return JSONResponse({"detail": "Not authenticated"}, status_code=401)
             # Not an API call — let the SPA load so it can show its login form.
     return await call_next(request)
 
 
+from app.api.accounts import router as accounts_router
+app.include_router(accounts_router, prefix=settings.api_prefix)
 app.include_router(router, prefix=settings.api_prefix)
+from app.api.workspace import router as workspace_router
+if settings.workspace_enabled:
+    app.include_router(workspace_router, prefix=settings.api_prefix)
+from app.api.leads import router as leads_router
+app.include_router(leads_router, prefix=settings.api_prefix)
 
+
+from app.api.wrike import router as wrike_router
+app.include_router(wrike_router, prefix=settings.api_prefix)
+
+# Serve the built dashboard (frontend/dist, copied to ./static in the Docker
 # Serve the built dashboard (frontend/dist, copied to ./static in the Docker
 # image) at "/". Registered after the API router so /api/* always wins over
 # the catch-all. html=True makes "/" resolve to static/index.html.

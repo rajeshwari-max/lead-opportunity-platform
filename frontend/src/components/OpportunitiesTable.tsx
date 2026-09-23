@@ -1,3 +1,4 @@
+import { SaveLeadButton, ReviewLeadButton, recordLeadActivity } from "./DashboardLeads";
 import {
   createColumnHelper,
   flexRender,
@@ -81,12 +82,15 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
     });
 
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const toggleExpanded = (id: number) =>
+  const [activityError, setActivityError] = useState("");
+  const toggleExpanded = (id: number) => {
+    if (!expanded.has(id)) void recordLeadActivity(id,"viewed").catch(()=>setActivityError("Activity could not be saved. Please try again."));
     setExpanded((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  };
 
   const toggleApproval = async (o: Opportunity) => {
     const next = !(pendingApproval[o.id] ?? o.approved);
@@ -628,6 +632,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
                             />
                             <div className="min-w-0 flex-1">
                               {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                              <div className="mt-2"><SaveLeadButton id={o.id} /></div>
                             </div>
                           </div>
                         ) : (
@@ -646,7 +651,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
                             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                               Title
                             </p>
-                            <p className="mt-0.5 font-medium leading-snug">{o.title}</p>
+                            <p className="mt-0.5 font-medium leading-snug">{o.title}</p><SaveLeadButton id={o.id} /><ReviewLeadButton id={o.id} />{activityError&&<p role="alert">{activityError}</p>}
                           </div>
 
                           {o.summary && (

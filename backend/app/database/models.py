@@ -5,7 +5,7 @@ import enum
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
-    Date, DateTime, Enum, Float, Index, String, Text, UniqueConstraint,
+    Date, DateTime, Enum, Float, Index, String, Text, UniqueConstraint, LargeBinary,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -316,4 +316,122 @@ class ExpertCount(Base):
     search_url: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+# Personal workspaces are scoped by verified account email on every API query.
+class LeadActivity(Base):
+    __tablename__ = "lead_activity"
+    owner: Mapped[str] = mapped_column(String(320), primary_key=True)
+    opportunity_id: Mapped[int] = mapped_column(primary_key=True)
+    viewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    source_opened_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class DashboardPreferences(Base):
+    __tablename__ = "dashboard_preferences"
+    owner: Mapped[str] = mapped_column(String(320), primary_key=True)
+    filters: Mapped[str] = mapped_column(Text, default="{}")
+
+
+class WorkspaceCredential(Base):
+    __tablename__ = "workspace_credentials"
+    owner: Mapped[str] = mapped_column(String(320), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(Text, default="")
+    is_admin: Mapped[bool] = mapped_column(default=False)
+    invitation_hash: Mapped[str | None] = mapped_column(String(64))
+    invitation_expires: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class WorkspaceProfile(Base):
+    __tablename__ = "workspace_profiles"
+    owner: Mapped[str] = mapped_column(String(320), primary_key=True)
+    title: Mapped[str] = mapped_column(String(120), default="My opportunity journey")
+    accent: Mapped[str] = mapped_column(String(20), default="blue")
+    keywords: Mapped[str] = mapped_column(Text, default="")
+    verticals: Mapped[str] = mapped_column(Text, default="")
+    countries: Mapped[str] = mapped_column(Text, default="")
+    experience: Mapped[str] = mapped_column(Text, default="")
+    registrations: Mapped[str] = mapped_column(Text, default="")
+
+
+class ApplicationJourney(Base):
+    __tablename__ = "application_journeys"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner: Mapped[str] = mapped_column(String(320), index=True)
+    opportunity_id: Mapped[int] = mapped_column(index=True)
+    stage: Mapped[str] = mapped_column(String(32), default="Saved")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    factors: Mapped[str] = mapped_column(Text, default="[]")
+    next_action: Mapped[str] = mapped_column(Text, default="")
+    next_action_date: Mapped[date | None] = mapped_column(Date)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    __table_args__ = (UniqueConstraint("owner", "opportunity_id"),)
+
+
+class JourneyEvent(Base):
+    __tablename__ = "journey_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    journey_id: Mapped[int] = mapped_column(index=True)
+    stage: Mapped[str] = mapped_column(String(32))
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class JourneyAttachment(Base):
+    __tablename__ = "journey_attachments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    journey_id: Mapped[int] = mapped_column(index=True)
+    filename: Mapped[str] = mapped_column(String(240))
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class WorkspaceContact(Base):
+    __tablename__ = "workspace_contacts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner: Mapped[str] = mapped_column(String(320), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    organization: Mapped[str] = mapped_column(String(300), default="")
+    role: Mapped[str] = mapped_column(String(200), default="")
+    email: Mapped[str] = mapped_column(String(320), default="")
+    tags: Mapped[str] = mapped_column(Text, default="")
+    strength: Mapped[str] = mapped_column(String(30), default="Known")
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class WrikeConnection(Base):
+    """Encrypted tokens for the single shared Wrike connection (id=1)."""
+
+    __tablename__ = "wrike_connections"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    access_token_encrypted: Mapped[str] = mapped_column(Text)
+    refresh_token_encrypted: Mapped[str] = mapped_column(Text)
+    host: Mapped[str] = mapped_column(String(255))
+    expires_at: Mapped[int] = mapped_column()  # UTC Unix timestamp
+    connected_by: Mapped[str] = mapped_column(String(320))
+
+
+class WrikeTaskLink(Base):
+    """One Wrike task (or unresolved creation attempt) per opportunity."""
+
+    __tablename__ = "wrike_task_links"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    opportunity_id: Mapped[int] = mapped_column(unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(16), default="creating")
+    task_id: Mapped[str | None] = mapped_column(String(128))
+    permalink: Mapped[str | None] = mapped_column(Text)
+    folder_id: Mapped[str] = mapped_column(String(256))
+    created_by: Mapped[str] = mapped_column(String(320))
+    responsible_ids: Mapped[str] = mapped_column(Text, default="[]")
+    assignment_warning: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
     )
