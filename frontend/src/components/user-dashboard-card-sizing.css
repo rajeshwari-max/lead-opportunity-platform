@@ -1,0 +1,12 @@
+/* Keep one unusually long deadline from stretching every analytics card. */
+.user-dashboard .ud-charts {
+  align-items: start;
+}
+
+.user-dashboard .ud-deadlines a {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}

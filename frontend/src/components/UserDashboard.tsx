@@ -13,6 +13,7 @@ import { formatDate } from "@/lib/utils";
 import { toInr, RATES_AS_OF } from "@/lib/money";
 import { emptyFilters, type Facets, type FilterState, type Opportunity, type Paginated, type Stats } from "@/lib/types";
 import "./user-dashboard.css";
+import "./user-dashboard-card-sizing.css";
 
 interface Props {
   filters: FilterState;
