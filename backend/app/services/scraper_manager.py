@@ -21,7 +21,12 @@ from app.services.scrape_outcome import Evidence, Outcome, classify
 from app.schemas.opportunity import RawOpportunity
 from app.scrapers.base_scraper import BaseScraper
 from app.scrapers.registry import get_scrapers
-from app.services.classification import Classifier, KeywordClassifier
+from app.services.classification import (
+    Classifier,
+    KeywordClassifier,
+    category_hint_for_record_type,
+)
+from app.services.classification_model import classify as classify_vertical_model
 from app.services.deadline_parser import DeadlineParser
 from app.services.deduplication import make_unique_id
 from app.services.amounts import clean_amount, extract_amount
@@ -41,7 +46,7 @@ from app.services.deadline_audit import is_sentinel
 from app.services.spam import is_spam
 from app.services.organization import extract_organization, tidy_organization
 from app.services.verticals import VERTICALS as ALL_VERTICALS
-from app.services.verticals import classify_verticals, verticals_to_str
+from app.services.verticals import verticals_to_str
 from app.services.study_type import classify_study_type
 from app.services.work_type import classify_work_type
 
@@ -534,6 +539,7 @@ class ScraperManager:
         from app.services.actionable import application_today
         today = application_today()
         batch_uids: set[str] = set()  # catch duplicates within the same batch too
+        enabled_categories = set(settings.enabled_categories)
         contract = contract_for(source_key or "",
                                 batch[0].source_website if batch else "")
         with session_scope() as db:
@@ -598,9 +604,18 @@ class ScraperManager:
                     if not settings.keep_expired:
                         continue
 
-                category = self.classifier.classify(raw.title, raw.summary, raw.category_hint)
+                # Prefer the source's structured notice type over a scraper's
+                # broad page-level hint.  A page can be called "grants" and
+                # still contain an RFP; the record type describes this row.
+                category_hint = (
+                    category_hint_for_record_type(raw.record_type)
+                    or raw.category_hint
+                )
+                category = self.classifier.classify(
+                    raw.title, raw.summary, category_hint)
                 vertical_body = " ".join(filter(None, [raw.summary, raw.vertical, raw.eligibility]))
-                vertical_tags = classify_verticals(raw.title, vertical_body)
+                vertical_result = classify_vertical_model(raw.title, vertical_body)
+                vertical_tags = vertical_result.labels
                 if self.vertical_filter and not (set(vertical_tags) & self.vertical_filter):
                     self._count_off_vertical(raw.source_website)
                     continue
@@ -678,6 +693,16 @@ class ScraperManager:
                         log.debug("[%s] rejected (%s): %s", raw.source_website,
                                   why, (raw.title or "")[:60])
                         continue
+
+                # The platform's working scope is intentionally narrow.  A
+                # curated board may contain adjacent record types, and a page
+                # hint may still fail to identify the row; neither should turn
+                # an Other/Award/Challenge into stored dashboard inventory.
+                if category.value not in enabled_categories:
+                    rejected += 1
+                    log.debug("[%s] rejected (category outside dashboard scope): %s",
+                              raw.source_website, (raw.title or "")[:60])
+                    continue
 
                 uid = make_unique_id(raw.title, organization, deadline, raw.opportunity_url, raw.source_website)
 
@@ -783,6 +808,13 @@ class ScraperManager:
                     funding_type=raw.funding_type,
                     vertical=raw.vertical,
                     verticals=verticals_to_str(vertical_tags),
+                    verticals_source="auto",
+                    classification_status=vertical_result.status,
+                    classification_source="rule",
+                    classification_version=vertical_result.version,
+                    vertical_scores=vertical_result.scores_json(),
+                    classification_evidence=vertical_result.evidence_json(),
+                    classified_at=datetime.now(timezone.utc),
                     # Routing axis: research assignments and delivery work go to
                     # different teams even when both are filed as "RFP".
                     work_type=classify_work_type(raw.title, vertical_body),

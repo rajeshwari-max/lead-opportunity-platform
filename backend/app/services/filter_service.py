@@ -109,6 +109,24 @@ class FilterService:
             # whose date simply could not be parsed.
             stmt = select(Opportunity).where(live_clause)
         stmt = stmt.where(Opportunity.unique_id.not_like("merged:%"))
+        # The working dashboard is intentionally scoped to the opportunity
+        # types the team acts on.  Old rows labelled Other/Award/Challenge used
+        # to leak into the table even though the filter cards and charts hid
+        # those categories.  Enforce the same allow-list at the query boundary
+        # so counts, pagination and exports all agree.
+        if f.opportunity_types_only:
+            enabled_categories = [
+                Category(value) for value in settings.enabled_categories
+                if value in Category._value2member_map_
+            ]
+            if enabled_categories:
+                stmt = stmt.where(Opportunity.category.in_(enabled_categories))
+            # New ingestion refuses these already.  This clause protects the
+            # dashboard from legacy rows that pre-date direct-link validation.
+            stmt = stmt.where(
+                Opportunity.opportunity_url.is_not(None),
+                Opportunity.opportunity_url != "",
+            )
         if getattr(f, "new_today", False):
             # Matches the "New Today" stat card. Clicking it used to only change
             # the sort order, so the table looked identical and the card seemed

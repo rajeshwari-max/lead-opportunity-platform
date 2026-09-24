@@ -27,7 +27,7 @@ _KEYWORD_MAP: list[tuple[Category, list[str]]] = [
         r"\brfei\b", r"request\s+for\s+expressions?\s+of\s+interest",
         r"\bic\b", r"individual\s+contract(or)?",
         r"\blta\b", r"long[\s-]term\s+agreement",
-        r"\bsssa\b", r"\bcfa\b", r"call\s+for\s+applications?\s+\(consultan",
+        r"\bsssa\b", r"\bcfas?\b", r"call\s+for\s+applications?\s+\(consultan",
         r"request\s+for\s+services?", r"solicitation",
     ]),
     (Category.TENDER, [
@@ -44,7 +44,13 @@ _KEYWORD_MAP: list[tuple[Category, list[str]]] = [
         r"\bgrants?\b", r"funding\s+opportunit", r"seed\s+fund", r"\bfund(s)?\b",
         r"financial\s+support", r"call\s+for\s+applications?",
     ]),
-    (Category.PROPOSAL, [r"call\s+for\s+proposals?", r"\bcfp\b", r"invit\w+\s+proposals?", r"proposals?\s+invited"]),
+    (Category.PROPOSAL, [
+        r"call\s+for\s+proposals?", r"\bcfps?\b", r"invit\w+\s+proposals?",
+        r"proposals?\s+invited", r"\bopen\s+calls?\b",
+        r"call\s+for\s+(partners?|concepts?|ideas?|submissions?)",
+        r"\b(research|innovation|funding|grant|proposal|project|partnership)\s+calls?\b",
+        r"\bcalls?\s+\d+\b",
+    ]),
 ]
 
 _COMPILED = [
@@ -91,3 +97,23 @@ class KeywordClassifier:
             if scores.get(cat) == best:
                 return cat
         return Category.OTHER
+
+
+def category_hint_for_record_type(record_type: str) -> Category | None:
+    """Translate a source's structured notice type into our display category.
+
+    This is deliberately separate from title inference.  ADB and World Bank
+    expose reliable record types even when a title is only a project name; the
+    dashboard should not label those ``Other`` merely because the title omits
+    the words RFP or tender.
+    """
+    value = (record_type or "").strip().lower().replace(" ", "_")
+    if value == "grant":
+        return Category.GRANT
+    if value == "call_for_proposals":
+        return Category.PROPOSAL
+    if value in {"rfp", "rfq", "eoi", "consultancy"}:
+        return Category.RFP
+    if value in {"tender", "itb"}:
+        return Category.TENDER
+    return None

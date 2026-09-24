@@ -152,6 +152,9 @@ class OpportunityFilters(BaseModel):
     # A toggle rather than a deletion — many are real, just thin on text.
     has_vertical: bool = True
     unclassified_only: bool = False
+    # User-facing dashboard scope: only Grant/RFP/Tender/Proposal. Kept
+    # explicit because admin/diagnostic callers may inspect legacy Other rows.
+    opportunity_types_only: bool = False
     # Administrative opt-in for rolling and undated rows. Ordinary dashboard,
     # export and email requests leave this false and require a real future (or
     # today) deadline.

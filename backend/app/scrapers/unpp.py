@@ -509,6 +509,10 @@ class UNPartnerPortalScraper(BaseScraper):
             opportunity_url=url or "",
             website=self.website,
             source_website=self.display_name,
+            # /cfei/open contains Calls for Expression of Interest.  Carry the
+            # source's structural type so a title such as "Disability Inclusion
+            # Assessment" is classified as an RFP rather than Other.
+            record_type="eoi",
             # Every row here is an OPEN call — /cfei/open is already filtered
             # to those — but a call with no published deadline must not be
             # stored as permanently live.

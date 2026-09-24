@@ -52,10 +52,15 @@ from app.services.links import is_furniture
 _OPPORTUNITY_WORDS = re.compile(
     r"\b("
     # funding
-    r"grants?|funding|fund|financial\s+support|seed\s+fund|"
+    # Bare "fund"/"funding" is intentionally not evidence.  Programme pages,
+    # annual reports and portfolio stories use those words constantly.  Real
+    # calls still match grant, funding opportunity/available, or application
+    # language below.
+    r"grants?|funding\s+(opportunit\w*|available|call|round)|"
+    r"financial\s+support|seed\s+fund|"
     r"fellowships?|scholarships?|bursar(y|ies)|prizes?|awards?|"
     # solicitations
-    r"rfps?|rfqs?|rfas?|rfis?|rfeis?|eois?|itbs?|icbs?|ncbs?|ltas?|"
+    r"rfps?|rfqs?|rfas?|cfas?|cfps?|rfis?|rfeis?|eois?|itbs?|icbs?|ncbs?|ltas?|"
     r"request\s+for\s+(proposals?|quotations?|applications?|information|"
     r"expressions?\s+of\s+interest|services?|tenders?)|"
     r"expressions?\s+of\s+interest|invitation\s+to\s+(bid|tender)|"
@@ -72,17 +77,25 @@ _OPPORTUNITY_WORDS = re.compile(
     r"challenges?|competitions?|accelerators?|incubators?|"
     # application language
     r"applications?\s+(are\s+)?(open|invited|welcome)|apply\s+(now|by|for)|"
-    r"proposals?\s+(are\s+)?(invited|sought|welcome)|open\s+call"
+    r"proposals?\s+(are\s+)?(invited|sought|welcome)|open\s+calls?"
     r")\b",
     re.IGNORECASE,
 )
 
-# A URL path that names a funding or procurement record.
-_OPPORTUNITY_HREF = re.compile(
-    r"/(grants?|funding|fund|opportunit\w*|calls?|call-for-\w+|tenders?|"
-    r"rfps?|rfqs?|eois?|proposals?|solicitations?|awards?|fellowships?|"
-    r"scholarships?|competitions?|challenges?|procurement|bids?|"
-    r"cfei|notices?)(?=[-/?#._]|$)",
+# Strong evidence that the row itself is accepting responses.  Unlike the
+# broader vocabulary above, this may override an informational-looking URL
+# (FundsForNGOs legitimately publishes RFPs below /research-2/) and a summary
+# that mentions prior winners.  It is checked in the TITLE only for overrides.
+_DIRECT_CALL_WORDS = re.compile(
+    r"\b(rfps?|rfqs?|rfas?|cfas?|cfps?|rfis?|rfeis?|eois?|itbs?|icbs?|ncbs?|"
+    r"request\s+for\s+(proposals?|quotations?|applications?|information|"
+    r"expressions?\s+of\s+interest|services?|tenders?)|"
+    r"call\s+for\s+(proposals?|applications?|expressions?|partners?|concepts?|"
+    r"ideas?|submissions?)|open\s+calls?|invitation\s+to\s+(bid|tender)|"
+    r"(research|innovation|funding|grant|proposal|project|partnership)\s+calls?|"
+    r"calls?\s+\d+|grants?\s+for|funding\s+opportunit\w*|apply\s+(now|by|for)|"
+    r"applications?\s+(are\s+)?(open|invited|welcome)|"
+    r"proposals?\s+(are\s+)?(invited|sought|welcome)|tenders?)\b",
     re.IGNORECASE,
 )
 
@@ -188,6 +201,7 @@ def is_opportunity(
     "1,110 of them are /news/ pages from four sources" is.
     """
     t = " ".join((title or "").split())
+    title_is_direct_call = bool(_DIRECT_CALL_WORDS.search(t))
     if is_furniture(t, url):
         return False, "furniture"
     if _HEADING_TITLE.match(t):
@@ -197,15 +211,14 @@ def is_opportunity(
     # The negative URL test applies to EVERY source, curated included: a
     # curated board can still link out to its own news page, and that link is
     # not an opportunity wherever it was found.
-    if path and _NOT_AN_OPPORTUNITY_HREF.search(path) and \
-            not _OPPORTUNITY_HREF.search(path):
+    if path and _NOT_AN_OPPORTUNITY_HREF.search(path) and not title_is_direct_call:
         return False, "page type is never an opportunity"
 
     # Also every source, curated included. A tender board publishes contract
     # awards alongside its open notices — World Bank's feed is mostly awards —
     # so "this page only contains opportunities" does not mean "and none of them
     # have already been decided".
-    if is_already_awarded(t, summary):
+    if is_already_awarded(t, summary) and not title_is_direct_call:
         return False, "a grant already awarded, not one being offered"
 
     if curated:
@@ -213,16 +226,8 @@ def is_opportunity(
         # does not have to say "grant" to be one. See the module docstring.
         return True, ""
 
-    cat = str(category or "").strip().lower()
-    if cat and cat not in ("", "other"):
-        # The classifier matched real solicitation or funding vocabulary. That
-        # is the same evidence this function looks for, already computed.
-        return True, ""
-
     haystack = f"{t} {' '.join((summary or '').split())[:1200]}"
     if _OPPORTUNITY_WORDS.search(haystack):
-        return True, ""
-    if path and _OPPORTUNITY_HREF.search(path):
         return True, ""
     return False, "no opportunity signal"
 

@@ -120,6 +120,8 @@ export interface FilterState {
   /** Hide rows with no vertical. Default on. */
   has_vertical: boolean;
   unclassified_only?: boolean;
+  /** Keep the working dashboard to Grant/RFP/Tender/Proposal rows. */
+  opportunity_types_only: boolean;
   page: number;
   page_size: number;
   sort_by: string;
@@ -143,6 +145,7 @@ export const emptyFilters: FilterState = {
   english_only: true,
   has_vertical: true,
   unclassified_only: false,
+  opportunity_types_only: true,
   page: 1,
   page_size: 25,
   sort_by: "deadline",

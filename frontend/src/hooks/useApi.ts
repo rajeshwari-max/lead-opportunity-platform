@@ -44,6 +44,7 @@ export function useDashboardData(filters: FilterState, refreshKey: number) {
         study_type: filters.study_type, english_only: filters.english_only,
         has_vertical: filters.has_vertical,
         unclassified_only: filters.unclassified_only,
+        opportunity_types_only: filters.opportunity_types_only,
       }),
     [filters]
   );
