@@ -24,8 +24,10 @@ $BackendDir = Join-Path $ProjectDir "backend"
 $Python = Join-Path $BackendDir ".venv\Scripts\python.exe"
 $Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $Transfer = Join-Path $BackendDir "data\developmentaid-transfer-$Stamp.db"
+$TransferArchive = "$Transfer.gz"
 $Remote = "$UserName@$HostName"
 $RemoteTransfer = "/home/$UserName/developmentaid-transfer-$Stamp.db"
+$RemoteTransferArchive = "$RemoteTransfer.gz.uploading"
 
 if (-not (Test-Path -LiteralPath $KeyPath -PathType Leaf)) {
     throw "EC2 key not found: $KeyPath"
@@ -65,6 +67,10 @@ Run {
     & $Python (Join-Path $BackendDir "scripts\snapshot_db.py") `
         --output $Transfer --only-source DevelopmentAid --active-only
 } "Could not create the local transfer snapshot."
+Run {
+    & $Python -c "import gzip, shutil, sys; src, dst = sys.argv[1:]; source = open(src, 'rb'); target = gzip.open(dst, 'wb', compresslevel=6); shutil.copyfileobj(source, target); target.close(); source.close()" $Transfer $TransferArchive
+} "Could not compress the local transfer snapshot."
+$TransferHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $TransferArchive).Hash.ToLowerInvariant()
 
 Step "Backing up EC2, pulling the release, testing, and deploying"
 $Deploy = @'
@@ -105,10 +111,50 @@ echo "Code deployment passed."
 $Deploy | & ssh -i $KeyPath $Remote "bash -s -- '$RemoteProject' '$ExpectedCommit'"
 if ($LASTEXITCODE -ne 0) { throw "Code deployment failed; the EC2 database backup was retained." }
 
-Step "Uploading the filtered DevelopmentAid transfer"
-Run {
-    & scp -i $KeyPath $Transfer "${Remote}:$RemoteTransfer"
-} "Transfer upload failed."
+Step "Uploading the compressed DevelopmentAid transfer"
+$Uploaded = $false
+for ($Attempt = 1; $Attempt -le 4; $Attempt++) {
+    Write-Host "Upload attempt $Attempt of 4..."
+    & scp -i $KeyPath -o ConnectTimeout=20 -o ServerAliveInterval=15 `
+        -o ServerAliveCountMax=12 $TransferArchive "${Remote}:$RemoteTransferArchive"
+    if ($LASTEXITCODE -eq 0) {
+        $Uploaded = $true
+        break
+    }
+    if ($Attempt -lt 4) { Start-Sleep -Seconds (5 * $Attempt) }
+}
+if (-not $Uploaded) { throw "Transfer upload failed after four attempts." }
+
+Step "Verifying and expanding the transfer on EC2"
+$Expand = @'
+set -euo pipefail
+PROJECT_DIR="$1"
+ARCHIVE="$2"
+TRANSFER="$3"
+EXPECTED_HASH="$4"
+ACTUAL_HASH=$(sha256sum "$ARCHIVE" | awk '{print $1}')
+[ "$ACTUAL_HASH" = "$EXPECTED_HASH" ] || {
+  echo "Uploaded transfer checksum mismatch." >&2
+  exit 31
+}
+"$PROJECT_DIR/backend/.venv/bin/python" - "$ARCHIVE" "$TRANSFER" <<'PY'
+import gzip
+import os
+import shutil
+import sys
+
+source, destination = sys.argv[1:]
+partial = destination + ".partial"
+with gzip.open(source, "rb") as compressed, open(partial, "wb") as database:
+    shutil.copyfileobj(compressed, database)
+os.replace(partial, destination)
+PY
+rm -f -- "$ARCHIVE"
+echo "Transfer checksum passed and database was expanded."
+'@
+$Expand | & ssh -i $KeyPath $Remote `
+    "bash -s -- '$RemoteProject' '$RemoteTransferArchive' '$RemoteTransfer' '$TransferHash'"
+if ($LASTEXITCODE -ne 0) { throw "Transfer verification or expansion failed." }
 
 Step "Dry-running and applying the duplicate-safe import"
 $Import = @'
