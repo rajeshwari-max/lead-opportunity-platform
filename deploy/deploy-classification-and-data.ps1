@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$HostName = "15.207.68.78",
+    [string]$HostName = "10.0.1.189",
     [string]$UserName = "ubuntu",
     [string]$KeyPath = "C:\Users\rajes\Downloads\cg-bd-agent.pem",
     [string]$ExpectedCommit = "a2eb1a8",
