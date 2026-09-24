@@ -43,8 +43,8 @@ test -d "$PROJECT_DIR/.git"
 test -d "$PROJECT_DIR/backend"
 test -d "$PROJECT_DIR/frontend"
 cd "$PROJECT_DIR"
-if [ -n "$(git status --porcelain)" ]; then
-  echo "EC2 checkout has uncommitted changes; deployment stopped." >&2
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  echo "EC2 checkout has modified or staged tracked files; deployment stopped." >&2
   git status --short >&2
   exit 20
 fi
