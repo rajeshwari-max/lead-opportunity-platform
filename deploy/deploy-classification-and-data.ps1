@@ -3,7 +3,7 @@ param(
     [string]$HostName = "10.0.1.189",
     [string]$UserName = "ubuntu",
     [string]$KeyPath = "C:\Users\rajes\Downloads\cg-bd-agent.pem",
-    [string]$ExpectedCommit = "a2eb1a8",
+    [string]$ExpectedCommit = "",
     [string]$RemoteProject = "/home/ubuntu/Deployment/lead-opportunity-platform"
 )
 
@@ -22,6 +22,12 @@ function Run([scriptblock]$Command, [string]$Failure) {
 $ProjectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $BackendDir = Join-Path $ProjectDir "backend"
 $Python = Join-Path $BackendDir ".venv\Scripts\python.exe"
+if (-not $ExpectedCommit) {
+    $ExpectedCommit = (& git -C $ProjectDir rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $ExpectedCommit) {
+        throw "Could not determine the local release commit. Commit and push the changes before deployment."
+    }
+}
 $Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $Transfer = Join-Path $BackendDir "data\developmentaid-transfer-$Stamp.db"
 $TransferArchive = "$Transfer.gz"
@@ -93,6 +99,7 @@ mkdir -p data/deployment-backups
 if ./.venv/bin/python -c 'import pytest' 2>/dev/null; then
   ./.venv/bin/python -m pytest \
     tests/test_opportunity_quality.py \
+    tests/test_brand_classification.py \
     tests/test_classification_model.py \
     tests/test_active_rule.py \
     tests/test_parser_fixtures.py \
@@ -101,6 +108,13 @@ else
   echo "pytest is not installed on EC2; skipping server-side tests already validated locally."
   ./.venv/bin/python -m compileall -q app
 fi
+./.venv/bin/python - <<'PY'
+from app.database.db import init_db
+from app.services.brands import backfill_brands
+
+init_db()
+print(f"Live brand classifications updated: {backfill_brands(active_only=True)}")
+PY
 cd "$PROJECT_DIR"
 bash deploy/deploy.sh
 sudo supervisorctl status lead-scanning-api
@@ -170,6 +184,11 @@ echo "--- import preview ---"
 echo "--- applying import ---"
 ./.venv/bin/python scripts/merge_db.py \
   --source "$TRANSFER" --only-source DevelopmentAid --active-only
+./.venv/bin/python - <<'PY'
+from app.services.brands import backfill_brands
+
+print(f"Imported live brand classifications updated: {backfill_brands(active_only=True)}")
+PY
 echo "--- idempotence proof ---"
 VERIFY=$(./.venv/bin/python scripts/merge_db.py \
   --source "$TRANSFER" --only-source DevelopmentAid --active-only --dry-run)

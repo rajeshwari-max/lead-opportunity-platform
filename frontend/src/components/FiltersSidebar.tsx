@@ -15,7 +15,7 @@ interface Props {
   brandHierarchy?: boolean;
 }
 
-type ListKey = "categories" | "verticals" | "countries" | "regions" | "sources";
+type ListKey = "categories" | "verticals" | "brands" | "countries" | "regions" | "sources";
 
 export function FiltersSidebar({ facets, filters, onChange, hideVerticals = false, brandHierarchy = false }: Props) {
   // One search box per long list. Source Website is ~90 entries and Country is
@@ -82,8 +82,11 @@ export function FiltersSidebar({ facets, filters, onChange, hideVerticals = fals
           more than a tidy one that rearranges under you. */}
       {sections.filter(s => !hideVerticals || s.key !== "verticals").map(
         (s) => (
-          s.key === 'verticals' && brandHierarchy ? <BrandFilters key="brands" selected={filters.verticals}
-            onChange={verticals => onChange({ ...filters, verticals, page: 1 })} /> :
+          s.key === 'verticals' && brandHierarchy ? <BrandFilters key="brands"
+            selectedVerticals={filters.verticals} selectedBrands={filters.brands}
+            availableBrands={facets?.brands ?? []}
+            onVerticalChange={verticals => onChange({ ...filters, verticals, page: 1 })}
+            onBrandChange={brands => onChange({ ...filters, brands, page: 1 })} /> :
             <section key={s.key} className="space-y-1">
               <div className="mb-1 flex items-baseline justify-between gap-2">
                 <h3 className="text-xs font-semibold text-muted-foreground">{s.title}</h3>

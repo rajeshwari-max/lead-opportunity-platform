@@ -77,6 +77,7 @@ async def lifespan(_app: FastAPI):
     from app.services.geography import backfill_geography
     from app.services.organization import backfill_organizations
     from app.services.verticals import backfill_verticals
+    from app.services.brands import backfill_brands
     from app.services.deadline_audit import audit_deadlines
     from app.services.links import repair_links
     from app.services.study_type import backfill_study_types
@@ -95,6 +96,7 @@ async def lifespan(_app: FastAPI):
         for name, fn in (
             ("deadline audit", audit_deadlines),          # Active/Expired drift
             ("verticals", backfill_verticals),            # routing labels
+            ("brands", backfill_brands),                  # non-CMS brand labels
             ("links", repair_links),                      # homepage-only links
             ("geography", backfill_geography),
             ("organisation", backfill_organizations),

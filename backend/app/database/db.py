@@ -151,6 +151,26 @@ def _run_migrations(conn) -> None:
             conn.exec_driver_sql(
                 "ALTER TABLE opportunities ADD COLUMN verticals VARCHAR(256) NOT NULL DEFAULT ''"
             )
+        # Brand classification is a separate multi-label axis. Versioning lets
+        # startup maintenance process this initial migration once, then touch
+        # only rows produced by an older keyword ruleset.
+        for name, ddl in (
+            ("brands", "VARCHAR(256) NOT NULL DEFAULT ''"),
+            ("brand_scores", "TEXT"),
+            ("brand_evidence", "TEXT"),
+            ("brand_classification_version", "VARCHAR(32)"),
+        ):
+            if name not in columns("opportunities"):
+                conn.exec_driver_sql(
+                    f"ALTER TABLE opportunities ADD COLUMN {name} {ddl}")
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_opportunities_brands "
+            "ON opportunities(brands)"
+        )
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_opp_brand_classification_version "
+            "ON opportunities(brand_classification_version)"
+        )
         # Research vs Implementation routing. Additive: existing rows get an
         # empty value and are filled in by the startup backfill.
         if "work_type" not in columns("opportunities"):

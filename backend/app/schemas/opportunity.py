@@ -66,6 +66,7 @@ class OpportunityOut(BaseModel):
     funding_type: str
     vertical: str
     verticals: str = ""  # canonical comma-separated vertical tags
+    brands: str = ""     # canonical comma-separated non-CMS brand matches
     work_type: str = ""   # Research | Implementation | "" (unclear)
     study_type: str = ""  # Baseline | Endline | Data Collection | …
     category: Category
@@ -127,6 +128,7 @@ class OpportunityFilters(BaseModel):
 
     categories: list[str] = Field(default_factory=list)
     verticals: list[str] = Field(default_factory=list)
+    brands: list[str] = Field(default_factory=list)
     countries: list[str] = Field(default_factory=list)
     regions: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)

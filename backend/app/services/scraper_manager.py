@@ -27,6 +27,7 @@ from app.services.classification import (
     category_hint_for_record_type,
 )
 from app.services.classification_model import classify as classify_vertical_model
+from app.services.brands import classify_brands, brands_to_str
 from app.services.deadline_parser import DeadlineParser
 from app.services.deduplication import make_unique_id
 from app.services.amounts import clean_amount, extract_amount
@@ -616,6 +617,7 @@ class ScraperManager:
                 vertical_body = " ".join(filter(None, [raw.summary, raw.vertical, raw.eligibility]))
                 vertical_result = classify_vertical_model(raw.title, vertical_body)
                 vertical_tags = vertical_result.labels
+                brand_result = classify_brands(raw.title, vertical_body)
                 if self.vertical_filter and not (set(vertical_tags) & self.vertical_filter):
                     self._count_off_vertical(raw.source_website)
                     continue
@@ -808,6 +810,10 @@ class ScraperManager:
                     funding_type=raw.funding_type,
                     vertical=raw.vertical,
                     verticals=verticals_to_str(vertical_tags),
+                    brands=brands_to_str(brand_result.labels),
+                    brand_scores=brand_result.scores_json(),
+                    brand_evidence=brand_result.evidence_json(),
+                    brand_classification_version=brand_result.version,
                     verticals_source="auto",
                     classification_status=vertical_result.status,
                     classification_source="rule",

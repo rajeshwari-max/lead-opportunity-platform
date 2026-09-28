@@ -25,6 +25,7 @@ from app.services.actionable import (
     strict_actionable_clause,
 )
 from app.services.verticals import VERTICALS
+from app.services.brand_keywords import BRANDS
 
 _SORTABLE = {
     "deadline": Opportunity.deadline,
@@ -165,14 +166,26 @@ class FilterService:
                 or_(Opportunity.verticals.is_(None), Opportunity.verticals == ""),
                 or_(Opportunity.verticals_source.is_(None), Opportunity.verticals_source != HUMAN),
             )
-        elif f.has_vertical:
+        elif f.has_vertical and not f.brands:
+            # A non-CMS brand is an ownership label in its own right. Requiring
+            # a Devsol vertical as well would hide correctly matched Vrutti,
+            # Swasti, Green Foundation or Upfront opportunities merely because
+            # they sit outside the CMS taxonomy.
             stmt = stmt.where(
                 Opportunity.verticals.is_not(None), Opportunity.verticals != ""
             )
         if f.categories:
             stmt = stmt.where(Opportunity.category.in_([Category(c) for c in f.categories]))
+        ownership_clauses = []
         if f.verticals and not f.unclassified_only:
-            stmt = stmt.where(self._vertical_clause(f.verticals))
+            ownership_clauses.append(self._vertical_clause(f.verticals))
+        if f.brands:
+            ownership_clauses.append(self._brand_clause(f.brands))
+        if ownership_clauses:
+            # These controls are branches of one Brands tree. Selecting Health
+            # and Swasti means either ownership path, not only opportunities
+            # that happen to match both.
+            stmt = stmt.where(or_(*ownership_clauses))
         if f.countries:
             stmt = stmt.where(Opportunity.country.in_(f.countries))
         if f.regions:
@@ -203,6 +216,22 @@ class FilterService:
             clauses.append(Opportunity.verticals.like(f"%{s}%"))
             clauses.append(func.lower(Opportunity.vertical) == s.lower())
         return or_(*clauses)
+
+    @staticmethod
+    def _brand_clause(selected: list[str]):
+        """Match exact members of the comma-separated canonical brand list."""
+        valid = [brand for brand in selected if brand in BRANDS]
+        clauses = []
+        for brand in valid:
+            # Delimiters prevent a future brand name from matching merely
+            # because it is a substring of another one.
+            clauses.extend([
+                Opportunity.brands == brand,
+                Opportunity.brands.like(f"{brand}, %"),
+                Opportunity.brands.like(f"%, {brand}"),
+                Opportunity.brands.like(f"%, {brand}, %"),
+            ])
+        return or_(*clauses) if clauses else text("0 = 1")
 
     def _search_ids(self, query: str) -> Select | list[int]:
         """FTS5 prefix search ('health' → health*), LIKE fallback."""
@@ -328,6 +357,7 @@ class FilterService:
             # one because the current selection has no rows in it removes the
             # only control that could widen the selection again.
             "verticals": list(VERTICALS),
+            "brands": list(BRANDS),
             "countries": keep_selected(narrowed_or_all("country", "countries"), f.countries),
             "regions": keep_selected(narrowed_or_all("region", "regions"), f.regions),
             # Only sources that actually have a row in the current view. The

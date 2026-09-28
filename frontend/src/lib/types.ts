@@ -9,6 +9,8 @@ export interface Opportunity {
   vertical: string;
   /** Canonical comma-separated vertical tags, e.g. "Health, Climate/Sustainability". */
   verticals: string;
+  /** Canonical comma-separated non-CMS brand assignments. */
+  brands: string;
   /** Research | Implementation | "" — decides which team an RFP goes to. */
   work_type: string;
   /** Baseline | Endline | Data Collection | … when the call names one. */
@@ -52,6 +54,7 @@ export interface Paginated {
 export interface Facets {
   categories: string[];
   verticals: string[];
+  brands: string[];
   countries: string[];
   regions: string[];
   sources: string[];
@@ -101,6 +104,7 @@ export interface SourceInfo {
 export interface FilterState {
   categories: string[];
   verticals: string[];
+  brands: string[];
   countries: string[];
   regions: string[];
   sources: string[];
@@ -131,6 +135,7 @@ export interface FilterState {
 export const emptyFilters: FilterState = {
   categories: [],
   verticals: [],
+  brands: [],
   countries: [],
   regions: [],
   sources: [],

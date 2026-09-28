@@ -36,7 +36,8 @@ export function useDashboardData(filters: FilterState, refreshKey: number) {
   const statsKey = useMemo(
     () =>
       JSON.stringify({
-        c: filters.categories, se: filters.verticals, co: filters.countries,
+        c: filters.categories, se: filters.verticals, b: filters.brands,
+        co: filters.countries,
         r: filters.regions, so: filters.sources, q: filters.search,
         db: filters.deadline_before, da: filters.deadline_after,
         archived: filters.archived, new_today: filters.new_today,

@@ -6,6 +6,7 @@ export function filterParams(f: FilterState): URLSearchParams {
   const p = new URLSearchParams();
   f.categories.forEach((c) => p.append("categories", c));
   f.verticals.forEach((s) => p.append("verticals", s));
+  f.brands.forEach((s) => p.append("brands", s));
   f.countries.forEach((c) => p.append("countries", c));
   f.regions.forEach((r) => p.append("regions", r));
   f.sources.forEach((s) => p.append("sources", s));

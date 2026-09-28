@@ -11,7 +11,7 @@ from app.services.links import resolve_link
 
 _COLUMNS = [
     "unique_id", "title", "organization", "country", "region", "funding_type",
-    "vertical", "verticals", "category", "deadline", "website", "opportunity_url",
+    "vertical", "verticals", "brands", "category", "deadline", "website", "opportunity_url",
     # The resolved link — a search URL when no direct one exists, so an
     # exported row is never a dead end either.
     "link",
@@ -23,7 +23,7 @@ _COLUMNS = [
 def _row(o: Opportunity) -> list[str]:
     return [
         o.unique_id, o.title, o.organization, o.country, o.region, o.funding_type,
-        o.vertical, o.verticals or "", o.category.value,
+        o.vertical, o.verticals or "", o.brands or "", o.category.value,
         o.deadline.isoformat() if o.deadline else "",
         o.website, o.opportunity_url,
         resolve_link(o.opportunity_url, o.website, o.source_website, o.title)[0],

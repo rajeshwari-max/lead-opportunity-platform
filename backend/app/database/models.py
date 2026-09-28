@@ -48,6 +48,13 @@ class Opportunity(Base):
     # e.g. "Health, Climate/Sustainability". `vertical` above keeps the raw
     # source-provided free text untouched.
     verticals: Mapped[str] = mapped_column(String(256), default="", index=True)
+    # Multi-label assignments for the non-CMS brands. Kept separate from
+    # `verticals`: a brand and a Devsol vertical are different filter axes and
+    # combining them would make the Unclassified count and team routing lie.
+    brands: Mapped[str] = mapped_column(String(256), default="", index=True)
+    brand_scores: Mapped[str | None] = mapped_column(Text)
+    brand_evidence: Mapped[str | None] = mapped_column(Text)
+    brand_classification_version: Mapped[str | None] = mapped_column(String(32), index=True)
     # Who assigned those tags: "" / "auto" = the keyword classifier, "human" =
     # a person.
     #
