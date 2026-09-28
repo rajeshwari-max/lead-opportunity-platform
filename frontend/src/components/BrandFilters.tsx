@@ -1,3 +1,4 @@
+import { BrandLabel } from "./BrandLabel";
 import { useEffect, useRef } from 'react';
 import { VERTICALS } from '@/lib/types';
 import './brand-filters.css';
@@ -17,7 +18,7 @@ function Selection({ label, values, selected, onChange }: {
   useEffect(() => { if (input.current) input.current.indeterminate = count > 0 && count < values.length; }, [count, values.length]);
   return <label className="ud-brand-option"><input ref={input} type="checkbox" checked={count === values.length}
     onChange={e => onChange(e.target.checked ? [...new Set([...selected, ...values])] : selected.filter(v => !values.includes(v)))} />
-    <span>{label}</span></label>;
+    <BrandLabel name={label}/></label>;
 }
 
 export function BrandFilters({ selectedVerticals, selectedBrands, availableBrands,
@@ -32,7 +33,7 @@ export function BrandFilters({ selectedVerticals, selectedBrands, availableBrand
   return <section className="ud-brand-tree" aria-label="Brands">
     <div className="flex items-center justify-between"><h3>Brands</h3>{selectedCount > 0 &&
       <button type="button" onClick={() => { onVerticalChange([]); onBrandChange([]); }} className="text-xs underline">Clear</button>}</div>
-    <details open><summary>CMS</summary><div className="ud-brand-children">
+    <details open><summary><BrandLabel name="CMS"/></summary><div className="ud-brand-children">
       <Selection label="All CMS" values={VERTICALS} selected={selectedVerticals} onChange={onVerticalChange} />
       <details open className="ud-brand-branch"><summary>Devsol</summary><div className="ud-brand-children">
         <Selection label="All Devsol" values={DEVSOL} selected={selectedVerticals} onChange={onVerticalChange} />

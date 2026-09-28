@@ -66,6 +66,7 @@ export interface Stats {
   by_category: Record<string, number>;
   by_region: Record<string, number>;
   by_vertical: Record<string, number>;
+  by_brand?: Record<string, number>;
   todays_new: number;
   upcoming_deadlines: Opportunity[];
   last_scraped: string | null;

@@ -400,6 +400,16 @@ class FilterService:
                     counts[s] = n
             return counts
 
+        brand_counts = {"CMS": self.db.execute(select(func.count()).select_from(active).where(
+            or_(*(active.c.verticals.like(f"%{v}%") for v in VERTICALS))
+        )).scalar_one()}
+        for brand in ("Green Foundation", "Vrutti", "Swasti", "Setu", "Upfront", "Community Action Collab"):
+            brand_counts[brand] = self.db.execute(
+                select(func.count()).select_from(active).where(
+                    ("," + func.replace(func.coalesce(active.c.brands, ""), ", ", ",") + ",").like(f"%,{brand},%")
+                )
+            ).scalar_one()
+
         total = self.db.execute(select(func.count()).select_from(active)).scalar_one()
         todays = self.db.execute(
             select(func.count()).select_from(active).where(
@@ -425,6 +435,7 @@ class FilterService:
             },
             by_region=group_count("region"),
             by_vertical=vertical_counts(),
+            by_brand=brand_counts,
             todays_new=todays,
             upcoming_deadlines=[OpportunityOut.model_validate(o) for o in upcoming],
             last_scraped=last,

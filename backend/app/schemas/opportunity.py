@@ -193,6 +193,7 @@ class StatsOut(BaseModel):
     by_category: dict[str, int]
     by_region: dict[str, int]
     by_vertical: dict[str, int]
+    by_brand: dict[str, int] = Field(default_factory=dict)
     todays_new: int
     upcoming_deadlines: list[OpportunityOut]
     last_scraped: datetime | None

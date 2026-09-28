@@ -1,0 +1,10 @@
+.brand-label { display: inline-flex; align-items: center; gap: 9px; min-width: 0; vertical-align: middle; }
+.brand-logo-frame { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 36px; flex: 0 0 56px; background: #fff; border-radius: 5px; padding: 2px; }
+.brand-logo-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.brand-chart { display: grid; gap: 12px; }
+.brand-chart button { text-align: left; width: 100%; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.brand-chart button:focus-visible { outline: 2px solid #2455db; outline-offset: 4px; }
+.brand-chart-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
+.brand-chart-track { display: block; height: 7px; margin-top: 5px; background: #edf2ff; border-radius: 5px; overflow: hidden; }
+.brand-chart-track > span { display: block; height: 100%; background: linear-gradient(90deg,#1098b6,#41cbd0); border-radius: inherit; }
+.brand-chart button:hover { background: rgba(36,85,219,.04); border-radius: 5px; }

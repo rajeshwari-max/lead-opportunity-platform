@@ -1,3 +1,4 @@
+import { BrandLabel } from "./BrandLabel";
 import { DashboardLeads, SaveLeadButton, ReviewLeadButton, recordLeadActivity } from "./DashboardLeads";
 import { WrikeTaskAction } from "./WrikeTaskAction";
 import { useEffect, useRef, useState } from "react";
@@ -11,7 +12,7 @@ import { UserMenu } from "./UserMenu";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { toInr, RATES_AS_OF } from "@/lib/money";
-import { emptyFilters, type Facets, type FilterState, type Opportunity, type Paginated, type Stats } from "@/lib/types";
+import { VERTICALS, emptyFilters, type Facets, type FilterState, type Opportunity, type Paginated, type Stats } from "@/lib/types";
 import "./user-dashboard.css";
 import "./user-dashboard-card-sizing.css";
 
@@ -100,7 +101,7 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
   const pieSeries = remaining > 0 ? [...series, { name: "Other categories", value: remaining }] : series;
   const allChecked = !!data?.items.length && data.items.every(o => checked.has(o.id));
   const change = (patch: Partial<FilterState>) => onChange({ ...filters, ...patch, page: 1 });
-  const toggle = (key: "categories" | "regions" | "verticals", value: string) => change({ [key]: filters[key].length === 1 && filters[key][0] === value ? [] : [value] });
+  const toggle = (key: "categories" | "regions" | "verticals" | "brands", value: string) => change({ [key]: filters[key].length === 1 && filters[key][0] === value ? [] : [value] });
   const openBrief = (o: Opportunity) => {
     setSelectedId(o.id);
     void recordLeadActivity(o.id,"viewed").catch(()=>setMessage("Activity could not be saved. Please try again."));
@@ -145,7 +146,7 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
     { label: "New today", value: stats?.todays_new, note: "Newly discovered opportunities", tone: "mint", active: filters.new_today, action: () => change({ new_today: !filters.new_today }) },
   ];
   return <div className="user-dashboard">
-    <header className="ud-header"><div className="ud-brand"><span className="ud-logo">CMS</span><div><strong>Lead Scanning Platform</strong><p>Funding &amp; opportunity intelligence</p></div></div>
+    <header className="ud-header"><div className="ud-brand"><span className="ud-logo" aria-hidden="true">TC</span><div><strong>The Catalysts</strong><p>Funding &amp; opportunity intelligence</p></div></div>
       <div className="ud-actions">{adminViewUrl && <a className="ud-control" href={adminViewUrl}>Admin panel</a>}<UserMenu {...user} isAdmin={!!adminViewUrl} authRequired={user.authRequired} />
         <a className="ud-control" href={api.exportUrl("csv", filters)} download><Download size={14} /> CSV</a><a className="ud-control" href={api.exportUrl("xlsx", filters)} download>Excel</a>
         <button className="ud-control" onClick={resetView} aria-label="Clear filters and refresh"><RefreshCw size={16} /></button><button className="ud-control" onClick={() => setDark(!dark)} aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}>{dark ? <Sun size={16} /> : <Moon size={16} />}</button></div>
@@ -158,7 +159,7 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
           <div className="ud-donut-label"><strong>{count(hovered?.value ?? stats?.total_active ?? 0)}</strong><span>{hovered?.name ?? (filters.archived ? "Archived" : "Active")}<br />{!hovered && "opportunities"}</span></div>
         </div><div className="ud-legend">{series.map(s => <button key={s.name} aria-pressed={filters.categories.includes(s.name)} onClick={() => toggle("categories", s.name)} onMouseEnter={() => setHovered(s)} onMouseLeave={() => setHovered(null)}><i style={{ background: colors[s.name] ?? "#8b9db7" }} />{s.name}</button>)}</div>{remaining > 0 && <p className="ud-sub">{count(remaining)} in other categories</p>}{!statsLoading && !stats && <p className="ud-sub">Overview unavailable. Please refresh.</p>}{stats && !series.length && <p className="ud-sub">No categories in this view.</p>}</section>
         <Bars title="By region" subtitle="Opportunities by location" values={stats?.by_region ?? {}} selected={filters.regions} onSelect={name => toggle("regions", name)} />
-        <Bars title="CMS classifications" subtitle={unclassified ? "These opportunities have no assigned vertical" : "Devsol verticals and Social Business · may overlap"} values={unclassified ? {} : stats?.by_vertical ?? {}} selected={filters.verticals} onSelect={name => toggle("verticals", name)} cyan />
+        <div className="ud-classification-group"><Bars title="The Catalysts classifications" subtitle="Brands · opportunities can overlap" values={stats?.by_brand ?? {}} selected={filters.brands} onSelect={name => name === "CMS" ? change({verticals: filters.verticals.length ? [] : [...VERTICALS]}) : toggle("brands", name)} cyan /><details><summary>CMS · Devsol and Social Business</summary><Bars title="CMS breakdown" subtitle="Devsol verticals and Social Business" values={stats?.by_vertical ?? {}} selected={filters.verticals} onSelect={name => toggle("verticals", name)} cyan /></details></div>
         <section className="ud-panel ud-chart"><h2>Upcoming deadlines</h2><p className="ud-sub">Plan your next application</p><ul className="ud-deadlines">{stats?.upcoming_deadlines.slice(0, 4).map(o => <li key={o.id}><span>{o.deadline ? new Date(o.deadline).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "Open"}</span><a href={o.link || o.opportunity_url} target="_blank" rel="noreferrer">{o.title}</a></li>)}</ul>{!stats?.upcoming_deadlines.length && <p className="ud-sub">No upcoming deadlines in this view.</p>}</section>
       </div>
       <div className="ud-workspace"><div className="ud-filter-panel ud-panel" role="region" aria-label="Opportunity filters" tabIndex={0}><FiltersSidebar brandHierarchy facets={facets} filters={filters} hideVerticals={unclassified} onChange={next => onChange({ ...next, unclassified_only: unclassified, has_vertical: unclassified ? false : next.has_vertical })} /></div>
@@ -198,5 +199,5 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
 function Bars({ title, subtitle, values, selected, onSelect, cyan = false }: { title: string; subtitle: string; values: Record<string, number>; selected: string[]; onSelect: (name: string) => void; cyan?: boolean }) {
   const entries = Object.entries(values).slice(0, 8);
   const max = Math.max(1, ...entries.map(([, value]) => value));
-  return <section className={`ud-panel ud-chart ${cyan ? "ud-cyan-bars" : ""}`}><h2>{title}</h2><p className="ud-sub">{subtitle}</p><div className="ud-bars">{entries.map(([name, value]) => <button key={name} aria-pressed={selected.includes(name)} onClick={() => onSelect(name)} title={`${name}: ${count(value)} opportunities`}><span><span>{shortVertical(name)}</span><b>{count(value)}</b></span><i><i style={{ width: `${value / max * 100}%` }} /></i></button>)}</div>{!entries.length && <p className="ud-sub">No data in this view.</p>}</section>;
+  return <section className={`ud-panel ud-chart ${cyan ? "ud-cyan-bars" : ""}`}><h2>{title}</h2><p className="ud-sub">{subtitle}</p><div className="ud-bars">{entries.map(([name, value]) => <button key={name} aria-pressed={selected.includes(name)} onClick={() => onSelect(name)} title={`${name}: ${count(value)} opportunities`}><span><BrandLabel name={shortVertical(name)}/><b>{count(value)}</b></span><i><i style={{ width: `${value / max * 100}%` }} /></i></button>)}</div>{!entries.length && <p className="ud-sub">No data in this view.</p>}</section>;
 }

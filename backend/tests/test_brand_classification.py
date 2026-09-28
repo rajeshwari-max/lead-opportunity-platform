@@ -114,3 +114,17 @@ def test_cms_and_other_brand_selections_are_a_union():
         result = FilterService(db).query(OpportunityFilters(
             verticals=["Health"], brands=["Vrutti"]))
         assert {item.unique_id for item in result.items} == {"health", "vrutti"}
+
+
+def test_brand_stats_include_all_brands_and_count_assignments_once():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(Opportunity(unique_id="multi", title="Health grant", source_website="Test",
+            category=Category.GRANT, status=Status.ACTIVE, deadline=date(2099, 1, 1),
+            deadline_state="dated", opportunity_url="https://example.org/multi",
+            verticals="Health, Livelihood", brands="Vrutti, Swasti"))
+        db.flush()
+        stats = FilterService(db).stats(OpportunityFilters(has_vertical=False))
+        assert stats.by_brand == {"CMS":1, "Green Foundation":0, "Vrutti":1,
+            "Swasti":1, "Setu":0, "Upfront":0, "Community Action Collab":0}

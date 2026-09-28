@@ -1,3 +1,4 @@
+import { BrandBars } from "./BrandLabel";
 import { useMemo } from "react";
 import {
   Bar,
@@ -15,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDate } from "@/lib/utils";
 import { scrollToOpportunities } from "@/components/StatCards";
-import type { FilterState, Stats } from "@/lib/types";
+import { VERTICALS, type FilterState, type Stats } from "@/lib/types";
 
 const COLORS = ["#818cf8", "#34d399", "#fbbf24", "#f472b6", "#38bdf8", "#fb923c", "#a78bfa", "#f87171"];
 
@@ -60,7 +61,7 @@ export function ChartsRow({ stats, loading, filters, onChange }: Props) {
     );
   }
 
-  const toggleSingle = (key: "categories" | "verticals" | "regions", name: string) => {
+  const toggleSingle = (key: "categories" | "verticals" | "regions" | "brands", name: string) => {
     const current = filters[key];
     const next = current.length === 1 && current[0] === name ? [] : [name];
     onChange({ ...filters, [key]: next, page: 1 });
@@ -102,9 +103,12 @@ export function ChartsRow({ stats, loading, filters, onChange }: Props) {
                    onBarClick={(name) => toggleSingle("regions", name)} />
       </ChartCard>
 
-      <ChartCard title="By Vertical">
+      <ChartCard title="The Catalysts classifications">
+        <BrandBars values={stats.by_brand ?? {}} onSelect={name => name === "CMS" ? onChange({...filters, verticals: filters.verticals.length ? [] : [...VERTICALS], page: 1}) : toggleSingle("brands", name)} />
+        <details><summary>CMS · Devsol and Social Business</summary>
         <BarsChart data={verticalSeries} fill={COLORS[1]}
                    onBarClick={(name) => toggleSingle("verticals", name)} />
+        </details>
       </ChartCard>
 
       <ChartCard title="Upcoming Deadlines">

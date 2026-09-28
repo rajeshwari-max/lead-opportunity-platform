@@ -27,7 +27,7 @@ export function LoginScreen({onSuccess}:{onSuccess:()=>void}) {
   }catch(e){setError(e instanceof Error?e.message:"Server unavailable");}finally{setBusy(false);}
  }
  return <main className="login-page">
-  <section className="login-story"><strong className="login-brand">CMS <small>LEAD SCANNING PLATFORM</small></strong><div><small>FROM DISCOVERY TO IMPACT</small><h1>Your next opportunity.<br/>Your own journey.</h1><p>Discover relevant funding, build stronger applications and save leads and keep your progress in your personal dashboard.</p><div className="login-preview">YOUR OPPORTUNITY JOURNEY<h3>Discover → Apply → Grow</h3><p>Discover · Save · Track</p></div></div><small>Funding & opportunity intelligence</small></section>
+  <section className="login-story"><strong className="login-brand">The Catalysts</strong><div><small>FROM DISCOVERY TO IMPACT</small><h1>Your next opportunity.<br/>Your own journey.</h1><p>Discover relevant funding, build stronger applications and save leads and keep your progress in your personal dashboard.</p><div className="login-preview">YOUR OPPORTUNITY JOURNEY<h3>Discover → Apply → Grow</h3><p>Discover · Save · Track</p></div></div><small>Funding & opportunity intelligence</small></section>
   <section className="login-form-side"><form onSubmit={submit}>
    <small>WELCOME TO YOUR DASHBOARD</small>
    <h2>{token?"Set your password":mode==="register"?"Create your account":mode==="forgot"?"Forgot password?":"Welcome back"}</h2>
