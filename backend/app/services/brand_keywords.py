@@ -1,10 +1,202 @@
-"""Brand keyword inventory supplied in Keywords for Platform level Lead scanning.xlsx.
+"""Auditable brand keyword inventories supplied by the brand teams.
 
-This file preserves the source terms.  Matching safety (broad-term handling,
-word boundaries, year/country noise) belongs in services/brands.py so the
-inventory remains auditable against the workbook.
+This file preserves the source terms and, where supplied, their subsection
+headings. Matching safety (broad-term handling, word boundaries, year/country
+noise) belongs in services/brands.py so the inventory remains auditable
+against the source documents.
 """
 from __future__ import annotations
+
+
+def _flatten_sections(sections: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
+    """Flatten subsection terms once, preserving source order and uniqueness."""
+    unique: list[str] = []
+    seen: set[str] = set()
+    for terms in sections.values():
+        for term in terms:
+            key = term.casefold()
+            if key not in seen:
+                seen.add(key)
+                unique.append(term)
+    return tuple(unique)
+
+
+BRAND_KEYWORD_SECTIONS: dict[str, dict[str, tuple[str, ...]]] = {
+    'Setu': {
+        'Core Social Protection': (
+            'Social Protection',
+            'Social Security',
+            'Universal Social Protection',
+            'Social Assistance',
+            'Social Insurance',
+            'Social Safety Nets',
+            'Social Security Schemes',
+            'Social Protection Systems',
+        ),
+        'Government & Policy': (
+            'Social Protection Policy',
+            'Social Welfare',
+            'Welfare Schemes',
+            'Government Schemes',
+            'Scheme Delivery',
+            'Policy Advocacy',
+            'Policy Research',
+            'Systems Strengthening',
+            'Government Convergence',
+        ),
+        'Last-Mile Access': (
+            'Last-Mile Delivery',
+            'Last-Mile Access',
+            'Scheme Saturation',
+            'Universal Access',
+            'Beneficiary Identification',
+            'Enrolment Support',
+            'Entitlement Access',
+            'Service Delivery',
+            'Outreach',
+            'Community Facilitation',
+        ),
+        'Vulnerable Communities': (
+            'Vulnerable Communities',
+            'Marginalised Communities',
+            'Excluded Communities',
+            'Low-Income Households',
+            'Informal Workers',
+            'Migrant Workers',
+            'Women',
+            'Children',
+            'Elderly',
+            'Persons with Disabilities',
+            'Tribal Communities',
+            'DNTs',
+            'Homeless Communities',
+        ),
+        'Livelihoods & Workers': (
+            'Informal Workers',
+            'Gig Workers',
+            'Platform Workers',
+            'Labour Welfare',
+            'Worker Welfare',
+            'Employment Security',
+            'Livelihood Security',
+            'Occupational Vulnerability',
+            'Migrant Labour',
+        ),
+        'Health & Nutrition': (
+            'Health Protection',
+            'Health Insurance',
+            'Universal Health Coverage',
+            'Maternal Health',
+            'Child Health',
+            'Nutrition Security',
+            'Health Entitlements',
+        ),
+        'Financial Inclusion': (
+            'Financial Inclusion',
+            'DBT',
+            'Direct Benefit Transfer',
+            'Banking Access',
+            'Social Security Payments',
+            'Jan Aadhaar',
+            'Aadhaar Linkage',
+            'Financial Literacy',
+        ),
+        'Digital & Technology': (
+            'Digital Public Infrastructure',
+            'Digital Inclusion',
+            'e-Governance',
+            'Digital Service Delivery',
+            'Beneficiary Databases',
+            'Social Registry',
+            'Data for Social Protection',
+            'Technology for Development',
+        ),
+        'Climate & Shocks': (
+            'Shock-Responsive Social Protection',
+            'Climate-Responsive Social Protection',
+            'Climate Vulnerability',
+            'Disaster Risk',
+            'Climate Resilience',
+            'Adaptive Social Protection',
+            'Social Protection in Emergencies',
+        ),
+        'Research & Evidence': (
+            'Social Protection Research',
+            'Evidence-Based Policy',
+            'Implementation Research',
+            'Impact Evaluation',
+            'Policy Research',
+            'Field Research',
+            'Knowledge Management',
+            'Data for Development',
+            'Learning & Evidence',
+        ),
+        'Capacity Building': (
+            'Capacity Building',
+            'Training',
+            'Training of Trainers',
+            'Government Capacity Building',
+            'Frontline Worker Training',
+            'Institutional Strengthening',
+            'Knowledge Exchange',
+            'Community of Practice',
+        ),
+        'CSR & Philanthropy': (
+            'CSR Social Protection',
+            'CSR Rural Development',
+            'CSR Livelihoods',
+            'CSR Inclusion',
+            'CSR Health',
+            'CSR Education',
+            'CSR Financial Inclusion',
+            'Philanthropy',
+            'Development Finance',
+            'Impact Investment',
+        ),
+        'Development Sector': (
+            'Development Sector',
+            'Development Organisations',
+            'NGOs',
+            'Civil Society Organisations',
+            'Non-Profit Organisations',
+            'Social Impact Organisations',
+            'Grassroots Organisations',
+            'Development Partners',
+        ),
+        'Partnerships': (
+            'Public-Private Partnerships',
+            'Government-NGO Partnerships',
+            'Multi-Stakeholder Partnerships',
+            'Development Partnerships',
+            'Coalition Building',
+            'Collective Impact',
+            'Convergence Partnerships',
+        ),
+        'District-Level Development': (
+            'District Development',
+            'District Transformation',
+            'Aspirational Districts',
+            'District Administration',
+            'District Convergence',
+            'Rural Development',
+            'Block Development',
+            'Gram Panchayat Development',
+        ),
+        'Key Government Functions': (
+            'Rural Development',
+            'Panchayati Raj',
+            'Labour Welfare',
+            'Women & Child Development',
+            'Social Justice',
+            'Tribal Development',
+            'Health & Family Welfare',
+            'Agriculture',
+            'Skill Development',
+            'Financial Inclusion',
+        ),
+    },
+}
+
 
 BRAND_KEYWORDS: dict[str, tuple[str, ...]] = {
     'Green Foundation': (
@@ -210,6 +402,7 @@ BRAND_KEYWORDS: dict[str, tuple[str, ...]] = {
         'Worker Well Being',
         'Food Security and Nutrition',
     ),
+    'Setu': _flatten_sections(BRAND_KEYWORD_SECTIONS['Setu']),
     'Upfront': (
         'Worker',
         'Community',
@@ -268,6 +461,7 @@ SOURCE_KEYWORD_COUNTS = {
     'Green Foundation': 158,
     'Vrutti': 21,
     'Swasti': 18,
+    'Setu': 134,
     'Upfront': 50,
 }
 

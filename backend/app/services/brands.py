@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 
 from app.services.brand_keywords import BRAND_KEYWORDS, BRANDS
 
-MODEL_VERSION = "brand-rules-2026.09.28"
+MODEL_VERSION = "brand-rules-2026.09.29"
 ASSIGNMENT_THRESHOLD = 3.0
 
 # Valid search aids that are unsafe as standalone brand decisions.  They remain
@@ -32,6 +32,12 @@ _WEAK_TERMS = {
     "livelihoods", "worker", "community", "urban", "rural", "formal",
     "informal", "farm", "non farm", "commons", "restoration", "esg",
     "sustainability", "supply chain", "textile", "cotton", "spice",
+    "women", "children", "elderly", "training", "agriculture", "outreach",
+    "social welfare", "service delivery", "policy research", "field research",
+    "financial inclusion", "rural development", "skill development",
+    "philanthropy", "development finance", "impact investment", "ngos",
+    "development sector", "development partners", "social justice",
+    "labour welfare", "health and family welfare",
 }
 
 _YEAR = re.compile(r"\b(?:19|20)\d{2}\b", re.I)

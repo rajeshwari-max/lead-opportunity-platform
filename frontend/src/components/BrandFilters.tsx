@@ -4,7 +4,7 @@ import { VERTICALS } from '@/lib/types';
 import './brand-filters.css';
 
 const DEVSOL = VERTICALS.filter(v => v !== 'Social Business');
-const PENDING_BRANDS = ['Setu', 'Community Action Collab'];
+const PENDING_BRANDS = ['Community Action Collab'];
 
 export function brandPath(vertical: string) {
   return vertical === 'Social Business' ? 'CMS / Social Business' : `CMS / Devsol / ${vertical}`;

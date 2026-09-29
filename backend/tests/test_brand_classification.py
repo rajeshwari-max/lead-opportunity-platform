@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 
 from app.database.models import Base, Category, Opportunity, Status
 from app.schemas.opportunity import OpportunityFilters
-from app.services.brand_keywords import BRAND_KEYWORDS, SOURCE_KEYWORD_COUNTS
+from app.services.brand_keywords import (
+    BRAND_KEYWORDS,
+    BRAND_KEYWORD_SECTIONS,
+    SOURCE_KEYWORD_COUNTS,
+)
 from app.services.brands import classify_brands
 from app.services.filter_service import FilterService
 
@@ -21,6 +25,7 @@ from app.services.filter_service import FilterService
         ("Green Foundation", "Open call for climate-smart agriculture innovation"),
         ("Vrutti", "FPO development and women entrepreneurship grant"),
         ("Swasti", "Digital health and primary health systems programme"),
+        ("Setu", "Universal social protection systems programme"),
         ("Upfront", "Improving garment worker safety and workplace wellbeing"),
     ],
 )
@@ -37,11 +42,29 @@ def test_all_source_keywords_are_preserved_without_case_insensitive_duplicates()
         assert len(folded) == len(set(folded))
 
 
+def test_setu_subsections_are_preserved_separately_and_flattened_once():
+    sections = BRAND_KEYWORD_SECTIONS["Setu"]
+    assert tuple(sections) == (
+        "Core Social Protection", "Government & Policy", "Last-Mile Access",
+        "Vulnerable Communities", "Livelihoods & Workers", "Health & Nutrition",
+        "Financial Inclusion", "Digital & Technology", "Climate & Shocks",
+        "Research & Evidence", "Capacity Building", "CSR & Philanthropy",
+        "Development Sector", "Partnerships", "District-Level Development",
+        "Key Government Functions",
+    )
+    assert sum(map(len, sections.values())) == 139
+    assert len(BRAND_KEYWORDS["Setu"]) == 134
+    assert "Informal Workers" in sections["Vulnerable Communities"]
+    assert "Informal Workers" in sections["Livelihoods & Workers"]
+
+
 @pytest.mark.parametrize("title", [
     "Research grant in India",
     "Community design evaluation",
     "Rural worker support",
     "ESG fund announcement",
+    "Training grant for women",
+    "Agriculture and rural development programme",
 ])
 def test_broad_workbook_terms_do_not_classify_by_themselves(title):
     assert classify_brands(title).labels == []
