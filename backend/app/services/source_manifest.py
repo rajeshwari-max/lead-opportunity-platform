@@ -142,6 +142,94 @@ def _c(**kw) -> SourceContract:
 # Only the sources whose scope has actually been stated. Everything absent from
 # this dict gets the default contract below, marked needs_review.
 MANIFESTS: dict[str, SourceContract] = {
+    "phf": _c(
+        key="phf",
+        display_name="Paul Hamlyn Foundation",
+        listing_url="https://www.phf.org.uk/funding#heading-54836",
+        expected_types=(RecordType.GRANT,),
+        excluded_types=(RecordType.CONTRACT_AWARD, RecordType.PROJECT),
+        open_status_values=("open",),
+        closed_status_values=("closed", "not currently accepting applications"),
+        deadline_format="dayfirst",
+        curated=True,
+        scope_status=ScopeStatus.CONFIRMED,
+        owner_note=(
+            "Only cards in the page's Open for applications section. Funds in "
+            "the closed and invitation-only sections are excluded."
+        ),
+    ),
+    "macarthur_foundation": _c(
+        key="macarthur_foundation",
+        display_name="Macarthur Foundation",
+        listing_url="https://www.macfound.org/grants/",
+        excluded_types=(RecordType.CONTRACT_AWARD, RecordType.PROJECT),
+        scope_status=ScopeStatus.CONFIRMED,
+        production_enabled=False,
+        known_defect=(
+            "This URL is a historical search of grants and impact investments "
+            "approved since 1978, not a list of opportunities. Scraping it "
+            "would publish past awards as active grants."
+        ),
+        owner_note=(
+            "Keep disabled unless it is replaced by an official page that "
+            "lists currently open application calls."
+        ),
+    ),
+    "hewlett_foundation": _c(
+        key="hewlett_foundation",
+        display_name="Hewlett Foundation",
+        listing_url="https://hewlett.org/grants/",
+        excluded_types=(RecordType.CONTRACT_AWARD, RecordType.PROJECT),
+        scope_status=ScopeStatus.CONFIRMED,
+        production_enabled=False,
+        known_defect=(
+            "This URL is the foundation's grantmaking database. Its cards are "
+            "existing grants with fields such as Active and Awarded; they are "
+            "not open application opportunities."
+        ),
+        owner_note=(
+            "Keep disabled unless it is replaced by a specific official open "
+            "application window."
+        ),
+    ),
+    "european_union": _c(
+        key="european_union",
+        display_name="European Union",
+        listing_url=(
+            "https://ec.europa.eu/info/funding-tenders/opportunities/portal/"
+            "screen/opportunities/calls-for-proposals"
+        ),
+        expected_types=(RecordType.CALL_FOR_PROPOSALS, RecordType.TENDER),
+        excluded_types=(RecordType.PROJECT, RecordType.CONTRACT_AWARD),
+        open_status_values=("31094501", "31094502"),
+        closed_status_values=("31094503",),
+        deadline_format="iso",
+        curated=True,
+        scope_status=ScopeStatus.CONFIRMED,
+        owner_note=(
+            "English forthcoming/open calls from both official Funding & "
+            "Tenders Portal sections: calls for proposals (SEDIA types 1, 2, "
+            "8) and calls for tenders (type 0). Projects, awards and closed "
+            "status 31094503 are excluded."
+        ),
+    ),
+    "national_institutes_of_health": _c(
+        key="national_institutes_of_health",
+        display_name="National Institutes of Health",
+        listing_url="https://grants.nih.gov/funding/explore-nih-opportunities",
+        expected_types=(RecordType.GRANT,),
+        excluded_types=(RecordType.PROJECT, RecordType.NEWS),
+        open_status_values=("active",),
+        closed_status_values=("expired",),
+        deadline_format="iso",
+        curated=True,
+        scope_status=ScopeStatus.CONFIRMED,
+        owner_note=(
+            "Active grant opportunities from the Explore NIH Opportunities "
+            "tool. activitycodes=all covers every funding-category subsection; "
+            "expired opportunities and informational notices are excluded."
+        ),
+    ),
     "worldbank": _c(
         key="worldbank", display_name="World Bank",
         # Human-facing canonical source. The scraper observes the first-party

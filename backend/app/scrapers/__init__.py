@@ -9,6 +9,7 @@ from app.scrapers.bond import BondScraper
 from app.scrapers.adb import AdbTendersScraper
 from app.scrapers.developmentaid import DevelopmentAidScraper
 from app.scrapers.devnet import DevNetScraper
+from app.scrapers.european_union import EuropeanUnionScraper
 from app.scrapers.funders_misc import (
     BlueActionFundScraper,
     OpenSocietyScraper,
@@ -18,6 +19,7 @@ from app.scrapers.fundsforngos import FundsForNGOsScraper
 from app.scrapers.grantwatch import GrantWatchScraper
 from app.scrapers.indevjobs import IndevJobsScraper
 from app.scrapers.ngobox import NGOBoxScraper
+from app.scrapers.nih import NIHOpportunitiesScraper
 from app.scrapers.phf import PHFScraper
 from app.scrapers.unpp import UNPartnerPortalScraper
 from app.scrapers.worldbank import WorldBankScraper
@@ -38,5 +40,6 @@ __all__ = [
     "FundsForNGOsScraper", "BondScraper", "DevelopmentAidScraper", "GrantWatchScraper",
     "IndevJobsScraper", "PHFScraper", "PackardScraper", "OpenSocietyScraper",
     "BlueActionFundScraper", "UNPartnerPortalScraper", "WorldBankScraper",
+    "NIHOpportunitiesScraper", "EuropeanUnionScraper",
     "generic_listing",
 ]

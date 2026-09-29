@@ -1,0 +1,49 @@
+{
+  "apiVersion": "1",
+  "totalResults": 3,
+  "pageNumber": 1,
+  "pageSize": 2,
+  "sort": "[startDate:DESC]",
+  "results": [
+    {
+      "reference": "50129464TOPICSen",
+      "language": "en",
+      "metadata": {
+        "type": ["1"],
+        "status": ["31094501"],
+        "identifier": ["HORIZON-CL5-2027-07-D3-11"],
+        "title": ["Demonstration of hydropower technologies for efficient refurbishment"],
+        "callTitle": ["Sustainable energy systems"],
+        "deadlineDate": ["01-12-2027 05:30:00"],
+        "startDate": ["29-09-2026 05:30:00"],
+        "url": ["https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/topic-details/HORIZON-CL5-2027-07-D3-11"]
+      }
+    },
+    {
+      "reference": "c0ea897b-edcd-4e5d-8bf2-7380e4636c6d-CN",
+      "language": "en",
+      "metadata": {
+        "type": ["0"],
+        "status": ["31094502"],
+        "identifier": ["EACEA-2026-OP-0067"],
+        "title": ["Study in Europe Initiative and Erasmus Mundus Support Initiative"],
+        "startDate": ["29-09-2026 05:30:00"],
+        "cftEstimatedTotalProcedureValue": ["8500000 EUR"],
+        "cftLeadContractingAuthorityCode": ["[{\"name\":\"European Education and Culture Executive Agency (EACEA)\",\"isLeadAuthority\":true}]"],
+        "lots": ["{\"procurementProjectLots\":[{\"procurementProject\":{\"description\":\"Promote European higher education and support joint programmes.\"},\"tenderingTerms\":{\"tenderingProcess\":{\"tenderSubmissionDeadlinePeriod\":{\"endDate\":\"2026-12-10+01:00\",\"endTime\":\"16:00:59+01:00\"}}}},{\"procurementProject\":{\"description\":\"Attract global talent through scholarships.\"},\"tenderingTerms\":{\"tenderingProcess\":{\"tenderSubmissionDeadlinePeriod\":{\"endDate\":\"2026-12-12+01:00\",\"endTime\":\"16:00:59+01:00\"}}}}]}"],
+        "url": ["https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/tender-details/c0ea897b-edcd-4e5d-8bf2-7380e4636c6d-CN"]
+      }
+    },
+    {
+      "reference": "closed-record-en",
+      "language": "en",
+      "metadata": {
+        "type": ["1"],
+        "status": ["31094503"],
+        "identifier": ["CLOSED-CALL"],
+        "title": ["Closed call that must not be emitted"],
+        "deadlineDate": ["01-01-2025 05:30:00"]
+      }
+    }
+  ]
+}

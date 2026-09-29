@@ -156,11 +156,15 @@ def test_disabled_does_not_raise_an_alert():
 
 # ------------------------------------------------------ the manifest itself
 
-def test_devex_is_the_only_source_currently_held_back():
+def test_only_sources_with_confirmed_non_opportunity_or_access_pages_are_held_back():
     """Recorded so that switching another one off is a visible decision rather
     than something that happens and is noticed a month later."""
     off = {k for k, c in MANIFESTS.items() if not c.production_enabled}
-    assert off == {"devex"}
+    assert off == {
+        "devex",                 # inaccessible paywall, no working feed
+        "macarthur_foundation",  # historical grants/impact-investments search
+        "hewlett_foundation",    # database of grants already awarded
+    }
 
 
 def test_every_disabled_source_states_why():

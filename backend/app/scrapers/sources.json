@@ -188,8 +188,8 @@
   {
     "name": "national_institutes_of_health",
     "display_name": "National Institutes of Health",
-    "url": "https://grants.nih.gov/funding",
-    "website": "https://grants.nih.gov"
+    "url": "https://grants.nih.gov/funding/explore-nih-opportunities",
+    "website": "https://grants.nih.gov/funding/explore-nih-opportunities"
   },
   {
     "name": "fogarty_international_center",
@@ -225,7 +225,8 @@
     "name": "european_union",
     "display_name": "European Union",
     "url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/calls-for-proposals",
-    "website": "https://ec.europa.eu"
+    "tender_url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/calls-for-tenders?isExactMatch=true&order=DESC&pageNumber=1&pageSize=50&sortBy=startDate",
+    "website": "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities"
   },
   {
     "name": "sdg_impact_finance_initiative",
@@ -449,5 +450,146 @@
     "display_name": "DBS Foundation",
     "url": "https://www.dbs.com/foundation/index.html",
     "website": "https://www.dbs.com"
+  },
+  {
+    "name": "wellcome_contracts",
+    "display_name": "Wellcome Contracts",
+    "url": "https://wellcome.org/about-us/work-with-us/contract-opportunities",
+    "website": "https://wellcome.org",
+    "curated": true,
+    "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "_note": "A SECOND Wellcome source on purpose: wellcome_trust scrapes /research-funding/schemes and would never see a procurement notice. UNVERIFIED — the audit fetcher could not read it (every https request came back 302 to http), so this may need repointing."
+  },
+  {
+    "name": "grandchallenges",
+    "display_name": "Grand Challenges",
+    "url": "https://www.grandchallenges.org/grant-opportunities",
+    "website": "https://www.grandchallenges.org",
+    "curated": true,
+    "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "_note": "Overlaps bmgf_grand_challenges (gcgh.grandchallenges.org), which is Global Health only. The umbrella site carries calls the subdomain does not — 'Keystone Symposia: Funding Opportunities for 2027 Conferences' was on this page and not on gcgh. Expect some rows in both; deduplication.py collapses them where the apply link matches."
+  },
+  {
+    "name": "isti_institutional_grants",
+    "display_name": "ISTI Institutional Grants",
+    "url": "https://www.indiascienceandtechnology.gov.in/funding-opportunities/research-grants/institutional",
+    "website": "https://www.indiascienceandtechnology.gov.in",
+    "curated": true,
+    "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "_note": "19 records, ?page=N, 10 per page. The listing prints NO deadline — these are standing schemes, not dated calls. Undated rows are hidden by the strict Active rule and retired by audit_deadlines after LOP_ONGOING_MAX_AGE_DAYS, so expect them stored and not shown unless a detail page yields a date.",
+    "page_url": "https://www.indiascienceandtechnology.gov.in/funding-opportunities/research-grants/institutional?page={offset}",
+    "page_size": 1,
+    "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third."
+  },
+  {
+    "name": "isti_international_grants",
+    "display_name": "ISTI International Grants",
+    "url": "https://www.indiascienceandtechnology.gov.in/funding-opportunities/research-grants/international",
+    "website": "https://www.indiascienceandtechnology.gov.in",
+    "curated": true,
+    "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "_note": "11 records. Same undated-scheme caveat as isti_institutional_grants.",
+    "page_url": "https://www.indiascienceandtechnology.gov.in/funding-opportunities/research-grants/international?page={offset}",
+    "page_size": 1,
+    "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third."
+  },
+  {
+    "name": "isti_individual_grants",
+    "display_name": "ISTI Individual Grants",
+    "url": "https://www.indiascienceandtechnology.gov.in/funding-opportunities/research-grants/individual",
+    "website": "https://www.indiascienceandtechnology.gov.in",
+    "curated": true,
+    "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "_note": "Same undated-scheme caveat as isti_institutional_grants.",
+    "page_url": "https://www.indiascienceandtechnology.gov.in/funding-opportunities/research-grants/individual?page={offset}",
+    "page_size": 1,
+    "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third."
+  },
+  {
+    "name": "isti_conference_grants",
+    "display_name": "ISTI Conference & Seminar Grants",
+    "url": "https://www.indiascienceandtechnology.gov.in/funding-opportunities/grants-for-conference-seminars",
+    "website": "https://www.indiascienceandtechnology.gov.in",
+    "curated": true,
+    "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "_note": "7 records. Same undated-scheme caveat as isti_institutional_grants.",
+    "page_url": "https://www.indiascienceandtechnology.gov.in/funding-opportunities/grants-for-conference-seminars?page={offset}",
+    "page_size": 1,
+    "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third."
+  },
+  {
+    "name": "fire_biofin",
+    "display_name": "FIRE (BIOFIN)",
+    "url": "https://fire.biofin.org/",
+    "website": "https://fire.biofin.org",
+    "_note": "435 resources over 49 pages; detail links are /single/<slug>. Rows are funding PROGRAMMES (EU LIFE, Band Foundation), not dated calls, so the funding-vocabulary gate is left ON deliberately — curated here would admit the site's articles and country pages too."
+  },
+  {
+    "name": "eu_funding_portal_social",
+    "display_name": "EU Funding Portal — Social Entrepreneurship",
+    "url": "https://eufundingportal.eu/social-entrepreneurship",
+    "website": "https://eufundingportal.eu",
+    "_note": "UNVERIFIED: the audit fetcher could not read robots.txt on this host at all (connect timeout), so nothing is known about what the page lists. Run scripts/verify_source.py eu_funding_portal_social before trusting it."
+  },
+  {
+    "name": "globaleba_fund",
+    "display_name": "Global EbA Fund",
+    "url": "https://globalebafund.org/small-size-grants/",
+    "website": "https://globalebafund.org",
+    "curated": true,
+    "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "_note": "One call at a time: '8th Call for Proposals for Small-Size Grants', up to USD 250,000, window 28 Sep - 26 Oct 2026. Applications live on gms-portal.iucn.org, so the apply link leaves this domain."
+  },
+  {
+    "name": "developmentwala_rfps",
+    "display_name": "Developmentwala RFPs",
+    "url": "https://developmentwala.org/rfps",
+    "website": "https://developmentwala.org",
+    "curated": true,
+    "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "_note": "UNVERIFIED: robots.txt timed out for the audit fetcher. Path is the one the owner supplied."
+  },
+  {
+    "name": "devinfo_rfps",
+    "display_name": "DevInfo RFPs",
+    "url": "https://devinfo.in/request-for-proposals/",
+    "website": "https://devinfo.in",
+    "curated": true,
+    "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "_note": "A WordPress archive of Indian CSR/NGO RFPs. Rows carry a POSTED date, not a deadline, and the newest seen was Dec 2024 — much of this list is historic, and undated rows will not reach the dashboard."
+  },
+  {
+    "name": "investindia_rfp",
+    "display_name": "Invest India RFPs",
+    "url": "https://www.investindia.gov.in/request-for-proposal",
+    "website": "https://www.investindia.gov.in",
+    "curated": true,
+    "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "_note": "UNVERIFIED: answered the audit fetcher with HTTP 403, which usually means a bot wall. May need requires_js / a browser render."
+  },
+  {
+    "name": "leverforchange",
+    "display_name": "Lever for Change",
+    "url": "https://leverforchange.org/open-calls/",
+    "website": "https://leverforchange.org",
+    "curated": true,
+    "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "_note": "19 results over 2 pages, and MOST ARE CLOSED — the page shows awarded and under-review competitions beside the one open call (Boundless San Francisco). Each card states its status; rows without a live deadline will not reach the dashboard, which is correct."
+  },
+  {
+    "name": "samsstc_rfp",
+    "display_name": "SAMS Social Talent Connect",
+    "url": "https://www.samsstc.com/rfp-tender",
+    "website": "https://www.samsstc.com",
+    "curated": true,
+    "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "_note": "The strongest of this batch for India: 30 live RFP/RFQ/ToR notices, each with a real deadline, readable without signing in. Posting an RFP is paid; reading them is not."
+  },
+  {
+    "name": "ai_opportunity_fund_apac",
+    "display_name": "Google.org AI Opportunity Fund APAC",
+    "url": "https://aiopportunityfund.withgoogle.com/apac/",
+    "website": "https://aiopportunityfund.withgoogle.com",
+    "_note": "NOT A LISTING. One programme page for Phase 3, inviting learners to register interest; the 59 grantee organisations were already selected. Added because the owner asked for it, and it will show as a source that saves nothing until Google.org opens a call here."
   }
 ]

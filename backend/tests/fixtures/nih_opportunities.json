@@ -1,0 +1,36 @@
+{
+  "statusCode": 200,
+  "data": {
+    "hits": {
+      "total": 3,
+      "hits": [
+        {
+          "_id": "43116",
+          "_source": {
+            "type": "active",
+            "title": "HEAL Initiative: Whole Joint Health Program (R61/R33 Clinical Trial Required)",
+            "docnum": "PAR-27-045",
+            "primaryIC": "NCCIH",
+            "reldate": "2026-09-28T00:00:00.000Z",
+            "expdate": "2026-10-31T00:00:00.000Z",
+            "doctype": "PAR",
+            "ac": ["R61", "R33"],
+            "clinicaltrials": "Required",
+            "sponsors": ["NIAAA", "NIDCR"],
+            "purpose": "<p>Supports research on biological mechanisms that drive joint pain.</p>",
+            "ggid": "361304"
+          }
+        },
+        {
+          "_id": "old-record",
+          "_source": {
+            "type": "expired",
+            "title": "Expired example that must not be emitted",
+            "expdate": "2025-01-01T00:00:00.000Z",
+            "ggid": "000000"
+          }
+        }
+      ]
+    }
+  }
+}

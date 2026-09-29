@@ -90,7 +90,7 @@ def test_empty_status_is_unknown_not_closed():
 # ------------------------------------------------------------ honesty of scope
 
 def test_unmanifested_sources_are_needs_review_not_silently_confirmed():
-    c = contract_for("hewlett_foundation", "Hewlett Foundation")
+    c = contract_for("ospreys", "Ospreys")
     assert c.scope_status is ScopeStatus.NEEDS_REVIEW
     assert c.needs_owner_decision
     assert c.owner_note, "a needs_review source must say what is missing"
@@ -100,7 +100,7 @@ def test_needs_review_does_not_disable_a_source_by_itself():
     """Applied literally, 'disable unconfirmed sources' switches off 71 of 85 —
     a judgement about someone else's business. The fields are independent; only
     evidence disables."""
-    c = contract_for("hewlett_foundation")
+    c = contract_for("ospreys")
     assert c.needs_owner_decision
     assert c.production_enabled
 
@@ -146,7 +146,8 @@ def test_deadline_convention_is_stated_per_source(key, expected):
 def test_the_review_queue_lists_what_needs_a_decision():
     keys = ["worldbank", "unpp", "hewlett_foundation", "ospreys", "devnet"]
     pending = unconfirmed_sources(keys)
-    assert "hewlett_foundation" in pending and "ospreys" in pending
+    assert "ospreys" in pending
+    assert "hewlett_foundation" not in pending
     assert "worldbank" not in pending and "unpp" not in pending
 
 
