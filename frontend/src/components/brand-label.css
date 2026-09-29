@@ -8,3 +8,16 @@
 .brand-chart-track { display: block; height: 7px; margin-top: 5px; background: #edf2ff; border-radius: 5px; overflow: hidden; }
 .brand-chart-track > span { display: block; height: 100%; background: linear-gradient(90deg,#1098b6,#41cbd0); border-radius: inherit; }
 .brand-chart button:hover { background: rgba(36,85,219,.04); border-radius: 5px; }
+.brand-chart { margin-top: 16px; }
+.brand-chart summary { cursor: pointer; list-style: none; }
+.brand-chart summary::-webkit-details-marker { display: none; }
+.brand-chart summary:focus-visible { outline: 2px solid #2455db; outline-offset: 4px; }
+.brand-expand-hint { display: block; font-size: 11px; margin-top: 5px; opacity: .75; }
+.brand-cms > summary .brand-label::after { content: "▸"; margin-left: 8px; }
+.brand-cms[open] > summary .brand-label::after { content: "▾"; }
+.brand-children { display: grid; gap: 14px; margin: 14px 0 4px 10px; padding-left: 14px; border-left: 2px solid #dce6fa; }
+.brand-devsol > summary { font-size: 13px; font-weight: 600; }
+.brand-devsol > summary::before { content: "▸ "; }
+.brand-devsol[open] > summary::before { content: "▾ "; }
+.brand-chart .brand-all { font-size: 12px; text-decoration: underline; }
+.brand-chart .brand-logo-frame { width: 76px; flex-basis: 76px; height: 40px; }

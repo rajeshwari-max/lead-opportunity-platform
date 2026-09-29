@@ -48,7 +48,6 @@ interface Props {
 export function ChartsRow({ stats, loading, filters, onChange }: Props) {
   const categorySeries = useMemo(() => toSeries(stats?.by_category ?? {}), [stats]);
   const regionSeries = useMemo(() => toSeries(stats?.by_region ?? {}), [stats]);
-  const verticalSeries = useMemo(() => toSeries(stats?.by_vertical ?? {}), [stats]);
 
   if (!stats) {
     if (!loading) return null;
@@ -104,11 +103,7 @@ export function ChartsRow({ stats, loading, filters, onChange }: Props) {
       </ChartCard>
 
       <ChartCard title="The Catalysts classifications">
-        <BrandBars values={stats.by_brand ?? {}} onSelect={name => name === "CMS" ? onChange({...filters, verticals: filters.verticals.length ? [] : [...VERTICALS], page: 1}) : toggleSingle("brands", name)} />
-        <details><summary>CMS · Devsol and Social Business</summary>
-        <BarsChart data={verticalSeries} fill={COLORS[1]}
-                   onBarClick={(name) => toggleSingle("verticals", name)} />
-        </details>
+        <BrandBars values={stats.by_brand ?? {}} verticals={stats.by_vertical} onSelect={name => toggleSingle("brands", name)} onVerticalSelect={name => toggleSingle("verticals", name)} onCmsSelect={() => onChange({...filters, verticals: [...VERTICALS], page: 1})} />
       </ChartCard>
 
       <ChartCard title="Upcoming Deadlines">
