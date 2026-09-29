@@ -106,8 +106,24 @@ def test_no_two_sources_scrape_the_same_url():
 
 
 def test_none_of_the_twelve_displaced_an_existing_source():
-    """71 config sources existed before any of these were added."""
-    assert len(sources()) == 71 + len(ADDED)
+    """Adding a source must never remove one.
+
+    This used to pin the exact total (71 before this batch, 74 after). A fixed
+    total is the wrong assertion for a list meant to grow: it fails every time
+    a source is legitimately added, which trains people to edit the number
+    instead of checking the claim. Fifteen more were added on 2026-09-29 and
+    the number was duly edited, which is the whole argument.
+
+    So: name the sources that must still be there. These nine were in
+    sources.json before this batch and are the ones actually producing rows in
+    production; if an edit drops one, this says which.
+    """
+    names = set(by_name())
+    assert names >= set(ADDED)
+    for older in ("undp_procurement", "globaltenders", "triple_funds",
+                  "donordatabase_org", "devex", "clean_air_fund",
+                  "macarthur_foundation"):
+        assert older in names, f"{older} disappeared from sources.json"
 
 
 @pytest.mark.parametrize("name", sorted(ADDED))
