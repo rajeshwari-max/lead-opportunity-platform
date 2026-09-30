@@ -225,8 +225,7 @@
     "name": "european_union",
     "display_name": "European Union",
     "url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/calls-for-proposals",
-    "tender_url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/calls-for-tenders?isExactMatch=true&order=DESC&pageNumber=1&pageSize=50&sortBy=startDate",
-    "website": "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities"
+    "website": "https://ec.europa.eu"
   },
   {
     "name": "sdg_impact_finance_initiative",
@@ -467,7 +466,9 @@
     "website": "https://www.grandchallenges.org",
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
-    "_note": "Overlaps bmgf_grand_challenges (gcgh.grandchallenges.org), which is Global Health only. The umbrella site carries calls the subdomain does not — 'Keystone Symposia: Funding Opportunities for 2027 Conferences' was on this page and not on gcgh. Expect some rows in both; deduplication.py collapses them where the apply link matches."
+    "_note": "NO PAGINATION: one to two calls at a time (on 2026-09-30, one — 'Keystone Symposia: Funding Opportunities for 2027 Conferences', linked via hubs.la). Overlaps bmgf_grand_challenges (gcgh.grandchallenges.org), which is Global Health only; the umbrella site carries calls the subdomain does not. Expect some rows in both; deduplication.py collapses them where the apply link matches.",
+    "requires_js": false,
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
   },
   {
     "name": "isti_institutional_grants",
@@ -476,10 +477,12 @@
     "website": "https://www.indiascienceandtechnology.gov.in",
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
-    "_note": "19 records, ?page=N, 10 per page. The listing prints NO deadline — these are standing schemes, not dated calls. Undated rows are hidden by the strict Active rule and retired by audit_deadlines after LOP_ONGOING_MAX_AGE_DAYS, so expect them stored and not shown unless a detail page yields a date.",
+    "_note": "19 records ('Total number of Record(s): 19'), 10 on ?page=0, 9 on ?page=1 (measured 2026-09-30). The listing prints NO deadline — these are standing schemes, not dated calls. Undated rows are hidden by the strict Active rule and retired by audit_deadlines after LOP_ONGOING_MAX_AGE_DAYS, so expect them stored and not shown unless a detail page yields a date.",
     "page_url": "https://www.indiascienceandtechnology.gov.in/funding-opportunities/research-grants/institutional?page={offset}",
     "page_size": 1,
-    "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third."
+    "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third.",
+    "requires_js": false,
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
   },
   {
     "name": "isti_international_grants",
@@ -488,10 +491,12 @@
     "website": "https://www.indiascienceandtechnology.gov.in",
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
-    "_note": "11 records. Same undated-scheme caveat as isti_institutional_grants.",
+    "_note": "11 records ('Total number of Record(s): 11'), 10 on ?page=0, 1 on ?page=1 (measured 2026-09-30). The listing prints NO deadline — these are standing schemes, not dated calls. Undated rows are hidden by the strict Active rule and retired by audit_deadlines after LOP_ONGOING_MAX_AGE_DAYS, so expect them stored and not shown unless a detail page yields a date.",
     "page_url": "https://www.indiascienceandtechnology.gov.in/funding-opportunities/research-grants/international?page={offset}",
     "page_size": 1,
-    "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third."
+    "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third.",
+    "requires_js": false,
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
   },
   {
     "name": "isti_individual_grants",
@@ -500,10 +505,12 @@
     "website": "https://www.indiascienceandtechnology.gov.in",
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
-    "_note": "Same undated-scheme caveat as isti_institutional_grants.",
+    "_note": "20 records ('Total number of Record(s): 20'), 10 on ?page=0, 10 on ?page=1 (measured 2026-09-30). The listing prints NO deadline — these are standing schemes, not dated calls. Undated rows are hidden by the strict Active rule and retired by audit_deadlines after LOP_ONGOING_MAX_AGE_DAYS, so expect them stored and not shown unless a detail page yields a date.",
     "page_url": "https://www.indiascienceandtechnology.gov.in/funding-opportunities/research-grants/individual?page={offset}",
     "page_size": 1,
-    "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third."
+    "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third.",
+    "requires_js": false,
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
   },
   {
     "name": "isti_conference_grants",
@@ -512,10 +519,12 @@
     "website": "https://www.indiascienceandtechnology.gov.in",
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
-    "_note": "7 records. Same undated-scheme caveat as isti_institutional_grants.",
+    "_note": "7 records ('Total number of Record(s): 7'), all 7 on ?page=0 (measured 2026-09-30). The listing prints NO deadline — these are standing schemes, not dated calls. Undated rows are hidden by the strict Active rule and retired by audit_deadlines after LOP_ONGOING_MAX_AGE_DAYS, so expect them stored and not shown unless a detail page yields a date.",
     "page_url": "https://www.indiascienceandtechnology.gov.in/funding-opportunities/grants-for-conference-seminars?page={offset}",
     "page_size": 1,
-    "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third."
+    "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third.",
+    "requires_js": false,
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
   },
   {
     "name": "fire_biofin",
@@ -538,7 +547,9 @@
     "website": "https://globalebafund.org",
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
-    "_note": "One call at a time: '8th Call for Proposals for Small-Size Grants', up to USD 250,000, window 28 Sep - 26 Oct 2026. Applications live on gms-portal.iucn.org, so the apply link leaves this domain."
+    "_note": "NO PAGINATION: one call at a time — '8th Call for Proposals for Small-Size Grants', up to USD 250,000, window 28 Sep - 26 Oct 2026. Applications live on gms-portal.iucn.org, so the apply link leaves this domain.",
+    "requires_js": false,
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
   },
   {
     "name": "developmentwala_rfps",
@@ -556,7 +567,9 @@
     "website": "https://devinfo.in",
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
-    "_note": "A WordPress archive of Indian CSR/NGO RFPs. Rows carry a POSTED date, not a deadline, and the newest seen was Dec 2024 — much of this list is historic, and undated rows will not reach the dashboard."
+    "_note": "NO PAGINATION, and none is missing: the page is a fixed list of 30 RFPs, newest first, ending at an Aug 2023 entry, with no older-posts or page control (measured 2026-09-30). Rows carry a POSTED date, not a deadline, and the newest was Dec 2024 — most of this list is historic, and undated rows will not reach the dashboard.",
+    "requires_js": false,
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
   },
   {
     "name": "investindia_rfp",
@@ -574,16 +587,22 @@
     "website": "https://leverforchange.org",
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
-    "_note": "19 results over 2 pages, and MOST ARE CLOSED — the page shows awarded and under-review competitions beside the one open call (Boundless San Francisco). Each card states its status; rows without a live deadline will not reach the dashboard, which is correct."
+    "_note": "WordPress /page/N/ pagination, 1-based, 12 per page: 'Showing 1–12 of 19', page 2 holds the other 7 and has no next link (measured 2026-09-30). MOST ARE CLOSED — awarded and under-review competitions sit beside the one open call (Boundless San Francisco). Rows without a live deadline will not reach the dashboard, which is correct.",
+    "page_url": "https://leverforchange.org/open-calls/page/{page}/",
+    "requires_js": false,
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
   },
   {
     "name": "samsstc_rfp",
     "display_name": "SAMS Social Talent Connect",
-    "url": "https://www.samsstc.com/rfp-tender",
+    "url": "https://www.samsstc.com/rfp-tender/rfp-list",
     "website": "https://www.samsstc.com",
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
-    "_note": "The strongest of this batch for India: 30 live RFP/RFQ/ToR notices, each with a real deadline, readable without signing in. Posting an RFP is paid; reading them is not."
+    "_note": "Repointed 2026-09-30 from /rfp-tender, which is a landing page that shows a selection of cards and a 'View all 31 →' link, to /rfp-tender/rfp-list, the full list. 1-BASED ?page=N, 30 per page: 'Showing 1–30 of 31' on page 1, so page 2 carries one row and page 3 is empty, which ends the walk. Every card has a real deadline and is readable without signing in; posting an RFP is paid, reading is not.",
+    "page_url": "https://www.samsstc.com/rfp-tender/rfp-list?page={page}",
+    "requires_js": false,
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
   },
   {
     "name": "ai_opportunity_fund_apac",

@@ -186,3 +186,92 @@ def test_the_rejected_urls_really_are_absent(domain):
     hosts = {(urlparse(s["url"]).hostname or "").lower() for s in sources()}
     assert not any(h == domain or h.endswith("." + domain) for h in hosts), \
         f"{domain} was excluded on 2026-09-29: {NOT_ADDED[domain]}"
+
+
+# ================================================================ pagination
+# Measured on 2026-09-30 by reading each listing's own pager and stated total.
+# Each entry: (the total the site states, per page, how page N+1 is addressed).
+# None for per_page/dialect means the listing has NO pagination at all —
+# pinned so that nobody "fixes" it by bolting on a template that invents pages.
+
+MEASURED = {
+    #  name                        total  per_page  second page URL (or None)
+    "samsstc_rfp":               (31,    30,  "https://www.samsstc.com/rfp-tender/rfp-list?page=2"),
+    "leverforchange":            (19,    12,  "https://leverforchange.org/open-calls/page/2/"),
+    "isti_institutional_grants": (19,    10,  "https://www.indiascienceandtechnology.gov.in/funding-opportunities/research-grants/institutional?page=1"),
+    "isti_international_grants": (11,    10,  "https://www.indiascienceandtechnology.gov.in/funding-opportunities/research-grants/international?page=1"),
+    "isti_individual_grants":    (20,    10,  "https://www.indiascienceandtechnology.gov.in/funding-opportunities/research-grants/individual?page=1"),
+    "isti_conference_grants":    (7,     10,  "https://www.indiascienceandtechnology.gov.in/funding-opportunities/grants-for-conference-seminars?page=1"),
+    "devinfo_rfps":              (30,    None, None),
+    "grandchallenges":           (1,     None, None),
+    "globaleba_fund":            (1,     None, None),
+}
+
+
+def scraper(name):
+    import app.scrapers  # noqa: F401
+    from app.scrapers.registry import SCRAPER_REGISTRY
+
+    s = SCRAPER_REGISTRY[name]()
+    # State the generic next_page reads: the page we just parsed had rows, and
+    # it was not a repeat of the one before.
+    s._page_had_items = True
+    s._page_signature, s._prev_signature = "page-1-rows", ""
+    return s
+
+
+@pytest.mark.parametrize("name", sorted(n for n, m in MEASURED.items() if m[2]))
+def test_the_second_page_is_the_one_the_site_itself_links_to(name):
+    """The whole point. Page 1 -> the URL the site's own pager uses for page 2.
+
+    For ISTI that is ?page=1, not ?page=2 — Drupal counts from zero, and
+    asking for ?page=2 would skip the second page and read the third.
+    """
+    s = scraper(name)
+    nxt = s.next_page("<html></html>", s.start_url, 1)
+    assert nxt is not None, f"{name} stopped after page 1"
+    assert nxt.url == MEASURED[name][2]
+
+
+@pytest.mark.parametrize("name", sorted(n for n, m in MEASURED.items() if not m[2]))
+def test_a_listing_with_no_pager_is_not_given_one(name):
+    """devinfo lists 30 RFPs on one page and has no older-posts control;
+    Grand Challenges and the EbA Fund show one call at a time. A template here
+    would make the crawler request pages that do not exist."""
+    assert not by_name()[name].get("page_url")
+    s = scraper(name)
+    assert s.next_page("<html><body><p>no pager</p></body></html>", s.start_url, 1) is None
+
+
+@pytest.mark.parametrize("name", sorted(n for n, m in MEASURED.items() if m[1]))
+def test_enough_pages_are_walked_to_reach_the_stated_total(name):
+    """The crawl only ends on an empty or repeated page, so it reaches every
+    row as long as the per-page and total figures here are right. This keeps
+    the arithmetic visible: a site that grows past the safety cap shows up."""
+    from app.core.config import settings
+
+    total, per_page, _ = MEASURED[name]
+    pages_needed = -(-total // per_page)            # ceiling division
+    assert pages_needed + 1 <= settings.max_pages_safety_cap, \
+        f"{name} needs {pages_needed} pages plus the empty one that ends the walk"
+
+
+def test_samsstc_reads_the_full_list_not_the_landing_page():
+    """/rfp-tender is a landing page with a 'View all 31 →' link. The source
+    was first registered there; the full list is /rfp-tender/rfp-list."""
+    assert by_name()["samsstc_rfp"]["url"].endswith("/rfp-tender/rfp-list")
+
+
+@pytest.mark.parametrize("name", sorted(MEASURED))
+def test_server_rendered_listings_are_fetched_without_a_browser(name):
+    """Each of these was read without running JavaScript. The generic default
+    renders every source in Chromium when it can; for these that is pure cost,
+    and on a host without Playwright it logs a warning on every run."""
+    assert by_name()[name].get("requires_js") is False
+    assert scraper(name).prefer_js is False
+
+
+@pytest.mark.parametrize("name", sorted(UNVERIFIED | {"fire_biofin", "ai_opportunity_fund_apac"}))
+def test_the_unmeasured_ones_keep_the_browser(name):
+    """Nothing is known about how these render, so they keep the default."""
+    assert "requires_js" not in by_name()[name]
