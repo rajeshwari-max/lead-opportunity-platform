@@ -65,8 +65,11 @@ NOT_ADDED = {
 
 # Sources that the audit could NOT read. They are in sources.json with an
 # UNVERIFIED note; this list is what makes that promise checkable.
-UNVERIFIED = {"wellcome_contracts", "eu_funding_portal_social",
-              "developmentwala_rfps", "investindia_rfp"}
+#
+# wellcome_contracts and investindia_rfp left this set on 2026-09-30: both
+# fetched from EC2 (6 rows and 2 rows). What is still unknown about them is
+# their stated totals, which is a coverage question, not a reachability one.
+UNVERIFIED = {"eu_funding_portal_social", "developmentwala_rfps"}
 
 
 def sources() -> list[dict]:
@@ -262,16 +265,180 @@ def test_samsstc_reads_the_full_list_not_the_landing_page():
     assert by_name()["samsstc_rfp"]["url"].endswith("/rfp-tender/rfp-list")
 
 
-@pytest.mark.parametrize("name", sorted(MEASURED))
+# grandchallenges and globaleba_fund read fine without JavaScript from an
+# outside fetcher, were switched to plain HTTP, and then fetched NOTHING from
+# EC2. They are back on the browser; the rest fetched fine over HTTP.
+BROWSER_AFTER_ALL = {"grandchallenges", "globaleba_fund"}
+PLAIN_HTTP = set(MEASURED) - BROWSER_AFTER_ALL
+
+
+@pytest.mark.parametrize("name", sorted(PLAIN_HTTP))
 def test_server_rendered_listings_are_fetched_without_a_browser(name):
-    """Each of these was read without running JavaScript. The generic default
-    renders every source in Chromium when it can; for these that is pure cost,
-    and on a host without Playwright it logs a warning on every run."""
+    """Each of these was read without JavaScript AND fetched over plain HTTP
+    from EC2 on 2026-09-30. Rendering them in Chromium is pure cost."""
     assert by_name()[name].get("requires_js") is False
     assert scraper(name).prefer_js is False
 
 
-@pytest.mark.parametrize("name", sorted(UNVERIFIED | {"fire_biofin", "ai_opportunity_fund_apac"}))
+@pytest.mark.parametrize("name", sorted(BROWSER_AFTER_ALL))
+def test_the_two_that_plain_http_could_not_fetch_keep_the_browser(name):
+    """Readable without JavaScript is not the same as readable without a
+    browser. From EC2, httpx got no page back from either site."""
+    assert "requires_js" not in by_name()[name]
+    assert scraper(name).prefer_js is True
+
+
+@pytest.mark.parametrize("name", sorted(UNVERIFIED | {
+    "fire_biofin", "ai_opportunity_fund_apac", "wellcome_contracts", "investindia_rfp"}))
 def test_the_unmeasured_ones_keep_the_browser(name):
     """Nothing is known about how these render, so they keep the default."""
     assert "requires_js" not in by_name()[name]
+
+
+# ================================================ rows vs the site's own count
+# The first EC2 run (2026-09-30) found MORE rows than the site states for SAMS
+# (36/31) and all four ISTI lists (+2/+3), and FEWER for DevInfo (24/30).
+# A surplus is links that are not listings; a shortfall on a dedicated board is
+# rows the parser discarded. The fixtures below are SYNTHETIC — built from the
+# link shapes seen on each site, not captured — so they prove the mechanism,
+# and the next verify_batch run proves the counts.
+
+def parse(name, html, url=None):
+    s = scraper(name)
+    return s.parse_listing(html, url or s.start_url)
+
+
+SAMS_PAGE = """<html><body><main>
+  <a href="/rfp-tender/rfp-tender-description/rfq-for-purchase-of-laptops-room-to-read-india/1190">RFQ for Purchase of Laptops</a>
+  <p>Deadline: Oct 08, 2026</p>
+  <a href="/rfp-tender/rfp-tender-description/tor-catalyse-tech-rmnch-selco-foundation/1192">ToR - Catalyse Tech: Reproductive, Maternal, Newborn &amp; Child Health</a>
+  <p>Deadline: Oct 10, 2026</p>
+  <a href="/rfp-tender/category/monitoring-and-evaluation">Monitoring and Evaluation Tenders</a>
+  <a href="/rfp-tender/posting/create/rfp-tender-Detail">Post an RFP or Tender for free today</a>
+  <a href="/rfp-tender/pricing/rfp-plans">RFP posting plans and pricing</a>
+</main></body></html>"""
+
+
+def test_sams_keeps_rfps_and_drops_category_and_posting_links():
+    rows = parse("samsstc_rfp", SAMS_PAGE)
+    assert sorted(r.opportunity_url.rsplit("/", 1)[-1] for r in rows) == ["1190", "1192"]
+
+
+def test_sams_keeps_an_rfp_with_no_funding_words_in_its_title():
+    """'RFQ for Purchase of Laptops' is a real procurement notice with no
+    funding vocabulary. With the in-parser funding test on, it never became a
+    row at all — so no report downstream could have counted it missing."""
+    titles = [r.title for r in parse("samsstc_rfp", SAMS_PAGE)]
+    assert "RFQ for Purchase of Laptops" in titles
+
+
+ISTI_PAGE = """<html><body><main>
+  <a href="/funding-opportunities/research-grants/institutional/core-research-grant-crg">Core Research Grant (CRG)</a>
+  <a href="/funding-opportunities/research-grants/institutional/scheme-construction-women-hostel-universities">Scheme of Construction of Women's Hostel in Universities</a>
+  <div class="menu-block">
+    <a href="/funding-opportunities/research-grants/international">International research grants and fellowships</a>
+    <a href="/funding-opportunities/research-grants/individual">Individual research grants and fellowships</a>
+    <a href="/funding-opportunities/grants-for-conference-seminars">Grants for conferences and seminars</a>
+  </div>
+  <a href="/funding-opportunities/research-grants/institutional?page=1">2</a>
+</main></body></html>"""
+
+
+def test_isti_keeps_child_schemes_and_drops_sibling_sections():
+    """The surplus on each ISTI list matched its sidebar of sibling sections.
+    A scheme is a CHILD of the listing path; a sibling section is not."""
+    rows = parse("isti_institutional_grants", ISTI_PAGE)
+    assert sorted(r.opportunity_url.rsplit("/", 1)[-1] for r in rows) == [
+        "core-research-grant-crg", "scheme-construction-women-hostel-universities"]
+
+
+def test_isti_keeps_a_scheme_whose_title_has_no_funding_word():
+    """"Scheme of Construction of Women's Hostel in Universities" is a real
+    UGC grant scheme."""
+    titles = [r.title for r in parse("isti_institutional_grants", ISTI_PAGE)]
+    assert any("Women's Hostel" in t for t in titles)
+
+
+@pytest.mark.parametrize("name", sorted(n for n in MEASURED if n.startswith("isti_")))
+def test_each_isti_selector_names_its_own_listing_path(name):
+    """A selector copied from the institutional entry to the international
+    one would match nothing there — every row gone, silently."""
+    entry = by_name()[name]
+    path = urlparse(entry["url"]).path
+    assert entry["title_selector"] == f'a[href*="{path}/"]'
+
+
+DEVINFO_PAGE = """<html><body><main>
+  <article><h2><a href="https://devinfo.in/request-for-proposal-rfp-for-annual-rate-for-delivery-and-installation-of-interactive-panels/">Request for Proposal for Annual Rate Delivery and Installation of Interactive Panels</a></h2>
+  <span>November 12, 2024</span></article>
+  <article><h2><a href="https://devinfo.in/ecosystem-services-evaluation-of-restored-harit-sites-hclf/">Ecosystem Services Evaluation of restored and rejuvenated Harit sites in India – HCLF</a></h2>
+  <span>August 24, 2023</span></article>
+</main></body></html>"""
+
+
+def test_devinfo_keeps_rfps_that_never_mention_money():
+    rows = parse("devinfo_rfps", DEVINFO_PAGE)
+    assert len(rows) == 2
+
+
+# ======================================================================= FIRE
+
+def test_fire_walks_the_site_s_own_page_numbers():
+    s = scraper("fire_biofin")
+    nxt = s.next_page("<html></html>", s.start_url, 1)
+    assert nxt.url == "http://fire.biofin.org/?page=2"
+    nxt = s.next_page("<html></html>", "http://fire.biofin.org/?page=34", 34)
+    assert nxt.url == "http://fire.biofin.org/?page=35"
+
+
+def test_fire_rows_are_restricted_to_resource_pages():
+    """Every FIRE resource is /single/<slug>. No synthetic page is asserted
+    here: FIRE's real card markup has never been seen from outside EC2, and a
+    made-up page parsed to zero rows — which would have made an all() check
+    pass on nothing. The selector is what is known; the next EC2 run shows
+    whether the within-run repeats (27.7%) came from non-resource links."""
+    assert by_name()["fire_biofin"]["title_selector"] == 'a[href*="/single/"]'
+
+
+# ================================================ one timeout must not end it
+
+def test_a_render_that_fails_once_is_retried(monkeypatch):
+    """FIRE lost pages 35-49 to a single 30-second timeout on page 35."""
+    import asyncio
+
+    from app.scrapers.base_scraper import PageRequest
+
+    s = scraper("fire_biofin")
+    calls = []
+
+    async def flaky(req):
+        calls.append(req.url)
+        return None if len(calls) == 1 else "<html>page 35</html>"
+
+    monkeypatch.setattr(s, "_fetch_rendered", flaky)
+    monkeypatch.setattr("app.scrapers.base_scraper._playwright_available", lambda: True)
+    monkeypatch.setattr("app.scrapers.base_scraper.settings.retry_backoff", 0.0)
+    html = asyncio.run(s._fetch(None, PageRequest("http://fire.biofin.org/?page=35")))
+    assert html == "<html>page 35</html>"
+    assert len(calls) == 2
+
+
+def test_a_render_that_fails_twice_still_ends_the_walk(monkeypatch):
+    """One retry, not three: each attempt launches a Chromium, and a source
+    that is really blocked must not cost three launches per page on EC2."""
+    import asyncio
+
+    from app.scrapers.base_scraper import PageRequest
+
+    s = scraper("fire_biofin")
+    calls = []
+
+    async def dead(req):
+        calls.append(req.url)
+        return None
+
+    monkeypatch.setattr(s, "_fetch_rendered", dead)
+    monkeypatch.setattr("app.scrapers.base_scraper._playwright_available", lambda: True)
+    monkeypatch.setattr("app.scrapers.base_scraper.settings.retry_backoff", 0.0)
+    assert asyncio.run(s._fetch(None, PageRequest("http://fire.biofin.org/?page=35"))) is None
+    assert len(calls) == 2

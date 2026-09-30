@@ -350,7 +350,33 @@ class BaseScraper(ABC):
     async def _fetch(self, client: httpx.AsyncClient, req: PageRequest) -> str | None:
         """Rate-limited fetch with retry + exponential backoff. Never raises."""
         if self.requires_js or (self.prefer_js and _playwright_available()):
-            return await self._fetch_rendered(req)
+            # ONE retry for a rendered page, where plain HTTP gets three.
+            #
+            # This used to be a single attempt, and crawl() treats a page that
+            # comes back None as the end of the walk. FIRE (BIOFIN) proved what
+            # that costs: one 30-second Page.goto timeout on page 35 of 49
+            # ended the run, fourteen pages were never read, and the report
+            # could only say "either the source ran out, or it stopped early".
+            # A timeout on one page of a long listing is routine; losing the
+            # rest of the listing to it is not.
+            #
+            # One retry, not max_retries: every attempt launches a Chromium, and
+            # a source that is genuinely blocked would otherwise cost three
+            # browser launches per page on a small EC2 box. A render that fails
+            # twice in a row is a real failure and still ends the walk.
+            for attempt in (1, 2):
+                html = await self._fetch_rendered(req)
+                if html is not None:
+                    if attempt > 1:
+                        log.info("[%s] %s rendered on the retry", self.name, req.url)
+                    return html
+                if attempt == 1:
+                    wait = settings.retry_backoff * 2
+                    log.warning("[%s] render failed on %s — retrying once in %.0fs",
+                                self.name, req.url, wait)
+                    await asyncio.sleep(wait)
+            log.error("[%s] giving up on %s after 2 render attempts", self.name, req.url)
+            return None
         if self.prefer_js:
             log.warning(
                 "[%s] works best with browser rendering — install Playwright "

@@ -457,7 +457,7 @@
     "website": "https://wellcome.org",
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
-    "_note": "A SECOND Wellcome source on purpose: wellcome_trust scrapes /research-funding/schemes and would never see a procurement notice. UNVERIFIED — the audit fetcher could not read it (every https request came back 302 to http), so this may need repointing."
+    "_note": "A SECOND Wellcome source on purpose: wellcome_trust scrapes /research-funding/schemes and would never see a procurement notice. Fetched from EC2 on 2026-09-30: 6 rows on one page, 4 pass the gate (2 excluded as pages that are never opportunities). The site's own count has not been compared."
   },
   {
     "name": "grandchallenges",
@@ -467,8 +467,7 @@
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
     "_note": "NO PAGINATION: one to two calls at a time (on 2026-09-30, one — 'Keystone Symposia: Funding Opportunities for 2027 Conferences', linked via hubs.la). Overlaps bmgf_grand_challenges (gcgh.grandchallenges.org), which is Global Health only; the umbrella site carries calls the subdomain does not. Expect some rows in both; deduplication.py collapses them where the apply link matches.",
-    "requires_js": false,
-    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
+    "_render_note": "requires_js was set false on 2026-09-30 because the page reads without JavaScript from an outside fetcher — and from EC2 plain HTTP then fetched NOTHING (outcome no_fetch). The browser default is back. Readable without JavaScript is not the same as readable without a browser."
   },
   {
     "name": "isti_institutional_grants",
@@ -482,7 +481,11 @@
     "page_size": 1,
     "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third.",
     "requires_js": false,
-    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run.",
+    "title_selector": "a[href*=\"/funding-opportunities/research-grants/institutional/\"]",
+    "_title_selector_note": "Only links of this shape are rows. The first EC2 run found MORE rows than the site's own counter (22 against 19); a surplus against the site's count can only be links that are not listings — category, sidebar or sibling-section links sharing the page. Every real row links to a detail page of this shape. For ISTI that is a child of the listing path: <listing>/<scheme-slug>. The surplus matched the number of sibling sections in the sidebar.",
+    "require_funding_signal": false,
+    "_funding_signal_note": "OFF because this is a dedicated board and title_selector already restricts rows to detail links. Listing titles such as 'RFQ for Purchase of Laptops' or 'Annual Rate for Delivery and Installation of Interactive Panels' carry no funding vocabulary and were being dropped INSIDE the parser — before any report could count them. is_furniture, the same-page test and the nav-href test still apply."
   },
   {
     "name": "isti_international_grants",
@@ -496,7 +499,11 @@
     "page_size": 1,
     "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third.",
     "requires_js": false,
-    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run.",
+    "title_selector": "a[href*=\"/funding-opportunities/research-grants/international/\"]",
+    "_title_selector_note": "Only links of this shape are rows. The first EC2 run found MORE rows than the site's own counter (14 against 11); a surplus against the site's count can only be links that are not listings — category, sidebar or sibling-section links sharing the page. Every real row links to a detail page of this shape. For ISTI that is a child of the listing path: <listing>/<scheme-slug>. The surplus matched the number of sibling sections in the sidebar.",
+    "require_funding_signal": false,
+    "_funding_signal_note": "OFF because this is a dedicated board and title_selector already restricts rows to detail links. Listing titles such as 'RFQ for Purchase of Laptops' or 'Annual Rate for Delivery and Installation of Interactive Panels' carry no funding vocabulary and were being dropped INSIDE the parser — before any report could count them. is_furniture, the same-page test and the nav-href test still apply."
   },
   {
     "name": "isti_individual_grants",
@@ -510,7 +517,11 @@
     "page_size": 1,
     "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third.",
     "requires_js": false,
-    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run.",
+    "title_selector": "a[href*=\"/funding-opportunities/research-grants/individual/\"]",
+    "_title_selector_note": "Only links of this shape are rows. The first EC2 run found MORE rows than the site's own counter (22 against 20); a surplus against the site's count can only be links that are not listings — category, sidebar or sibling-section links sharing the page. Every real row links to a detail page of this shape. For ISTI that is a child of the listing path: <listing>/<scheme-slug>. The surplus matched the number of sibling sections in the sidebar.",
+    "require_funding_signal": false,
+    "_funding_signal_note": "OFF because this is a dedicated board and title_selector already restricts rows to detail links. Listing titles such as 'RFQ for Purchase of Laptops' or 'Annual Rate for Delivery and Installation of Interactive Panels' carry no funding vocabulary and were being dropped INSIDE the parser — before any report could count them. is_furniture, the same-page test and the nav-href test still apply."
   },
   {
     "name": "isti_conference_grants",
@@ -524,21 +535,29 @@
     "page_size": 1,
     "_page_url_note": "Drupal pagination is 0-BASED: ?page=0 is the first page, ?page=1 the second. {offset} with page_size 1 produces exactly that; {page} would skip the second page and start at the third.",
     "requires_js": false,
-    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run.",
+    "title_selector": "a[href*=\"/funding-opportunities/grants-for-conference-seminars/\"]",
+    "_title_selector_note": "Only links of this shape are rows. The first EC2 run found MORE rows than the site's own counter (9 against 7); a surplus against the site's count can only be links that are not listings — category, sidebar or sibling-section links sharing the page. Every real row links to a detail page of this shape. For ISTI that is a child of the listing path: <listing>/<scheme-slug>. The surplus matched the number of sibling sections in the sidebar.",
+    "require_funding_signal": false,
+    "_funding_signal_note": "OFF because this is a dedicated board and title_selector already restricts rows to detail links. Listing titles such as 'RFQ for Purchase of Laptops' or 'Annual Rate for Delivery and Installation of Interactive Panels' carry no funding vocabulary and were being dropped INSIDE the parser — before any report could count them. is_furniture, the same-page test and the nav-href test still apply."
   },
   {
     "name": "fire_biofin",
     "display_name": "FIRE (BIOFIN)",
     "url": "https://fire.biofin.org/",
     "website": "https://fire.biofin.org",
-    "_note": "435 resources over 49 pages; detail links are /single/<slug>. Rows are funding PROGRAMMES (EU LIFE, Band Foundation), not dated calls, so the funding-vocabulary gate is left ON deliberately — curated here would admit the site's articles and country pages too."
+    "_note": "First EC2 run 2026-09-30: 34 pages walked before a 30s render timeout on page 35 ended the walk; the site claims ~49 pages / 435 resources (unconfirmed). base_scraper now retries a failed render once. Rows are funding PROGRAMMES (EU LIFE, Band Foundation), not dated calls, so the opportunity gate is left ON.",
+    "page_url": "http://fire.biofin.org/?page={page}",
+    "title_selector": "a[href*=\"/single/\"]",
+    "_title_selector_note": "Every FIRE resource is /single/<slug>. The first EC2 run extracted 292 rows over 34 pages of which 81 repeated a URL already seen (27.7%) and 38 failed the opportunity gate. Restricting to /single/ links removes any sidebar or article link that appears on every page. If repeats persist AFTER this, they are real listing rows moving between pages — an unstable sort order on the site — and some rows are then never seen at all.",
+    "_page_url_note": "1-based ?page=N, as the site's own pager uses (the log shows http://fire.biofin.org/?page=35)."
   },
   {
     "name": "eu_funding_portal_social",
     "display_name": "EU Funding Portal — Social Entrepreneurship",
     "url": "https://eufundingportal.eu/social-entrepreneurship",
     "website": "https://eufundingportal.eu",
-    "_note": "UNVERIFIED: the audit fetcher could not read robots.txt on this host at all (connect timeout), so nothing is known about what the page lists. Run scripts/verify_source.py eu_funding_portal_social before trusting it."
+    "_note": "UNVERIFIED and UNREACHABLE: no page came back from EC2 on 2026-09-30 (no_fetch, 4s), and an outside fetcher could not read its robots.txt either. Nothing about its content is known. Candidate for removal if it still fails after the owner opens it in a browser."
   },
   {
     "name": "globaleba_fund",
@@ -548,8 +567,7 @@
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
     "_note": "NO PAGINATION: one call at a time — '8th Call for Proposals for Small-Size Grants', up to USD 250,000, window 28 Sep - 26 Oct 2026. Applications live on gms-portal.iucn.org, so the apply link leaves this domain.",
-    "requires_js": false,
-    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
+    "_render_note": "requires_js was set false on 2026-09-30 because the page reads without JavaScript from an outside fetcher — and from EC2 plain HTTP then fetched NOTHING (outcome no_fetch). The browser default is back. Readable without JavaScript is not the same as readable without a browser."
   },
   {
     "name": "developmentwala_rfps",
@@ -558,7 +576,7 @@
     "website": "https://developmentwala.org",
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
-    "_note": "UNVERIFIED: robots.txt timed out for the audit fetcher. Path is the one the owner supplied."
+    "_note": "UNVERIFIED and PARSING FAILS: fetched from EC2 on 2026-09-30 but yielded ONE row, and that row links to a listing, not an RFP (0% deep links). Whatever the page shows, the generic parser does not see it as rows. Needs data/debug/developmentwala_rfps_page1.html from EC2 read by a person before a parser can be written — guessing selectors is how ADB's first fix got every selector wrong."
   },
   {
     "name": "devinfo_rfps",
@@ -569,7 +587,9 @@
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
     "_note": "NO PAGINATION, and none is missing: the page is a fixed list of 30 RFPs, newest first, ending at an Aug 2023 entry, with no older-posts or page control (measured 2026-09-30). Rows carry a POSTED date, not a deadline, and the newest was Dec 2024 — most of this list is historic, and undated rows will not reach the dashboard.",
     "requires_js": false,
-    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run.",
+    "require_funding_signal": false,
+    "_funding_signal_note": "OFF because this is a dedicated board whose every entry is an RFP. Listing titles such as 'RFQ for Purchase of Laptops' or 'Annual Rate for Delivery and Installation of Interactive Panels' carry no funding vocabulary and were being dropped INSIDE the parser — before any report could count them. is_furniture, the same-page test and the nav-href test still apply. The first EC2 run (2026-09-30) found 24 of the 30 entries; this is the most likely cause and the next run will show whether it was the only one."
   },
   {
     "name": "investindia_rfp",
@@ -578,7 +598,7 @@
     "website": "https://www.investindia.gov.in",
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
-    "_note": "UNVERIFIED: answered the audit fetcher with HTTP 403, which usually means a bot wall. May need requires_js / a browser render."
+    "_note": "Fetched from EC2 on 2026-09-30 through the browser: 2 RFPs on one page. An outside fetcher gets HTTP 403, so keep the browser. The site's own count has not been compared."
   },
   {
     "name": "leverforchange",
@@ -602,7 +622,11 @@
     "_note": "Repointed 2026-09-30 from /rfp-tender, which is a landing page that shows a selection of cards and a 'View all 31 →' link, to /rfp-tender/rfp-list, the full list. 1-BASED ?page=N, 30 per page: 'Showing 1–30 of 31' on page 1, so page 2 carries one row and page 3 is empty, which ends the walk. Every card has a real deadline and is readable without signing in; posting an RFP is paid, reading is not.",
     "page_url": "https://www.samsstc.com/rfp-tender/rfp-list?page={page}",
     "requires_js": false,
-    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run."
+    "_requires_js_note": "Plain HTTP on purpose: the listing is server-rendered (read without a browser on 2026-09-30). The generic default renders every source in Chromium when Playwright is installed, which here only adds cost — and on a host without Playwright it logs a warning each run.",
+    "title_selector": "a[href*=\"/rfp-tender/rfp-tender-description/\"]",
+    "_title_selector_note": "Only links of this shape are rows. The first EC2 run found MORE rows than the site's own counter (36 against 31); a surplus against the site's count can only be links that are not listings — category, sidebar or sibling-section links sharing the page. Every real row links to a detail page of this shape.",
+    "require_funding_signal": false,
+    "_funding_signal_note": "OFF because this is a dedicated board and title_selector already restricts rows to detail links. Listing titles such as 'RFQ for Purchase of Laptops' or 'Annual Rate for Delivery and Installation of Interactive Panels' carry no funding vocabulary and were being dropped INSIDE the parser — before any report could count them. is_furniture, the same-page test and the nav-href test still apply."
   },
   {
     "name": "ai_opportunity_fund_apac",
