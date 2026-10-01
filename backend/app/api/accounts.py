@@ -12,7 +12,8 @@ from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session
 
 from app.core.auth import (COOKIE_NAME, SESSION_DAYS, current_user, hash_password,
-                           verify_password, make_session_token, password_version)
+                           verify_password, make_session_token, password_version,
+                           password_matches)
 from app.core.config import settings
 from app.database.db import get_db
 from app.database.models import TeamMember, WorkspaceCredential
@@ -74,10 +75,38 @@ def login(body: Login, request: Request, response: Response, db: Session = Depen
     throttle("email:"+email)
     throttle("ip:"+(request.client.host if request.client else "unknown"))
     credential = db.get(WorkspaceCredential, email)
-    valid = verify_password(body.password, credential.password_hash if credential else "")
     member = db.scalar(select(TeamMember).where(func.lower(TeamMember.email) == email))
+    valid = verify_password(body.password, credential.password_hash if credential else "")
+
+    # Transition accounts from the former shared-password dashboard without
+    # trapping existing team members between Sign in and Register.  The legacy
+    # password is accepted only for an active, pre-existing member who has not
+    # established a personal password.  On the first successful use it is
+    # immediately stored as that member's salted personal hash; once they reset
+    # or change it, the shared password can never override the personal one.
+    legacy = bool(
+        member and member.active
+        and not (credential and credential.password_hash)
+        and settings.dashboard_password
+        and password_matches(body.password)
+    )
+    if legacy:
+        credential = credential or WorkspaceCredential(
+            owner=email, password_hash="", is_admin=False
+        )
+        credential.password_hash = hash_password(body.password)
+        credential.invitation_hash = None
+        credential.invitation_expires = None
+        db.add(credential)
+        db.commit()
+        valid = True
     if not valid or not member or not member.active:
-        raise HTTPException(401, "Incorrect email or password, or account unavailable")
+        raise HTTPException(
+            401,
+            "Sign-in failed. Existing team members can use the password previously "
+            "provided by the administrator or choose Forgot password. New users "
+            "should choose Register.",
+        )
     return sign_in(response, request, member, credential)
 
 
@@ -226,11 +255,38 @@ def register(body: Register, request: Request, response: Response, db: Session =
     throttle("register-email:" + email)
     encoded = hash_password(body.password)
     db.execute(text("BEGIN IMMEDIATE"))
-    # Never claim an existing identity or its records without proof of ownership.
+    # Existing team members from the shared-password dashboard already have an
+    # identity even though they may not have a WorkspaceCredential yet.  Let
+    # them enter that configured shared password here as well as on Sign in, so
+    # choosing the wrong tab cannot strand them.  Any other password must go
+    # through Forgot password and email verification; registration never
+    # overwrites an established personal password.
     member = db.scalar(select(TeamMember).where(func.lower(TeamMember.email) == email))
-    if member or db.get(WorkspaceCredential, email):
+    credential = db.get(WorkspaceCredential, email)
+    legacy = bool(
+        member and member.active
+        and not (credential and credential.password_hash)
+        and settings.dashboard_password
+        and password_matches(body.password)
+    )
+    if legacy:
+        credential = credential or WorkspaceCredential(
+            owner=email, password_hash="", is_admin=False
+        )
+        credential.password_hash = encoded
+        credential.invitation_hash = None
+        credential.invitation_expires = None
+        db.add(credential)
+        db.commit()
+        return sign_in(response, request, member, credential)
+    if member or credential:
         db.rollback()
-        raise HTTPException(409, "This address is already registered or reserved. Sign in, use Forgot password, or contact your administrator.")
+        raise HTTPException(
+            409,
+            "This work email is already ready to use. Select Sign in and use the "
+            "password previously provided by your administrator, or select Forgot "
+            "password to create a new personal password.",
+        )
     member = TeamMember(email=email, name=body.name.strip(), auto_send=False)
     credential = WorkspaceCredential(owner=email, password_hash=encoded, is_admin=False)
     db.add_all([member, credential])

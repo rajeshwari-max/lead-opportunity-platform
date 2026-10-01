@@ -36,7 +36,7 @@ class WorkspaceTests(unittest.TestCase):
         app.include_router(leads_router, prefix='/api')
         app.dependency_overrides[get_db] = db
         self.client = TestClient(app)
-        self.patches = [patch('app.database.db.SessionLocal', self.sessions), patch.object(w.settings, 'personal_login', True), patch.object(w.settings, 'dashboard_password', 'shared'), patch.object(w.settings, 'admin_password', 'separate-admin'), patch.object(w.settings, 'read_only', False)]
+        self.patches = [patch('app.database.db.SessionLocal', self.sessions), patch.object(w.settings, 'personal_login', True), patch.object(w.settings, 'dashboard_password', 'shared-password-123'), patch.object(w.settings, 'admin_password', 'separate-admin'), patch.object(w.settings, 'read_only', False)]
         for p in self.patches:
             p.start()
         a._attempts.clear()
@@ -77,12 +77,65 @@ class WorkspaceTests(unittest.TestCase):
         self.client.cookies.clear()
         self.client.cookies.set(COOKIE_NAME,make_session_token('alice@example.org','Alice',True))
         self.assertEqual(self.client.get('/api/workspace/journeys').status_code,401)
-        self.assertEqual(self.client.post('/api/login',json={'email':'alice@example.org','password':'shared'}).status_code,401)
+        self.assertEqual(self.client.post('/api/login',json={'email':'alice@example.org','password':'shared-password-123'}).status_code,401)
         self.unlock('alice')
         with self.sessions() as db:
             db.get(WorkspaceCredential,'alice@example.org').password_hash=hash_password('replacement-password')
             db.commit()
         self.assertEqual(self.client.get('/api/workspace/journeys').status_code,401)
+
+    def test_legacy_team_member_can_sign_in_and_is_migrated(self):
+        with self.sessions() as db:
+            db.add(TeamMember(name='Legacy member',email='legacy-login@example.org',active=True,auto_send=False))
+            db.commit()
+        self.client.cookies.clear()
+        response=self.client.post('/api/login',json={'email':'legacy-login@example.org','password':'shared-password-123'})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertFalse(response.json()['is_admin'])
+        with self.sessions() as db:
+            credential=db.get(WorkspaceCredential,'legacy-login@example.org')
+            self.assertIsNotNone(credential)
+            self.assertTrue(a.verify_password('shared-password-123',credential.password_hash))
+            self.assertFalse(credential.is_admin)
+        # A personal password is authoritative after migration: changing the
+        # configured shared password cannot overwrite or bypass it.
+        with patch.object(a.settings,'dashboard_password','different-shared'):
+            self.client.cookies.clear()
+            self.assertEqual(self.client.post('/api/login',json={'email':'legacy-login@example.org','password':'different-shared'}).status_code,401)
+        self.assertEqual(self.client.post('/api/login',json={'email':'legacy-login@example.org','password':'shared-password-123'}).status_code,200)
+
+    def test_register_tab_accepts_legacy_member_but_never_overwrites_personal_password(self):
+        with self.sessions() as db:
+            db.add(TeamMember(name='Reserved name',email='legacy-register@example.org',active=True,auto_send=False))
+            db.commit()
+        self.client.cookies.clear()
+        response=self.client.post('/api/login/register',json={
+            'email':'legacy-register@example.org','name':'Attempted overwrite','password':'shared-password-123'
+        })
+        self.assertEqual(response.status_code,200,response.text)
+        with self.sessions() as db:
+            member=db.scalar(select(TeamMember).where(TeamMember.email=='legacy-register@example.org'))
+            credential=db.get(WorkspaceCredential,'legacy-register@example.org')
+            self.assertEqual(member.name,'Reserved name')
+            self.assertTrue(a.verify_password('shared-password-123',credential.password_hash))
+            self.assertFalse(credential.is_admin)
+        retry=self.client.post('/api/login/register',json={
+            'email':'legacy-register@example.org','name':'Overwrite','password':'replacement-pass-123'
+        })
+        self.assertEqual(retry.status_code,409)
+        self.assertIn('Forgot password',retry.json()['detail'])
+
+    def test_legacy_password_does_not_admit_unknown_or_inactive_members(self):
+        with self.sessions() as db:
+            db.add(TeamMember(name='Inactive',email='inactive-legacy@example.org',active=False,auto_send=False))
+            db.commit()
+        self.client.cookies.clear()
+        for email in ('missing@example.org','inactive-legacy@example.org'):
+            response=self.client.post('/api/login',json={'email':email,'password':'shared-password-123'})
+            self.assertEqual(response.status_code,401)
+        with self.sessions() as db:
+            self.assertIsNone(db.get(WorkspaceCredential,'missing@example.org'))
+            self.assertIsNone(db.get(WorkspaceCredential,'inactive-legacy@example.org'))
 
     def test_owner_isolation_including_files_and_contacts(self):
         j = self.track()
@@ -294,7 +347,7 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(response.status_code,200)
             send.assert_not_called()
             self.assertFalse(response.json()['is_admin'])
-            self.assertEqual(self.client.post('/api/login',json={'email':'external@gmail.com','password':'shared'}).status_code,401)
+            self.assertEqual(self.client.post('/api/login',json={'email':'external@gmail.com','password':'shared-password-123'}).status_code,401)
             old=self.client.cookies.get(COOKIE_NAME)
             self.assertEqual(self.client.post('/api/accounts/password',json={'current_password':'wrong','new_password':'updated-password-123'}).status_code,400)
             self.assertEqual(self.client.post('/api/accounts/password',json={'current_password':'personal-password-123','new_password':'updated-password-123'}).status_code,200)

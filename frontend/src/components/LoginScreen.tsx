@@ -32,7 +32,8 @@ export function LoginScreen({onSuccess}:{onSuccess:()=>void}) {
    <small>WELCOME TO YOUR DASHBOARD</small>
    <h2>{token?"Set your password":mode==="register"?"Create your account":mode==="forgot"?"Forgot password?":"Welcome back"}</h2>
    {token&&<p>Choose your personal password to continue.</p>}
-   {!token&&mode==="register"&&<p>Choose your password to create your account immediately. Your account starts with user access.</p>}
+   {!token&&mode==="login"&&<p>Existing team members can use the password previously shared with them, or use Forgot password to create a personal password.</p>}
+   {!token&&mode==="register"&&<p>New to the platform? Choose a password to create your account. If your work email was already added by your team, use the existing team password or choose Forgot password.</p>}
    {!token&&mode==="forgot"&&<p>Enter your account email and we’ll send you a password reset link.</p>}
    {!token&&mode==="register"&&<label>Your name<input required autoComplete="name" maxLength={200} value={name} onChange={e=>setName(e.target.value)}/></label>}
    {!token&&<label>Work email<input type="email" required autoComplete="username" maxLength={320} value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@organisation.org"/></label>}
@@ -42,7 +43,7 @@ export function LoginScreen({onSuccess}:{onSuccess:()=>void}) {
    <p role="alert" className="login-error">{error}</p>
    {message&&<p role="status" className="login-success">{message}</p>}
    <button className="login-submit" disabled={busy}>{busy?"Please wait…":token?"Save password & continue":mode==="register"?"Register":mode==="forgot"?"Send reset link":"Sign in"}</button>
-   {!token&&<div className="login-help">{mode==="login"?<>New here? <button type="button" disabled={busy} className="login-text-button" onClick={()=>changeMode("register")}>Register</button></>:<button type="button" disabled={busy} className="login-text-button" onClick={()=>changeMode("login")}>Already have an account? Sign in</button>}</div>}
+   {!token&&<div className="login-help">{mode==="login"?<>New here? <button type="button" disabled={busy} className="login-text-button" onClick={()=>changeMode("register")}>Register</button></>:mode==="register"?<>Already have an account? <button type="button" disabled={busy} className="login-text-button" onClick={()=>changeMode("login")}>Sign in</button> · <button type="button" disabled={busy} className="login-text-button" onClick={()=>changeMode("forgot")}>Forgot password?</button></>:<button type="button" disabled={busy} className="login-text-button" onClick={()=>changeMode("login")}>Already have an account? Sign in</button>}</div>}
    <footer>Admin access is granted by your administrator.</footer>
   </form></section>
  </main>;
