@@ -233,6 +233,20 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(r.status_code,503)
             self.assertIn('not configured',r.json()['detail'])
 
+    def test_password_recovery_link_uses_validated_browser_origin(self):
+        """A same-origin EC2 dashboard must not fall back to a stale URL setting."""
+        self.client.cookies.clear()
+        with patch('app.services.email_service.is_configured',return_value=True), \
+             patch.object(a,'send_account_link') as send, \
+             patch.object(a.settings,'dashboard_url','https://unreachable.example'):
+            response=self.client.post(
+                '/api/login/forgot-password',
+                json={'email':'alice@example.org'},
+                headers={'Origin':'http://testserver'},
+            )
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(send.call_args.kwargs['dashboard_base'],'http://testserver')
+
     def test_dashboard_saved_leads_and_admin_monitoring(self):
         self.unlock('bob')
         r = self.client.post('/api/my-leads', json={'opportunity_id': 1})

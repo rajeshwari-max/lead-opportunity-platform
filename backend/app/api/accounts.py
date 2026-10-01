@@ -193,10 +193,15 @@ def request_account_email(body, request, db, registration=False):
     db.add(credential)
     db.commit()
     try:
-        origin = request.headers.get("origin", "")
-        # A configured frontend origin is trusted; never use arbitrary Host or
-        # forwarded headers to construct a password reset URL.
-        frontend = origin if origin in settings.cors_origins and origin != "*" else ""
+        # ``guard`` has already proved that Origin is either the same origin as
+        # this request or an explicitly configured frontend.  Prefer that
+        # validated browser origin for the email link: it is the address the
+        # person is demonstrably using.  Looking only in ``cors_origins`` broke
+        # production on EC2 because same-origin traffic does not need to appear
+        # in the CORS allow-list, so a stale HTTPS setting was used even though
+        # the dashboard was actually served over HTTP.
+        origin = request.headers.get("origin", "").rstrip("/")
+        frontend = origin if origin and origin != "*" else ""
         send_account_link(email, token, registration, dashboard_base=frontend)
     except HTTPException:
         raise
