@@ -3,11 +3,14 @@ import green from "../assets/brands/green-foundation.png";
 import vrutti from "../assets/brands/vrutti.png";
 import swasti from "../assets/brands/swasti.png";
 import upfront from "../assets/brands/upfront.png";
+import setu from "../assets/brands/setu.png";
+import communityActionCollab from "../assets/brands/community-action-collab.png";
 import "./brand-label.css";
 import { VERTICALS } from "@/lib/types";
 
 const logos: Record<string, string> = {
   CMS: cms, "Green Foundation": green, Vrutti: vrutti, Swasti: swasti, Upfront: upfront,
+  Setu: setu, "Community Action Collab": communityActionCollab,
 };
 
 export function BrandLabel({ name }: { name: string }) {
