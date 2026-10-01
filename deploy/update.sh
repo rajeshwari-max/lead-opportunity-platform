@@ -71,7 +71,13 @@ npm run build
 [ -f dist/index.html ] || die "the build produced no dist/index.html"
 
 # ------------------------------------------------------------- 4. publish
-WEBROOT=$(sudo nginx -T 2>/dev/null | grep -m1 -oP '(?<=root\s)[^;]+')
+# Do not use ``grep -m1`` here. With ``pipefail`` it closes the pipe after the
+# first match, nginx receives SIGPIPE while still printing its configuration,
+# and the deploy exits before publishing even though the root was found.
+# awk keeps reading to EOF but prints only the first root.
+WEBROOT=$(sudo nginx -T 2>/dev/null | awk '
+  !found && $1 == "root" { value=$2; sub(/;$/, "", value); print value; found=1 }
+')
 [ -n "$WEBROOT" ] || die "could not read the web root out of the nginx config"
 say "Publishing to $WEBROOT"
 
