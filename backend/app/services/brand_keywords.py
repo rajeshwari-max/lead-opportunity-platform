@@ -195,6 +195,27 @@ BRAND_KEYWORD_SECTIONS: dict[str, dict[str, tuple[str, ...]]] = {
             'Financial Inclusion',
         ),
     },
+    'Community Action Collab': {
+        'Primary Themes': (
+            'Resilience',
+            'Collaboration',
+            'Social Protection',
+            'Livelihoods',
+            'Disaster Risk Reduction (DRR)',
+            'Systems Change',
+            'Multiplier Effect',
+            'Network Effect',
+        ),
+        'Core Sectors': (
+            'Gender',
+            'Health',
+            'Livelihoods',
+            "Workers' Rights",
+            'Collaborative Action',
+            'Social Business',
+            'Resilience',
+        ),
+    },
 }
 
 
@@ -455,6 +476,8 @@ BRAND_KEYWORDS: dict[str, tuple[str, ...]] = {
         'BRSR',
         'Business and Human Rights',
     ),
+    'Community Action Collab': _flatten_sections(
+        BRAND_KEYWORD_SECTIONS['Community Action Collab']),
 }
 
 SOURCE_KEYWORD_COUNTS = {
@@ -463,6 +486,7 @@ SOURCE_KEYWORD_COUNTS = {
     'Swasti': 18,
     'Setu': 134,
     'Upfront': 50,
+    'Community Action Collab': 13,
 }
 
 BRANDS = tuple(BRAND_KEYWORDS)

@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 
 from app.services.brand_keywords import BRAND_KEYWORDS, BRANDS
 
-MODEL_VERSION = "brand-rules-2026.09.29"
+MODEL_VERSION = "brand-rules-2026.10.01"
 ASSIGNMENT_THRESHOLD = 3.0
 
 # Valid search aids that are unsafe as standalone brand decisions.  They remain
@@ -38,10 +38,12 @@ _WEAK_TERMS = {
     "philanthropy", "development finance", "impact investment", "ngos",
     "development sector", "development partners", "social justice",
     "labour welfare", "health and family welfare",
+    "health", "resilience", "collaboration", "social protection",
 }
 
 _YEAR = re.compile(r"\b(?:19|20)\d{2}\b", re.I)
 _COUNTRY_NOISE = re.compile(r"\bindia\b", re.I)
+_PARENTHETICAL_ABBREVIATION = re.compile(r"\(([A-Za-z][A-Za-z0-9-]{1,10})\)")
 _SEARCH_WRAPPERS = re.compile(
     r"\b(?:call for proposals?|request for applications?|expression of interest|"
     r"open call|funding opportunity|apply now)\b",
@@ -65,10 +67,21 @@ def _core_variant(term: str) -> str:
 
 def _phrase_pattern(term: str) -> re.Pattern[str]:
     # Flexible separators make "worker-wellbeing" match "Worker Well Being"
-    # without falling back to unsafe substring matching.
-    pieces = [re.escape(part) for part in re.split(r"[\s\-&/]+", term) if part]
-    expression = r"[\s\-&/]+".join(pieces)
+    # and "workers' rights" match "workers rights", without falling back to
+    # unsafe substring matching.
+    separator = r"[\s\-&/'’]+"
+    pieces = [re.escape(part) for part in re.split(separator, term) if part]
+    expression = separator.join(pieces)
     return re.compile(rf"(?<!\w){expression}(?!\w)", re.I)
+
+
+def _search_variants(term: str) -> tuple[str, ...]:
+    """Return safe matching aliases while retaining the supplied term."""
+    variants = [term, _core_variant(term)]
+    for match in _PARENTHETICAL_ABBREVIATION.finditer(term):
+        long_form = (term[:match.start()] + term[match.end():]).strip()
+        variants.extend((long_form, match.group(1)))
+    return tuple(variants)
 
 
 @dataclass(frozen=True)
@@ -84,7 +97,7 @@ def _compile() -> dict[str, tuple[_Term, ...]]:
         terms: list[_Term] = []
         seen: set[str] = set()
         for source_term in source_terms:
-            for variant in (source_term, _core_variant(source_term)):
+            for variant in _search_variants(source_term):
                 key = _normalise(variant)
                 if not key or key in seen:
                     continue

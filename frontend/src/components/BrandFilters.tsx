@@ -4,7 +4,7 @@ import { VERTICALS } from '@/lib/types';
 import './brand-filters.css';
 
 const DEVSOL = VERTICALS.filter(v => v !== 'Social Business');
-const PENDING_BRANDS = ['Community Action Collab'];
+const PENDING_BRANDS: string[] = [];
 
 export function brandPath(vertical: string) {
   return vertical === 'Social Business' ? 'CMS / Social Business' : `CMS / Devsol / ${vertical}`;
@@ -48,7 +48,7 @@ export function BrandFilters({ selectedVerticals, selectedBrands, availableBrand
       {availableBrands.map(brand => <Selection key={brand} label={brand} values={[brand]}
         selected={selectedBrands} onChange={onBrandChange} />)}
     </div></details>
-    <p className="ud-brand-note">Keywords not yet supplied</p>
+    {PENDING_BRANDS.length > 0 && <p className="ud-brand-note">Keywords not yet supplied</p>}
     {PENDING_BRANDS.map(brand => <label key={brand} className="ud-brand-option ud-brand-pending">
       <input type="checkbox" disabled /><span>{brand}</span></label>)}
   </section>;

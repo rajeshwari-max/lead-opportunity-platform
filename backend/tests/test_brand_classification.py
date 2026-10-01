@@ -27,6 +27,7 @@ from app.services.filter_service import FilterService
         ("Swasti", "Digital health and primary health systems programme"),
         ("Setu", "Universal social protection systems programme"),
         ("Upfront", "Improving garment worker safety and workplace wellbeing"),
+        ("Community Action Collab", "Systems change through collaborative action"),
     ],
 )
 def test_specific_workbook_phrases_assign_the_expected_brand(brand, title):
@@ -58,6 +59,24 @@ def test_setu_subsections_are_preserved_separately_and_flattened_once():
     assert "Informal Workers" in sections["Livelihoods & Workers"]
 
 
+def test_collab_subsections_are_preserved_separately_and_flattened_once():
+    sections = BRAND_KEYWORD_SECTIONS["Community Action Collab"]
+    assert tuple(sections) == ("Primary Themes", "Core Sectors")
+    assert sum(map(len, sections.values())) == 15
+    assert len(BRAND_KEYWORDS["Community Action Collab"]) == 13
+    assert "Livelihoods" in sections["Primary Themes"]
+    assert "Livelihoods" in sections["Core Sectors"]
+
+
+@pytest.mark.parametrize("title", [
+    "Disaster risk reduction funding opportunity",
+    "DRR innovation partnership",
+    "Workers Rights programme",
+])
+def test_collab_parenthetical_and_punctuation_variants_match(title):
+    assert "Community Action Collab" in classify_brands(title).labels
+
+
 @pytest.mark.parametrize("title", [
     "Research grant in India",
     "Community design evaluation",
@@ -65,6 +84,7 @@ def test_setu_subsections_are_preserved_separately_and_flattened_once():
     "ESG fund announcement",
     "Training grant for women",
     "Agriculture and rural development programme",
+    "Health, resilience and collaboration grant",
 ])
 def test_broad_workbook_terms_do_not_classify_by_themselves(title):
     assert classify_brands(title).labels == []
