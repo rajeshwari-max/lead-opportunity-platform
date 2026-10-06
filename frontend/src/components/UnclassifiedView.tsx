@@ -81,7 +81,7 @@ export function UnclassifiedView({ onClose, readOnly = false }:
     <div className="fixed inset-0 z-50 overflow-y-auto bg-background p-4 sm:p-6">
       <div className="mx-auto flex max-w-[1400px] flex-col gap-4">
         <header className="flex flex-wrap items-center gap-3 border-b pb-3">
-          <h2 className="text-lg font-semibold">Unclassified Opportunities</h2>
+          <h2 className="text-lg font-semibold">Miscellaneous Opportunities</h2>
           <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-800">
             {(data?.total ?? 0).toLocaleString()} matching
             {data && data.total !== data.unfiltered_total &&

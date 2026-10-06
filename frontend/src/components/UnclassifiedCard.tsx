@@ -86,7 +86,7 @@ export function UnclassifiedCard({ readOnly = false }: { readOnly?: boolean }) {
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
           <Tags className="h-4 w-4 text-indigo-600" />
-          Unclassified
+          Miscellaneous
           <button onClick={() => setOpenFull(true)}
                   className="ml-auto rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-semibold text-indigo-800 hover:bg-indigo-200">
             {data.total.toLocaleString()}

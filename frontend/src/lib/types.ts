@@ -9,6 +9,8 @@ export interface Opportunity {
   vertical: string;
   /** Canonical comma-separated vertical tags, e.g. "Health, Climate/Sustainability". */
   verticals: string;
+  /** Explicit CMS archetype assignments: Devsol and/or Social Business. */
+  archetypes: string;
   /** Canonical comma-separated non-CMS brand assignments. */
   brands: string;
   /** Research | Implementation | "" — decides which team an RFP goes to. */
@@ -30,6 +32,9 @@ export interface Opportunity {
    *              scripts/clean_dashboard.py. */
   link: string;
   link_kind: "direct" | "listing" | "search" | "none";
+  /** Set only when no vertical and no brand cleared its threshold — see
+   *  backend services/miscellaneous.py. A display label, never a routing one. */
+  miscellaneous?: Miscellaneous | null;
   summary: string;
   location: string;
   eligibility: string;
@@ -317,12 +322,46 @@ export interface ScraperHealth {
   thresholds: { failure_streak: number; stale_days: number };
 }
 
+export interface ClassificationStatus {
+  mode: "ml" | "rule_fallback";
+  enabled: boolean;
+  loaded: boolean;
+  version: string;
+  trained_at: string | null;
+  training_rows: number;
+  gold_rows: number;
+  unresolved_rows_excluded: number;
+  path: string;
+  error: string;
+}
+
 /** What the model would have said, and on what evidence. Shown to the reviewer
  *  because a bare confidence number gives them nothing to agree with. */
 export interface VerticalSuggestion {
   vertical: string;
   score: number;
   evidence: string[];
+}
+
+/** One vertical or brand an unclassified row came close to. `pct` is its
+ *  score as a percentage of that label's own threshold: 100 = would have been
+ *  assigned on its own. */
+export interface MiscSector {
+  name: string;
+  kind: "vertical" | "brand";
+  pct: number;
+  evidence: string[];
+}
+
+/** "Miscellaneous — Health + Setu" when the strongest n near misses, added
+ *  n = 1, 2, 3 … , reach 100%; plain "Miscellaneous" when nothing does. */
+export interface Miscellaneous {
+  label: string;
+  reached: boolean;
+  n: number;
+  combined: MiscSector[];
+  combined_pct: number;
+  sectors: MiscSector[];
 }
 
 export interface UnclassifiedItem {

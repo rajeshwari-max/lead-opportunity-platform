@@ -66,6 +66,7 @@ class OpportunityOut(BaseModel):
     funding_type: str
     vertical: str
     verticals: str = ""  # canonical comma-separated vertical tags
+    archetypes: str = ""  # Devsol and/or Social Business
     brands: str = ""     # canonical comma-separated non-CMS brand matches
     work_type: str = ""   # Research | Implementation | "" (unclear)
     study_type: str = ""  # Baseline | Endline | Data Collection | …
@@ -96,6 +97,19 @@ class OpportunityOut(BaseModel):
     # links feel like they "open the wrong opportunity".
     link: str = ""
     link_kind: str = "direct"
+
+    # Set only for a row with no vertical and no brand: the label the dashboard
+    # shows instead of "Unclassified", with the near-miss sectors and their
+    # percentage of threshold. Computed on read, never stored, never used for
+    # routing - see services/miscellaneous.py.
+    miscellaneous: dict | None = None
+
+    @model_validator(mode="after")
+    def _miscellaneous(self) -> "OpportunityOut":
+        from app.services.miscellaneous import for_row
+
+        self.miscellaneous = for_row(self)
+        return self
 
     @model_validator(mode="after")
     def _resolve_link(self) -> "OpportunityOut":

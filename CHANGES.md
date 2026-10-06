@@ -5,6 +5,61 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-05 — Unclassified opportunities are now "Miscellaneous", with what they came close to
+
+### The thresholds this is measured against (unchanged)
+
+* **CMS verticals** — `verticals._THRESHOLD = 2`. A keyword in the title scores
+  3, in the summary/eligibility 1. So one title keyword, or two body keywords,
+  assigns the vertical. This is the rule `backfill_verticals` re-applies to
+  every row at startup, so it is the one that decides what is unclassified.
+* **Non-CMS brands** — `brands.ASSIGNMENT_THRESHOLD = 3.0`. A specific term
+  scores 3.0 in the title / 1.5 in the body; a broad term ("women",
+  "training", "community") 1.0 / 0.35. A brand also needs at least one
+  specific term, so broad words alone never assign one.
+* Ingest additionally runs `classification_model` (per-vertical cut-offs
+  0.45–0.70 on a 0–1 score). It disagrees with the threshold-2 rule, and the
+  startup backfill overwrites what it decided. Not changed here; noted.
+
+### What was added
+
+`services/miscellaneous.py`. For a row with no vertical AND no brand:
+
+1. every vertical and brand is scored as a percentage of its own threshold
+   (100% = would have been assigned alone), so the two scales can be added;
+2. sorted strongest first, the top 1, top 2, top 3 … are added (n ascending);
+3. the first n reaching 100% names the row `Miscellaneous — A + B`;
+   otherwise it is plain `Miscellaneous`. Either way the near misses are
+   listed with their percentages and the words that scored them.
+
+It is a display label only: computed when the API serialises a row
+(`OpportunityOut.miscellaneous`), never stored, never written to `verticals`
+or `brands`, so routing and digests are unchanged.
+
+Frontend: the user dashboard's Unclassified tab and row tag read
+"Miscellaneous" (with the combined label), the brief lists each near miss
+with its percentage, and the admin card is renamed. The API filter is still
+`unclassified_only`.
+
+### Measured on the local database (copy of 2026-10-03)
+
+4,980 live rows; 1,921 have no vertical and no brand. Of those, 132 reach
+100% by combining (108 with n = 2, 20 with n = 3, 4 with n = 4), 670 have a
+near miss that never adds up, and 1,119 match no keyword at all.
+
+### A caution on reading the combined label
+
+A vertical and a brand can score the same phrase, and broad words count:
+"digital literacy for women … training … community" becomes
+"Miscellaneous — E4C + Setu + Upfront" (107%) from "training program",
+"women", "training" and "community". Each sector shows the words behind it so
+this is visible on the row.
+
+### Verify
+
+    pytest tests/test_miscellaneous.py      # 17 tests
+    npx tsc --noEmit -p frontend
+
 ## 2026-08-30 — World Bank was storing projects, and nothing was ever told not to
 
 ### Two faults, and the first one made the second invisible
@@ -132,6 +187,7 @@ per-source declaration: a convention someone has to remember to set is one that
 will be missed, and it already was.
 
 Deliberately strict — anchored, four-digit year first, only a time or timezone
+
 may follow. `31-07-2026` and `07/31/2026` are not ISO and still go through the
 source's convention.
 

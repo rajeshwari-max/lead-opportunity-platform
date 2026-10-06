@@ -26,3 +26,4 @@
 .ud-classification-group { min-width: 0; }
 .ud-classification-group > details { margin-top: 12px; }
 .ud-classification-group > details > summary { cursor: pointer; padding: 12px 16px; color: #203d69; background: #fff; border-radius: 12px; }
+.user-dashboard .ud-misc{margin:6px 0 10px;padding-left:18px;font-size:13px;line-height:1.5}.user-dashboard .ud-misc li{margin:2px 0}
