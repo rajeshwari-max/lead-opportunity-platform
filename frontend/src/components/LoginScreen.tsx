@@ -23,7 +23,10 @@ export function LoginScreen({onSuccess}:{onSuccess:()=>void}) {
    if(r.status===404)throw new Error("This backend has no sign-in endpoint yet (POST /api/login"+path+" is missing).");
    if(!r.ok)throw new Error(typeof data.detail==="string"?data.detail:`Sign-in failed — HTTP ${r.status}`);
    if(!token&&mode==="forgot"){setMessage(data.message);return;}
-   history.replaceState({},"","?view=user");setPassword("");onSuccess();
+   // Keep #wrike=<id> from an email's "Add to Wrike" button across sign-in,
+   // or the reader lands on the dashboard with no idea which row they clicked.
+   const wrike=/^#wrike=\d+$/.test(location.hash)?location.hash:"";
+   history.replaceState({},"","?view=user"+wrike);setPassword("");onSuccess();
   }catch(e){setError(e instanceof Error?e.message:"Server unavailable");}finally{setBusy(false);}
  }
  return <main className="login-page">

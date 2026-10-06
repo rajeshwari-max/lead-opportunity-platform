@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { UnclassifiedView } from "@/components/UnclassifiedView";
 import type { UnclassifiedItem, UnclassifiedResponse } from "@/lib/types";
+import { miscLabel, miscTitle } from "@/lib/miscellaneous";
 
 /** Rows the keyword classifier could not place in any vertical.
  *
@@ -132,6 +133,12 @@ export function UnclassifiedCard({ readOnly = false }: { readOnly?: boolean }) {
                   {item.source_website}
                   {item.country ? ` · ${item.country}` : ""}
                 </p>
+                {item.miscellaneous && (
+                  <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300"
+                     title={miscTitle(item.miscellaneous)}>
+                    {miscLabel(item.miscellaneous)}
+                  </p>
+                )}
               </div>
             </li>
           ))}

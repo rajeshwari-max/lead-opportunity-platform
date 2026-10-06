@@ -1,4 +1,4 @@
-import type { DigestRunResult, ReviewQueueResponse, ScraperHealth, UnclassifiedQuery, UnclassifiedResponse, EmailSettings, Facets, FilterState, Opportunity, Paginated, Progress, ScheduleStatus, SourceInfo, Stats, TeamMember, WrikeAssignee, WrikeFolder, WrikeStatus, WrikeTaskLink } from "./types";
+import type { ClassificationStatus, DigestRunResult, ReviewQueueResponse, ScraperHealth, UnclassifiedQuery, UnclassifiedResponse, EmailSettings, Facets, FilterState, Opportunity, Paginated, Progress, ScheduleStatus, SourceInfo, Stats, TeamMember, WrikeAssignee, WrikeFolder, WrikeStatus, WrikeTaskLink } from "./types";
 
 const BASE = "/api";
 
@@ -58,6 +58,8 @@ export const api = {
   wrikeFolder: () => get<WrikeFolder>("/wrike/folder"),
   wrikeAssignees: () => get<WrikeAssignee[]>("/wrike/assignees"),
   wrikeTaskForOpportunity: (id: number) => get<WrikeTaskLink>(`/wrike/opportunities/${id}`),
+  /** One row by id — used by the "Add to Wrike" link in digest emails. */
+  opportunity: (id: number) => get<Opportunity>(`/opportunities/${id}`),
   createWrikeTask: async (id: number, memberIds: number[]): Promise<WrikeTaskLink> => {
     const res = await fetch(`${BASE}/wrike/opportunities/${id}/tasks`, {
       method: "POST",
@@ -201,6 +203,8 @@ export const api = {
   },
   /** Which sources are broken and for how long, from run evidence. */
   scraperHealth: () => get<ScraperHealth>("/scraper-health"),
+  /** Active hierarchy model and the reviewed data used to train it. */
+  classificationStatus: () => get<ClassificationStatus>("/classification/status"),
   /** Rows no vertical could be derived for — hidden from the main table. */
   unclassified: (q: UnclassifiedQuery = {}) =>
     get<UnclassifiedResponse>(`/opportunities/unclassified?${unclassifiedParams(q)}`),

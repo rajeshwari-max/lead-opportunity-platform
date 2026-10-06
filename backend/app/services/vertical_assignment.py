@@ -217,7 +217,16 @@ def _as_item(o) -> dict:
         "date_scraped": o.date_scraped.isoformat() if o.date_scraped else None,
         "classification_status": c.status,
         "suggestions": suggestions,
+        # The same label the dashboard shows for this row, so the admin card
+        # and the user view never disagree about what a row is called.
+        "miscellaneous": _miscellaneous(o),
     }
+
+
+def _miscellaneous(o) -> dict | None:
+    from app.services.miscellaneous import for_row
+
+    return for_row(o)
 
 
 def unclassified_clause():

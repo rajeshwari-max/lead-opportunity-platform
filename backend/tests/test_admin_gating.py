@@ -8,10 +8,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.api.routes import router
-from app.core.auth import COOKIE_NAME, make_session_token
+from app.core.auth import (
+    COOKIE_NAME, hash_password, make_session_token, password_version,
+)
 from app.core.config import settings
 from app.database.db import get_db
 from app.database.models import Base
+
+TEST_PASSWORD_HASH = hash_password("test-password")
 
 
 @pytest.fixture
@@ -26,6 +30,16 @@ def client(monkeypatch):
     )
     Base.metadata.create_all(engine)
     session = Session(engine)
+    from app.database.models import TeamMember, WorkspaceCredential
+    for email, is_admin in (("person@catalysts.org", False), ("admin@catalysts.org", True)):
+        session.add(TeamMember(
+            name="Admin" if is_admin else "Person", email=email,
+            keywords="", categories="", verticals="", active=True,
+        ))
+        session.add(WorkspaceCredential(
+            owner=email, password_hash=TEST_PASSWORD_HASH, is_admin=is_admin,
+        ))
+    session.commit()
     app = FastAPI()
     app.include_router(router, prefix="/api")
     app.dependency_overrides[get_db] = lambda: session
@@ -35,8 +49,10 @@ def client(monkeypatch):
 
 
 def cookie(is_admin: bool) -> dict[str, str]:
+    email = "admin@catalysts.org" if is_admin else "person@catalysts.org"
     return {COOKIE_NAME: make_session_token(
-        "person@catalysts.org", "Person", is_admin=is_admin)}
+        email, "Admin" if is_admin else "Person", is_admin=is_admin,
+        version=password_version(TEST_PASSWORD_HASH))}
 
 
 @pytest.mark.parametrize("path", [

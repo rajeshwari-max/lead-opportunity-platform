@@ -12,10 +12,8 @@ import {
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
-  Check,
   ExternalLink,
   Search,
-  Undo2,
 } from "lucide-react";
 import { Badge, VerticalBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,10 +21,10 @@ import { MultiSelect } from "@/components/ui/multi-select";
 import { SendSelectionBar } from "@/components/SendSelectionBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
 import { daysLeft, formatDate } from "@/lib/utils";
 import { RATES_AS_OF, toInr } from "@/lib/money";
 import type { Facets, FilterState, Opportunity, Paginated } from "@/lib/types";
+import { miscLabel, miscTitle } from "@/lib/miscellaneous";
 
 const col = createColumnHelper<Opportunity>();
 
@@ -56,18 +54,11 @@ interface Props {
   onChange: (f: FilterState) => void;
   /** Distinct values powering the Source and Type dropdowns in the toolbar. */
   facets: Facets | null;
-  /** The public mirror can be read but not changed — approving is disabled there. */
+  /** Whether the dashboard is a read-only mirror. */
   readOnly?: boolean;
 }
 
-export function OpportunitiesTable({ data, loading, filters, onChange, facets, readOnly = false }: Props) {
-  // Approvals are tracked locally so the button responds on click rather than
-  // after a refetch of the whole page. Keyed by id and merged over the server
-  // value, so it survives re-renders but never masks a fresh fetch of a row
-  // someone else approved.
-  const [pendingApproval, setPendingApproval] = useState<Record<number, boolean>>({});
-  const [failedApproval, setFailedApproval] = useState<number | null>(null);
-
+export function OpportunitiesTable({ data, loading, filters, onChange, facets }: Props) {
   // Which rows are open. A Set of ids rather than a flag on the row, because
   // the row objects are replaced on every refetch and a flag would be lost.
   const [showInr, setShowInr] = useState<boolean>(() => loadPref("lop-show-inr", false));
@@ -90,23 +81,6 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
-  };
-
-  const toggleApproval = async (o: Opportunity) => {
-    const next = !(pendingApproval[o.id] ?? o.approved);
-    setPendingApproval((m) => ({ ...m, [o.id]: next }));
-    setFailedApproval(null);
-    try {
-      await api.approve(o.id, next);
-    } catch {
-      // Put the row back where it was; a button that stays "Approved" after a
-      // failed write is worse than no button at all.
-      setPendingApproval((m) => {
-        const { [o.id]: _dropped, ...rest } = m;
-        return rest;
-      });
-      setFailedApproval(o.id);
-    }
   };
 
   const pageIds = (data?.items ?? []).map((o) => o.id);
@@ -257,7 +231,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
     }),
     // One column, stacked: Research/Implementation sits on top of Grant/RFP.
     // A separate Work Type column cost horizontal space the table didn't have
-    // and pushed the Approve button off-screen. The routing decision still
+    // and pushed other columns off-screen. The routing decision still
     // reads first because it is physically above the category.
     col.accessor("category", {
       header: "Type",
@@ -291,6 +265,12 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
       size: 160,
       cell: (info) => {
         const tags = (info.getValue() || "").split(",").map((s) => s.trim()).filter(Boolean);
+        const misc = info.row.original.miscellaneous;
+        // No vertical and no brand: say what it came closest to, rather than a
+        // bare dash that reads the same as "nothing to see".
+        if (tags.length === 0 && misc)
+          return <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-900 dark:bg-amber-900/40 dark:text-amber-200"
+                       title={miscTitle(misc)}>{miscLabel(misc)}</span>;
         if (tags.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
         return (
           <div className="flex flex-wrap gap-1">
@@ -361,7 +341,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
       size: 150,
       // No whitespace-nowrap. Under table-fixed a long amount like
       // "$905,664 – $1,188,684" cannot shrink, so it ran straight over the
-      // Approve button in the next column. Wrapping keeps it inside its cell;
+      // content in the next column. Wrapping keeps it inside its cell;
       // break-words handles a single token wider than the column.
       cell: (info) => {
         const raw = info.getValue();
@@ -381,64 +361,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
         );
       },
     }),
-    col.display({
-      id: "approve",
-      header: "Approve",
-      size: 110,
-      cell: (info) => {
-        const o = info.row.original;
-        const approved = pendingApproval[o.id] ?? o.approved;
-        if (readOnly) {
-          return approved ? (
-            <span className="inline-flex items-center gap-1 whitespace-nowrap text-xs font-medium text-emerald-500">
-              <Check className="h-3.5 w-3.5" /> Approved
-            </span>
-          ) : (
-            <span className="text-xs text-muted-foreground">—</span>
-          );
-        }
-        return (
-          <div className="whitespace-nowrap">
-            <Button
-              size="sm"
-              variant={approved ? "default" : "outline"}
-              onClick={() => toggleApproval(o)}
-              title={
-                approved
-                  ? `Approved${o.approved_by ? ` by ${o.approved_by}` : ""}${
-                      o.approved_at ? ` on ${formatDate(o.approved_at)}` : ""
-                    }`
-                  : "Approve this opportunity"
-              }
-              className={approved ? "h-7 bg-emerald-600 px-2 text-xs hover:bg-emerald-700" : "h-7 px-2 text-xs"}
-            >
-              {approved ? (
-                <>
-                  <Check className="mr-1 h-3.5 w-3.5" /> Approved
-                </>
-              ) : (
-                "Approve"
-              )}
-            </Button>
-            {/* Undo was previously only discoverable by guessing that the green
-                button toggles. A mis-click needs a way out that is visible
-                without hovering. */}
-            {approved && (
-              <button
-                type="button"
-                onClick={() => toggleApproval(o)}
-                className="mt-1 flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-              >
-                <Undo2 className="h-3 w-3" /> Undo
-              </button>
-            )}
-            {failedApproval === o.id && (
-              <div className="mt-1 text-xs text-red-500">Couldn't save</div>
-            )}
-          </div>
-        );
-      },
-    }),
+
   ];
 
   // --- adjustable table -----------------------------------------------------
@@ -514,17 +437,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
           >
             ₹ INR
           </Button>
-          {/* Approving is only useful if the approved set can be read back — this
-              is how you review what the team has signed off. */}
-          <Button
-            size="sm"
-            variant={filters.approved ? "default" : "outline"}
-            onClick={() => onChange({ ...filters, approved: !filters.approved, page: 1 })}
-            className={filters.approved ? "h-8 bg-emerald-600 text-xs hover:bg-emerald-700" : "h-8 text-xs"}
-          >
-            <Check className="mr-1 h-3.5 w-3.5" />
-            {filters.approved ? "Showing approved" : "Approved only"}
-          </Button>
+
         </div>
       </CardHeader>
       <SendSelectionBar
@@ -606,7 +519,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
                       isOpen ? "bg-primary/[0.06]" : ""
                     }`}
                     // Clicking anywhere on the row expands it, except on a link
-                    // or a button — the title link and Approve must keep doing
+                    // or a button — links and actions must keep doing
                     // their own job rather than opening a panel.
                     onClick={(e) => {
                       const el = e.target as HTMLElement;

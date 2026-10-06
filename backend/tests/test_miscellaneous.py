@@ -178,3 +178,23 @@ def test_the_api_carries_the_label_only_for_unowned_rows():
     assert OpportunityOut(**common).miscellaneous["label"] == "Miscellaneous"
     assert OpportunityOut(**common, verticals="Health").miscellaneous is None
     assert OpportunityOut(**common, brands="Setu").miscellaneous is None
+
+
+# ------------------------------------------------ admin screens, 2026-10-06
+
+def test_the_admin_review_queue_carries_the_same_label():
+    """The admin card read 'Miscellaneous' in its heading but showed nothing
+    per row, because its items come from vertical_assignment._as_item, not
+    from OpportunityOut."""
+    from types import SimpleNamespace
+
+    from app.services.vertical_assignment import _as_item
+
+    o = SimpleNamespace(
+        id=1, title="Supply of office furniture", organization="", source_website="s",
+        opportunity_url="", summary="for the district dairy office", country="",
+        category="Tender", deadline=None, date_scraped=None, vertical="",
+        eligibility="", verticals="", brands="")
+    item = _as_item(o)
+    assert item["miscellaneous"]["label"] == "Miscellaneous"
+    assert [s["name"] for s in item["miscellaneous"]["sectors"]] == ["Livelihood"]

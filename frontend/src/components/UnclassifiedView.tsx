@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import type { UnclassifiedItem, UnclassifiedResponse } from "@/lib/types";
+import { miscLabel, miscTitle } from "@/lib/miscellaneous";
 
 /** The Unclassified Opportunities section.
  *
@@ -179,6 +180,12 @@ export function UnclassifiedView({ onClose, readOnly = false }:
                   <td className="p-2 text-xs">{item.country || "—"}</td>
                   <td className="p-2 text-xs tabular-nums">{item.deadline || "—"}</td>
                   <td className="p-2">
+                    {item.miscellaneous && (
+                      <div className="mb-1 text-[11px] font-medium text-amber-800 dark:text-amber-300"
+                           title={miscTitle(item.miscellaneous)}>
+                        {miscLabel(item.miscellaneous)}
+                      </div>
+                    )}
                     {item.suggestions?.length ? item.suggestions.map((s) => (
                       <div key={s.vertical} className="text-xs">
                         <span className="font-medium">{s.vertical}</span>{" "}

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -219,13 +219,14 @@ def db(monkeypatch):
 # Deliberately built so that deadline order and geography order DISAGREE: the
 # Peruvian row closes first and the Indian rows close last. A test suite whose
 # fixtures happen to agree on both would pass with the ordering removed.
+_TODAY = date.today()
 ROWS = [
     # title,                     country,      region,          deadline
-    ("Lima Water Resilience",    "Peru",       "Latin America", date(2026, 10, 1)),
-    ("Open Health Challenge",    "",           "Global",        date(2026, 10, 10)),
-    ("Dhaka Health Systems",     "Bangladesh", "South Asia",    date(2026, 10, 20)),
-    ("Bihar Water Supply",       "India",      "South Asia",    date(2026, 11, 1)),
-    ("Delhi Health Systems",     "India",      "South Asia",    date(2026, 11, 10)),
+    ("Lima Water Resilience",    "Peru",       "Latin America", _TODAY + timedelta(days=1)),
+    ("Open Health Challenge",    "",           "Global",        _TODAY + timedelta(days=10)),
+    ("Dhaka Health Systems",     "Bangladesh", "South Asia",    _TODAY + timedelta(days=20)),
+    ("Bihar Water Supply",       "India",      "South Asia",    _TODAY + timedelta(days=30)),
+    ("Delhi Health Systems",     "India",      "South Asia",    _TODAY + timedelta(days=40)),
 ]
 
 
@@ -253,7 +254,7 @@ def _plain_rows():
         Opportunity(title=t, country=c, region=r, deadline=d)
         for t, c, r, d in ROWS
     ] + [Opportunity(title="Kathmandu Schools", country="Nepal",
-                     region="South Asia", deadline=date(2026, 10, 5))]
+                     region="South Asia", deadline=_TODAY + timedelta(days=5))]
 
 
 def _member(session, name, **kw):

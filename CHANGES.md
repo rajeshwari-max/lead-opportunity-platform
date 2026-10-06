@@ -5,6 +5,38 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-06 — "Add to Wrike" replaces "Approve" in emails; Miscellaneous on the admin screens
+
+### Emails
+
+Approval had already been taken out of the digest and reminder (uncommitted
+work in `email_service.py`). In its place each row now has an **Add to Wrike**
+button, in an Action column that appears only when `LOP_WRIKE_ENABLED` is on.
+
+The button opens the dashboard — `?view=user#wrike=<id>` — on that row's
+existing "Add opportunity to Wrike" dialog, which shows the folder, offers
+assignees and asks before creating anything. It deliberately does NOT call
+the task-creation API: mail clients and link scanners fetch every URL in a
+message on delivery, and a link that created tasks would file one for every
+row of every digest. `#wrike=` is a fragment, so the dashboard never reads it
+as a filter link, and it survives sign-in (`LoginScreen.tsx`). New route `GET /api/opportunities/{id:int}`
+supplies the row; the `:int` stops it swallowing `/opportunities/unclassified`.
+
+### Why Miscellaneous was not visible after the last deploy
+
+The label was only on the **user** dashboard (`?view=user`). Admins land on
+the admin dashboard, whose main table hides rows without a vertical by default
+and showed a bare "—" for them, and whose Miscellaneous card is fed by
+`/opportunities/unclassified` — a different serializer that never carried the
+label. Both now show it (`lib/miscellaneous.ts` keeps the wording identical on
+every screen).
+
+### Verify
+
+    pytest tests/test_email_wrike_button.py tests/test_get_one_opportunity.py tests/test_miscellaneous.py tests/test_email_content.py
+
+---
+
 ## 2026-10-05 — Unclassified opportunities are now "Miscellaneous", with what they came close to
 
 ### The thresholds this is measured against (unchanged)

@@ -10,9 +10,10 @@ import { brandPath } from "./BrandFilters";
 import { SendSelectionBar } from "./SendSelectionBar";
 import { UserMenu } from "./UserMenu";
 import { api } from "@/lib/api";
+import { miscLabel, miscName, miscTitle } from "@/lib/miscellaneous";
 import { formatDate } from "@/lib/utils";
 import { toInr, RATES_AS_OF } from "@/lib/money";
-import { VERTICALS, emptyFilters, type Facets, type FilterState, type MiscSector, type Miscellaneous, type Opportunity, type Paginated, type Stats } from "@/lib/types";
+import { VERTICALS, emptyFilters, type Facets, type FilterState, type Opportunity, type Paginated, type Stats } from "@/lib/types";
 import "./user-dashboard.css";
 import "./user-dashboard-card-sizing.css";
 
@@ -36,12 +37,6 @@ const count = (n: number) => n.toLocaleString("en-IN");
 const tags = (o: Opportunity) => (o.verticals || o.vertical || "").split(",").map(v => v.trim()).filter(Boolean);
 const brandTags = (o: Opportunity) => (o.brands || "").split(",").map(v => v.trim()).filter(Boolean);
 const shortVertical = (s: string) => s.replace(/\(.*\)/, "").trim();
-// "Miscellaneous — Health + Setu": the strongest near misses whose percentages,
-// added strongest first, reach 100% of threshold. Plain "Miscellaneous" when
-// even all of them together do not.
-const miscName = (s: MiscSector) => s.kind === "vertical" ? shortVertical(s.name) : s.name;
-const miscLabel = (m: Miscellaneous) => m.reached ? `Miscellaneous — ${m.combined.map(miscName).join(" + ")}` : "Miscellaneous";
-const miscTitle = (m: Miscellaneous) => m.sectors.length ? m.sectors.map(s => `${miscName(s)} ${s.pct}%`).join(" · ") : "No vertical or brand signal at all";
 function deadlineLabel(value: string | null) {
   if (!value) return "Ongoing";
   const today = new Date();
@@ -87,6 +82,19 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
     const update = () => setReducedMotion(media.matches);
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
+  }, []);
+  // Arrived from a digest email's "Add to Wrike" button (#wrike=<id>): open
+  // that row's Wrike dialog. The dialog still asks before creating anything,
+  // and the fragment is removed so a refresh does not reopen it. A fragment
+  // rather than a query parameter so App's filter-link handling never sees it.
+  useEffect(() => {
+    const match = /^#wrike=(\d+)$/.exec(window.location.hash);
+    if (!match) return;
+    const raw = match[1];
+    history.replaceState({}, "", `${window.location.pathname}${window.location.search}`);
+    api.opportunity(Number(raw))
+      .then(o => setWrikeDialog(o))
+      .catch(() => setMessage("That opportunity could not be opened. It may have been archived or removed."));
   }, []);
   useEffect(() => {
     if (!wrikeDialog) return;

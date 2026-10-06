@@ -188,7 +188,7 @@ class ScrapeScheduler:
         self._scheduler.add_job(
             _run, CronTrigger(hour=0, minute=5, timezone="Asia/Kolkata"),
             id="deadline-audit", replace_existing=True,
-            max_instances=1, coalesce=True, misfire_grace_time=86400,
+            **{**_JOB_GUARDS, "misfire_grace_time": 86400},
         )
         log.info("Scheduler: nightly integrity and deadline audit at 00:05 Asia/Kolkata")
 

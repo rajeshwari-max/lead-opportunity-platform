@@ -77,7 +77,7 @@ def logout(response: Response) -> dict:
     return {"authenticated": False}
 
 
-def require_admin(request: Request) -> None:
+def require_admin(request: Request, db: Session = Depends(get_db)) -> None:
     """Guards the panels that change how the system behaves.
 
     Reading opportunities and approving them is open to anyone with the
@@ -86,7 +86,7 @@ def require_admin(request: Request) -> None:
     """
     from app.core.auth import COOKIE_NAME, current_user
 
-    if not current_user(request.cookies.get(COOKIE_NAME))["is_admin"]:
+    if not current_user(request.cookies.get(COOKIE_NAME), db)["is_admin"]:
         raise HTTPException(
             status_code=403,
             detail="Admin access has not been granted to this account.",
@@ -133,12 +133,13 @@ def filters_dep(
     page_size: int = 25,
     sort_by: str = "deadline",
     sort_dir: str = "asc",
+    db: Session = Depends(get_db),
 ) -> OpportunityFilters:
     if include_undated:
         # This flag deliberately widens the ordinary Active rule. Keep the
         # administrative escape hatch without giving users a query-string
         # bypass around the hidden review queue.
-        require_admin(request)
+        require_admin(request, db)
     return OpportunityFilters(
         archived=archived, new_today=new_today, approved=approved,
         work_type=work_type, study_type=study_type,
@@ -160,6 +161,23 @@ def list_opportunities(
     f: OpportunityFilters = Depends(filters_dep), db: Session = Depends(get_db)
 ) -> PaginatedOpportunities:
     return FilterService(db).query(f)
+
+
+@router.get("/opportunities/{opportunity_id:int}", response_model=OpportunityOut)
+def get_opportunity(opportunity_id: int, db: Session = Depends(get_db)) -> OpportunityOut:
+    """One opportunity, for links that name a row — the "Add to Wrike" button
+    in digest emails opens the dashboard on exactly this id.
+
+    `:int` is load-bearing: a plain `{opportunity_id}` also matches
+    /opportunities/unclassified and answers it with a 422, because Starlette
+    matches the path before FastAPI validates the type.
+    """
+    from app.database.models import Opportunity
+
+    opp = db.get(Opportunity, opportunity_id)
+    if opp is None:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    return OpportunityOut.model_validate(opp)
 
 
 @router.post(

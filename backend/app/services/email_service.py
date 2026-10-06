@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import smtplib
 from datetime import date
+from html import escape
 from urllib.parse import quote_plus
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -63,26 +64,6 @@ def _type_cell(o: Opportunity) -> str:
     return "".join(lines)
 
 
-def _approve_cell(o: Opportunity, member: TeamMember) -> str:
-    """One-click approval button, or a note that it's already approved.
-
-    Rendered as a table rather than a styled <a>, because Outlook ignores
-    padding on inline anchors and would collapse the button to bare text.
-    """
-    if o.approved:
-        return ('<span style="color:#059669;font-size:12px;font-weight:600;">✓ Approved</span>')
-    from app.services.approval_service import approve_url
-
-    url = approve_url(o.id, member.email)
-    return (
-        '<table cellpadding="0" cellspacing="0" style="border-collapse:separate;">'
-        f'<tr><td style="background:#4f46e5;border-radius:6px;">'
-        f'<a href="{url}" style="display:inline-block;padding:7px 14px;color:#ffffff;'
-        'font-size:12px;font-weight:600;text-decoration:none;">Approve</a>'
-        "</td></tr></table>"
-    )
-
-
 # Sections appear in this order regardless of size, so the same email always
 # reads the same way. Anything unrecognised falls to the end under "Other".
 #
@@ -125,6 +106,64 @@ _COMPACT_ABOVE = 40
 # guess, and each attempt is only a string build.
 _CAP_LADDER = (25, 15, 10, 6, 4, 2)
 _SIZE_BUDGET = 95 * 1024      # Gmail clips at ~102 KB; leave headroom for MIME
+
+
+def wrike_url(opportunity_id: int) -> str:
+    """Opens the dashboard's "Add opportunity to Wrike" dialog for one row.
+
+    A link to the DASHBOARD, never one that creates the task itself. Mail
+    clients and corporate link scanners fetch every URL in a message before
+    anyone clicks; a GET that created a task would file tasks for every row of
+    every digest on delivery. The dialog shows the destination folder, offers
+    assignees and asks "Create this Wrike task?" before anything is sent.
+    A fragment (#wrike=<id>), not a query parameter: the dashboard reads query
+    parameters as filter links, and a fragment is never sent to the server.
+    Sign-in keeps it (LoginScreen.tsx).
+    """
+    base = (settings.dashboard_url or "").rstrip("/")
+    return f"{base}/?view=user#wrike={int(opportunity_id)}"
+
+
+def _wrike_cell(o: Opportunity) -> str:
+    """The per-row action, replacing the retired Approve button.
+
+    A table rather than a styled <a> because Outlook ignores padding on inline
+    anchors and would collapse the button to bare text — the same reason the
+    Approve button was built this way.
+    """
+    return (
+        '<table cellpadding="0" cellspacing="0" style="border-collapse:separate;">'
+        '<tr><td style="background:#4f46e5;border-radius:6px;">'
+        f'<a href="{_text(wrike_url(o.id))}" style="display:inline-block;padding:7px 12px;'
+        'color:#ffffff;font-size:12px;font-weight:600;text-decoration:none;'
+        'white-space:nowrap;">Add to Wrike</a>'
+        '</td></tr></table>'
+    )
+
+
+def _show_wrike() -> bool:
+    """Only offer the button where the server can actually create tasks;
+    otherwise every click lands on "Wrike is not enabled on this server"."""
+    return bool(getattr(settings, "wrike_enabled", False))
+
+
+def _text(value: object) -> str:
+    """Escape source-owned text before it is inserted into an HTML email."""
+    return escape(str(value or ""), quote=True)
+
+
+def _short(value: object, limit: int) -> str:
+    """Collapse scraped prose and trim it without cutting the final word."""
+    value = " ".join(str(value or "").split())
+    if len(value) <= limit:
+        return _text(value)
+    shortened = value[:limit].rsplit(" ", 1)[0] or value[:limit]
+    return _text(shortened + "…")
+
+
+def _labels(value: str, empty: str = "Not classified") -> str:
+    labels = [part.strip() for part in (value or "").split(",") if part.strip()]
+    return _text(", ".join(labels) if labels else empty)
 
 
 def _group_for_digest(opportunities: list[Opportunity]) -> list[tuple[str, list[Opportunity]]]:
@@ -171,20 +210,45 @@ def _group_for_digest(opportunities: list[Opportunity]) -> list[tuple[str, list[
     return ordered
 
 
-def _digest_html(member: TeamMember, opportunities: list[Opportunity]) -> str:
-    """Grouped digest, rendered small enough that no mail client clips it."""
+def _opportunity_email_html(
+    member: TeamMember,
+    opportunities: list[Opportunity],
+    *,
+    reminder_days: int | None = None,
+) -> str:
+    """Render digests and reminders with one responsive, size-safe UI."""
     groups = _group_for_digest(opportunities)
     n = len(opportunities)
     if n <= _COMPACT_ABOVE:
-        html = _render_digest(member, groups, n, compact=False, cap=None)
+        html = _render_digest(
+            member, groups, n, compact=False, cap=None,
+            reminder_days=reminder_days,
+        )
         if len(html) <= _SIZE_BUDGET:
             return html
 
     for cap in _CAP_LADDER:
-        html = _render_digest(member, groups, n, compact=True, cap=cap)
+        html = _render_digest(
+            member, groups, n, compact=True, cap=cap,
+            reminder_days=reminder_days,
+        )
         if len(html) <= _SIZE_BUDGET:
             return html
     return html          # smallest cap still over budget — send it anyway
+
+
+def _digest_html(member: TeamMember, opportunities: list[Opportunity]) -> str:
+    """Grouped digest, rendered small enough that no mail client clips it."""
+    return _opportunity_email_html(member, opportunities)
+
+
+def _reminder_html(
+    member: TeamMember, opportunities: list[Opportunity], days_before: int
+) -> str:
+    """A deadline reminder using the same UI and detail set as the digest."""
+    return _opportunity_email_html(
+        member, opportunities, reminder_days=days_before,
+    )
 
 
 def _render_digest(
@@ -193,6 +257,7 @@ def _render_digest(
     n: int,
     compact: bool,
     cap: int | None,
+    reminder_days: int | None = None,
 ) -> str:
 
     # Contents strip: counts per region, each an anchor link. Gives the reader
@@ -212,7 +277,7 @@ def _render_digest(
                 "font-size:12px;margin:0 6px 6px 0;text-decoration:none;")
         chips.append(
             f'<a href="#r{i}" style="{pill}background:#eef2ff;color:#3730a3;">'
-            f'{region} <b>{len(items)}</b></a>'
+            f'{_text(region)} <b>{len(items)}</b></a>'
         )
     index = " ".join(chips)
 
@@ -223,9 +288,9 @@ def _render_digest(
         shown = items[:cap] if cap is not None else items
         hidden = len(items) - len(shown)
         more = (
-            f'<tr><td colspan="4" style="padding:10px;background:#f8fafc;color:#475569;'
-            f'font-size:12px;">+{hidden} more in {region}, soonest deadlines shown first — '
-            f'<a href="{settings.dashboard_url}" style="color:#4f46e5;">see them all in the '
+            f'<tr><td colspan="{4 if _show_wrike() else 3}" style="padding:10px;background:#f8fafc;color:#475569;'
+            f'font-size:12px;">+{hidden} more in {_text(region)}, soonest deadlines shown first — '
+            f'<a href="{_text(settings.dashboard_url)}" style="color:#4f46e5;">see them all in the '
             f'dashboard</a></td></tr>'
             if hidden > 0 else ""
         )
@@ -233,30 +298,51 @@ def _render_digest(
             f'<a name="r{i}"></a>'
             f'<h3 id="r{i}" style="color:#111827;font-size:15px;margin:26px 0 8px;'
             f'padding-bottom:6px;border-bottom:2px solid #4f46e5;">'
-            f'{region} <span style="color:#6b7280;font-weight:normal;font-size:13px;">'
+            f'{_text(region)} <span style="color:#6b7280;font-weight:normal;font-size:13px;">'
             f'· {len(items)} {"opportunity" if len(items) == 1 else "opportunities"}</span></h3>'
             '<table style="border-collapse:collapse;width:100%;background:#ffffff;">'
             '<tr style="text-align:left;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">'
             '<th style="padding:8px 10px;">Opportunity</th>'
-            '<th style="padding:8px 10px;">Work / Type</th>'
+            '<th style="padding:8px 10px;">Work / Archetype</th>'
             '<th style="padding:8px 10px;">Deadline</th>'
-            '<th style="padding:8px 10px;">Action</th></tr>'
+            + ('<th style="padding:8px 10px;">Action</th>' if _show_wrike() else '')
+            + '</tr>'
             f'{"".join(_digest_rows(member, shown, compact))}{more}</table>'
+        )
+
+    if reminder_days is not None:
+        when = "tomorrow" if reminder_days == 1 else f"in {reminder_days} days"
+        banner_label = "Deadline reminder"
+        introduction = (
+            f'A quick reminder — <b>{n}</b> '
+            f'{"opportunity closes" if n == 1 else "opportunities close"} '
+            f'<b>{when}</b>.'
+        )
+    else:
+        banner_label = "New funding opportunities"
+        interests = _text(member.keywords or member.verticals or "all topics")
+        introduction = (
+            f'Here {"is" if n == 1 else "are"} <b>{n}</b> '
+            f'{"opportunity" if n == 1 else "opportunities"} matching your '
+            f'interests ({interests}), grouped by region:'
         )
 
     return f"""
     <div style="font-family:Segoe UI,Arial,sans-serif;max-width:760px;margin:auto;">
-      <h2 style="color:#111827;margin-bottom:4px;">Hi {member.name},</h2>
-      <p style="color:#374151;margin-top:0;">Here {'is' if n == 1 else 'are'} <b>{n}</b>
-      {'opportunity' if n == 1 else 'opportunities'} matching your interests
-      ({member.keywords or member.verticals or 'all topics'}), grouped by region:</p>
+      <div style="background:#312e81;border-radius:10px;padding:18px 20px;margin-bottom:18px;">
+        <div style="color:#c7d2fe;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;">
+          {banner_label}
+        </div>
+        <h2 style="color:#ffffff;margin:5px 0 0;font-size:22px;">Hi {_text(member.name)},</h2>
+      </div>
+      <p style="color:#374151;margin-top:0;">{introduction}</p>
       {f'<p style="color:#6b7280;font-size:13px;margin:0 0 10px;">The counts below are '
        f'complete. To keep this email from being clipped by your mail client, each region '
        f'lists its {cap} soonest deadlines — the rest are in the '
-       f'<a href="{settings.dashboard_url}" style="color:#4f46e5;">dashboard</a>.</p>'
+       f'<a href="{_text(settings.dashboard_url)}" style="color:#4f46e5;">dashboard</a>.</p>'
        if capped else ''}
       <p style="margin:12px 0 4px;">
-        <a href="{settings.dashboard_url}" style="display:inline-block;
+        <a href="{_text(settings.dashboard_url)}" style="display:inline-block;
         background:#4f46e5;color:#ffffff;border-radius:6px;padding:9px 16px;
         font-size:13px;font-weight:600;text-decoration:none;">Open the dashboard</a>
       </p>
@@ -276,25 +362,17 @@ def _digest_rows(
         meta = [x for x in (
             o.organization or o.source_website,
             o.location or o.country,
-            o.funding_amount,
         ) if x]
-        # Compact mode drops the vertical chips — they are pure decoration and
-        # the most expensive markup per row.
-        verticals = "" if compact else "".join(
-            f'<span style="display:inline-block;background:#eef2ff;color:#3730a3;'
-            f'border-radius:9999px;padding:1px 8px;font-size:11px;margin:2px 4px 0 0;">{v.strip()}</span>'
-            for v in (o.verticals or "").split(",") if v.strip()
-        )
         # The description is NOT dropped. It used to be, and that made the
         # digest inconsistent in a way that looked like a bug: whether you got
         # descriptions depended on how many matches you happened to have that
         # day — under 40 and they appeared, over 40 and every row lost them.
         # A shortened description costs ~150 bytes and is the single most
         # useful line in the row, so compact mode shortens it instead.
-        summary = (o.summary or "").strip().replace("\n", " ")
         limit = 110 if compact else 220
-        if len(summary) > limit:
-            summary = summary[:limit].rsplit(" ", 1)[0] + "…"
+        summary = _short(o.summary, limit) or "No summary provided by the source."
+        eligibility = _short(o.eligibility, 120 if compact else 280) or \
+            "Not specified by the source."
         # Only the opportunity's own URL is offered as the title link. Falling
         # back to o.website here is what made "the link opens the homepage" a
         # recurring complaint: the title looked like a link to the call and
@@ -305,11 +383,11 @@ def _digest_rows(
         # in an inbox than plain text plus a homepage, which left the reader to
         # retype the title into the site's own search box.
         href, kind = resolve_link(o.opportunity_url, o.website, o.source_website, o.title)
-        title = (f'<a href="{href}" style="color:#4f46e5;font-weight:600;'
-                 f'text-decoration:none;">{o.title}</a>')
+        title = (f'<a href="{_text(href)}" style="color:#4f46e5;font-weight:600;'
+                 f'text-decoration:none;">{_text(o.title)}</a>')
         if kind == "search":
             title += ('<div style="color:#9ca3af;font-size:11px;margin-top:2px;">'
-                      f'no direct link published — opens a search on {o.source_website}</div>')
+                      f'no direct link published — opens a search on {_text(o.source_website)}</div>')
         elif link_kind(o.opportunity_url) == "listing":
             # Lands on an index rather than the call itself. Best available, but
             # the reader shouldn't be surprised by it.
@@ -319,13 +397,18 @@ def _digest_rows(
         <tr>
           <td style="padding:10px;border-bottom:1px solid #eee;vertical-align:top;">
             {title}
-            <div style="color:#6b7280;font-size:12px;margin-top:3px;">{' · '.join(meta)}</div>
-            {f'<div style="color:#4b5563;font-size:12px;margin-top:5px;line-height:1.45;">{summary}</div>' if summary else ''}
-            {f'<div style="margin-top:4px;">{verticals}</div>' if verticals else ''}
+            <div style="color:#6b7280;font-size:12px;margin-top:3px;">{_text(' · '.join(meta))}</div>
+            <div style="color:#4b5563;font-size:12px;margin-top:7px;line-height:1.45;"><b>Summary:</b> {summary}</div>
+            <div style="color:#4b5563;font-size:12px;margin-top:5px;line-height:1.45;"><b>Source:</b> {_text(o.source_website or 'Not specified')}</div>
+            <div style="color:#4b5563;font-size:12px;margin-top:5px;line-height:1.45;"><b>Opportunity size:</b> {_text(o.funding_amount or 'Not specified')}</div>
+            <div style="color:#4b5563;font-size:12px;margin-top:5px;line-height:1.45;"><b>Eligibility:</b> {eligibility}</div>
+            <div style="color:#4b5563;font-size:12px;margin-top:5px;line-height:1.45;"><b>Brand:</b> {_labels(o.brands)}</div>
+            <div style="color:#4b5563;font-size:12px;margin-top:3px;line-height:1.45;"><b>Vertical:</b> {_labels(o.verticals)}</div>
+            <div style="color:#4b5563;font-size:12px;margin-top:3px;line-height:1.45;"><b>Archetype:</b> {_text(o.category.value)}</div>
           </td>
           <td style="padding:10px;border-bottom:1px solid #eee;font-size:12px;vertical-align:top;">{_type_cell(o)}</td>
           <td style="padding:10px;border-bottom:1px solid #eee;font-size:12px;vertical-align:top;">{_deadline_cell(o)}</td>
-          <td style="padding:10px;border-bottom:1px solid #eee;vertical-align:top;">{_approve_cell(o, member)}</td>
+          {f'<td style="padding:10px;border-bottom:1px solid #eee;vertical-align:top;">{_wrike_cell(o)}</td>' if _show_wrike() else ''}
         </tr>""")
     return rows
 
@@ -363,34 +446,9 @@ def send_reminder(member: TeamMember, opportunities: list[Opportunity],
     msg["From"] = f"{settings.smtp_from_name} <{settings.smtp_user}>"
     msg["To"] = member.email
 
-    rows = []
-    for o in opportunities:
-        deadline = o.deadline.strftime("%d %b %Y") if o.deadline else "—"
-        rows.append(f"""
-        <tr>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;">
-            <a href="{o.opportunity_url}" style="color:#4f46e5;font-weight:600;text-decoration:none;">{o.title}</a>
-            <div style="color:#6b7280;font-size:13px;margin-top:2px;">
-              {o.organization or o.source_website}{' · ' + o.location if o.location else ''}
-            </div>
-          </td>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;white-space:nowrap;font-size:13px;">{o.category.value}</td>
-          <td style="padding:10px;border-bottom:1px solid #e5e7eb;white-space:nowrap;font-size:13px;color:#b45309;font-weight:600;">{deadline}</td>
-        </tr>""")
-    html = f"""
-    <div style="font-family:Segoe UI,Arial,sans-serif;max-width:680px;margin:auto;">
-      <h2 style="color:#111827;">Hi {member.name},</h2>
-      <p style="color:#374151;">A quick reminder — {'this opportunity closes' if n == 1 else f'these {n} opportunities close'}
-      <b>{when}</b>:</p>
-      <table style="border-collapse:collapse;width:100%;background:#ffffff;">
-        <tr style="text-align:left;color:#6b7280;font-size:12px;text-transform:uppercase;">
-          <th style="padding:10px;">Opportunity</th><th style="padding:10px;">Type</th><th style="padding:10px;">Deadline</th>
-        </tr>
-        {''.join(rows)}
-      </table>
-      <p style="color:#9ca3af;font-size:12px;margin-top:16px;">Sent by Lead Scanning Platform</p>
-    </div>"""
-    msg.attach(MIMEText(html, "html", "utf-8"))
+    msg.attach(MIMEText(
+        _reminder_html(member, opportunities, days_before), "html", "utf-8"
+    ))
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as server:
         server.starttls()
         server.login(settings.smtp_user, settings.smtp_password)

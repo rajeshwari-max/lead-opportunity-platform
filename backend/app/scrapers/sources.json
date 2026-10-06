@@ -225,6 +225,7 @@
     "name": "european_union",
     "display_name": "European Union",
     "url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/calls-for-proposals",
+    "tender_url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/calls-for-tenders?isExactMatch=true&order=DESC&pageNumber=1&pageSize=50&sortBy=startDate",
     "website": "https://ec.europa.eu"
   },
   {

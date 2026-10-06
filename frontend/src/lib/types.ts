@@ -377,6 +377,8 @@ export interface UnclassifiedItem {
   date_scraped: string | null;
   classification_status: "classified" | "uncertain" | "unclassified";
   suggestions: VerticalSuggestion[];
+  /** Same label the user dashboard shows; null when the row has a brand. */
+  miscellaneous?: Miscellaneous | null;
 }
 
 export interface UnclassifiedQuery {
