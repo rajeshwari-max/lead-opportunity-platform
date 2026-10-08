@@ -63,9 +63,9 @@ async def lifespan(_app: FastAPI):
     scheduler.start()  # restores any persisted daily/weekly/monthly/yearly schedule
 
     # ------------------------------------------------- background maintenance
-    # These eight passes each scan or rewrite the whole opportunities table.
-    # They used to be launched as eight concurrent tasks, so every boot put
-    # eight full-table workloads on one SQLite file at once — on a 177 MB
+    # These maintenance passes each scan or rewrite the opportunities table.
+    # They used to be launched as concurrent tasks, so every boot put several
+    # full-table workloads on one SQLite file at once — on a 177 MB
     # database on a small EC2 box that is minutes of contention, competing with
     # the API's own queries and, before the change above, with a catch-up scrape
     # starting in parallel.
@@ -76,8 +76,8 @@ async def lifespan(_app: FastAPI):
     from app.services.amounts import backfill_amounts
     from app.services.geography import backfill_geography
     from app.services.organization import backfill_organizations
-    from app.services.verticals import backfill_verticals
-    from app.services.brands import backfill_brands
+    from app.services.ml_hierarchy import backfill_hierarchy
+    from app.services.review_labels import apply_hierarchy_reviews
     from app.services.deadline_audit import audit_deadlines
     from app.services.links import repair_links
     from app.services.study_type import backfill_study_types
@@ -95,8 +95,8 @@ async def lifespan(_app: FastAPI):
         slog = logging.getLogger("scraper")
         for name, fn in (
             ("deadline audit", audit_deadlines),          # Active/Expired drift
-            ("verticals", backfill_verticals),            # routing labels
-            ("brands", backfill_brands),                  # non-CMS brand labels
+            ("reviewed hierarchy labels", apply_hierarchy_reviews),  # protect gold decisions first
+            ("hierarchy classification", backfill_hierarchy),  # category/brand/archetype/vertical
             ("links", repair_links),                      # homepage-only links
             ("geography", backfill_geography),
             ("organisation", backfill_organizations),
@@ -170,6 +170,9 @@ app.include_router(leads_router, prefix=settings.api_prefix)
 
 from app.api.wrike import router as wrike_router
 app.include_router(wrike_router, prefix=settings.api_prefix)
+
+from app.api.intelligence import router as intelligence_router
+app.include_router(intelligence_router, prefix=settings.api_prefix)
 
 # Serve the built dashboard (frontend/dist, copied to ./static in the Docker
 # Serve the built dashboard (frontend/dist, copied to ./static in the Docker

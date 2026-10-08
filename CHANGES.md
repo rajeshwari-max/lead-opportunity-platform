@@ -5,6 +5,34 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-08 — Finish the half-done Codex work so it can deploy
+
+Codex left the ML hierarchy, company intelligence, web discovery and Wrike
+work uncommitted. Run against Python 3.12 with scikit-learn 1.9.1 (the
+versions the model was trained with), everything passed except two things,
+and each one would have stopped `deploy/update.sh`:
+
+- **Company intelligence scoring crashed.** `_profile_fit` had been changed
+  to return five values (score, geography, reasons, matched, configured) but
+  `analyze_opportunity` still unpacked three, so every recommendation raised
+  `ValueError`. It now unpacks all five; the score is unchanged.
+  (`backend/app/services/company_intelligence.py`)
+- **The frontend did not build.** My workspace had a "Company intelligence"
+  tab that loaded the learning summary but never showed it, so `tsc` failed
+  on the unused value and `npm run build` stopped. The tab (admins only) now
+  shows historical leads, verified win rate, review decisions, live
+  applications, and the top winning verticals and win/loss/rejection reasons.
+  (`frontend/src/components/PersonalWorkspace.tsx`)
+
+Verify: `pytest -q` gives 1182 passed, 3 skipped; `npx tsc -b --noEmit` is
+clean.
+
+Deploy note: `requirements.txt` pins `scikit-learn==1.9.1`, which needs
+Python 3.11 or newer. Check `backend/.venv/bin/python --version` on EC2
+before deploying.
+
+---
+
 ## 2026-10-06 — "Add to Wrike" replaces "Approve" in emails; Miscellaneous on the admin screens
 
 ### Emails

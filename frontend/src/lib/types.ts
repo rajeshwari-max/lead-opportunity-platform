@@ -335,6 +335,149 @@ export interface ClassificationStatus {
   error: string;
 }
 
+/** Administrator-maintained facts used to decide whether an opportunity is
+ *  suitable for the company. Lists are stored independently so they remain
+ *  auditable and can be changed without retraining the classifier. */
+export interface CompanyIntelligenceProfile {
+  id: number;
+  company_name: string;
+  countries_of_operation: string[];
+  industries: string[];
+  sectors: string[];
+  focus_areas: string[];
+  organization_types: string[];
+  company_size: string;
+  years_of_operation: number | null;
+  capabilities: string[];
+  services: string[];
+  project_types: string[];
+  target_beneficiaries: string[];
+  geographic_focus: string[];
+  certifications: string[];
+  partnership_types: string[];
+  funding_types_of_interest: string[];
+  recommendation_weights: Record<string, number>;
+  recommendation_thresholds: Record<string, number>;
+  version: number;
+  updated_by: string;
+  updated_at: string | null;
+}
+
+export interface IntelligenceLearningSummary {
+  historical: {
+    total: number;
+    decided: number;
+    won: number;
+    lost: number;
+    positive_unverified: number;
+    applied: number;
+    shortlisted: number;
+    rejected: number;
+    win_rate: number;
+  };
+  feedback: {
+    total: number;
+    accepted: number;
+    rejected: number;
+    corrected: number;
+  };
+  live_actions: {
+    saved: number;
+    preparing: number;
+    applied: number;
+    shortlisted: number;
+    accepted: number;
+    unsuccessful: number;
+    withdrawn: number;
+    won: number;
+    lost: number;
+  };
+  top_statuses: [string, number][];
+  top_opportunity_types: [string, number][];
+  successful_geographies: [string, number][];
+  successful_verticals: [string, number][];
+  top_win_reasons: [string, number][];
+  top_loss_reasons: [string, number][];
+  top_rejection_reasons: [string, number][];
+}
+
+export interface EligibilityCriterion {
+  criterion: string;
+  requirement: string;
+  company_information: string;
+  status: "MATCH" | "MISMATCH" | "UNKNOWN" | "PARTIAL" | "NOT_APPLICABLE";
+  evidence: string;
+}
+
+export interface SimilarHistoricalLead {
+  id: number;
+  title: string;
+  similarity: number;
+  status: string;
+  outcome: string;
+  won_lost: string;
+  reason: string;
+  event_date: string | null;
+}
+
+export interface OpportunityIntelligence {
+  opportunity_id: number;
+  classification: {
+    brands: string[];
+    archetypes: string[];
+    verticals: string[];
+    scores: {
+      brands: Record<string, number>;
+      archetypes: Record<string, number>;
+      verticals: Record<string, number>;
+    };
+    evidence: Record<string, unknown>;
+    source: string;
+    status: string;
+    version: string;
+  };
+  components: Record<string, number>;
+  computed_eligibility_score: number;
+  computed_eligibility_level: "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
+  eligibility_override: "" | "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
+  eligibility_score: number;
+  eligibility_level: "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
+  company_fit_score: number;
+  historical_similarity: number;
+  success_pattern_score: number;
+  opportunity_quality_score: number;
+  recommendation_score: number;
+  priority: "HIGH" | "MEDIUM" | "LOW";
+  confidence: "HIGH" | "MEDIUM" | "LOW";
+  eligibility_matches: EligibilityCriterion[];
+  similar_leads: SimilarHistoricalLead[];
+  reasons: string[];
+  risks: string[];
+  human_decision: "accept" | "reject" | "correct" | "";
+  human_reason: string;
+  versions: Record<string, string | number>;
+  computed_at?: string;
+}
+
+export interface IntelligenceFeedbackInput {
+  decision: "accept" | "reject" | "correct";
+  /** Omit classification axes for an eligibility-only correction. Supplying
+   *  an empty array deliberately clears that axis. */
+  corrected_verticals?: string[];
+  corrected_brands?: string[];
+  corrected_archetypes?: string[];
+  eligibility_override?: "" | "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
+  reason?: string;
+  comment?: string;
+}
+
+export interface IntelligenceFeedbackResult {
+  id: number;
+  decision: string;
+  stored: boolean;
+  human_labels_protected: boolean;
+}
+
 /** What the model would have said, and on what evidence. Shown to the reviewer
  *  because a bare confidence number gives them nothing to agree with. */
 export interface VerticalSuggestion {

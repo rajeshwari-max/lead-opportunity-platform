@@ -48,6 +48,11 @@ class Opportunity(Base):
     # e.g. "Health, Climate/Sustainability". `vertical` above keeps the raw
     # source-provided free text untouched.
     verticals: Mapped[str] = mapped_column(String(256), default="", index=True)
+    # Explicit CMS hierarchy level.  Kept separately from `verticals` so
+    # Devsol/Social Business can be audited without changing the existing
+    # dashboard filter contract (Social Business remains mirrored into
+    # `verticals` for backwards-compatible filtering).
+    archetypes: Mapped[str] = mapped_column(String(128), default="", index=True)
     # Multi-label assignments for the non-CMS brands. Kept separate from
     # `verticals`: a brand and a Devsol vertical are different filter axes and
     # combining them would make the Unclassified count and team routing lie.
@@ -407,6 +412,163 @@ class WorkspaceContact(Base):
     tags: Mapped[str] = mapped_column(Text, default="")
     strength: Mapped[str] = mapped_column(String(30), default="Known")
     notes: Mapped[str] = mapped_column(Text, default="")
+
+
+# ---------------------------------------------------------------- company intelligence
+# These tables are deliberately separate from Opportunity. Classification
+# answers what a call is about; the records below answer whether it fits this
+# company, what historical evidence supports that conclusion, and what a
+# reviewer subsequently decided.  Keeping them separate prevents a future
+# recommendation model from silently rewriting scraped source evidence.
+class CompanyProfile(Base):
+    """Singleton, administrator-managed company profile used for fit checks."""
+
+    __tablename__ = "company_profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    company_name: Mapped[str] = mapped_column(String(256), default="")
+    countries_of_operation: Mapped[str] = mapped_column(Text, default="[]")
+    industries: Mapped[str] = mapped_column(Text, default="[]")
+    sectors: Mapped[str] = mapped_column(Text, default="[]")
+    focus_areas: Mapped[str] = mapped_column(Text, default="[]")
+    organization_types: Mapped[str] = mapped_column(Text, default="[]")
+    company_size: Mapped[str] = mapped_column(String(128), default="")
+    years_of_operation: Mapped[int | None] = mapped_column(default=None)
+    capabilities: Mapped[str] = mapped_column(Text, default="[]")
+    services: Mapped[str] = mapped_column(Text, default="[]")
+    project_types: Mapped[str] = mapped_column(Text, default="[]")
+    target_beneficiaries: Mapped[str] = mapped_column(Text, default="[]")
+    geographic_focus: Mapped[str] = mapped_column(Text, default="[]")
+    certifications: Mapped[str] = mapped_column(Text, default="[]")
+    partnership_types: Mapped[str] = mapped_column(Text, default="[]")
+    funding_types_of_interest: Mapped[str] = mapped_column(Text, default="[]")
+    recommendation_weights: Mapped[str] = mapped_column(Text, default="{}")
+    recommendation_thresholds: Mapped[str] = mapped_column(Text, default="{}")
+    version: Mapped[int] = mapped_column(default=1)
+    updated_by: Mapped[str] = mapped_column(String(320), default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class HistoricalLead(Base):
+    """One deduplicated historical company opportunity and its final outcome."""
+
+    __tablename__ = "historical_leads"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    external_id: Mapped[str] = mapped_column(String(128), default="")
+    title: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(256), default="")
+    opportunity_url: Mapped[str] = mapped_column(Text, default="")
+    opportunity_type: Mapped[str] = mapped_column(String(64), default="")
+    sector: Mapped[str] = mapped_column(String(256), default="")
+    verticals: Mapped[str] = mapped_column(String(512), default="")
+    brands: Mapped[str] = mapped_column(String(512), default="")
+    archetypes: Mapped[str] = mapped_column(String(256), default="")
+    geography: Mapped[str] = mapped_column(String(256), default="")
+    focus_area: Mapped[str] = mapped_column(String(512), default="")
+    eligibility_text: Mapped[str] = mapped_column(Text, default="")
+    funding: Mapped[str] = mapped_column(String(256), default="")
+    company_relevance: Mapped[str] = mapped_column(String(64), default="")
+    action_taken: Mapped[str] = mapped_column(String(64), default="")
+    status: Mapped[str] = mapped_column(String(128), default="", index=True)
+    outcome: Mapped[str] = mapped_column(String(64), default="", index=True)
+    won_lost: Mapped[str] = mapped_column(String(16), default="", index=True)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    reviewer_comment: Mapped[str] = mapped_column(Text, default="")
+    event_date: Mapped[date | None] = mapped_column(Date, index=True)
+    raw_data: Mapped[str] = mapped_column(Text, default="{}")
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class OpportunityIntelligence(Base):
+    """Latest explainable company-fit snapshot for one current opportunity."""
+
+    __tablename__ = "opportunity_intelligence"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    opportunity_id: Mapped[int] = mapped_column(unique=True, index=True)
+    eligibility_score: Mapped[float] = mapped_column(Float, default=0)
+    eligibility_level: Mapped[str] = mapped_column(String(16), default="UNKNOWN")
+    company_fit_score: Mapped[float] = mapped_column(Float, default=0)
+    historical_similarity: Mapped[float] = mapped_column(Float, default=0)
+    success_pattern_score: Mapped[float] = mapped_column(Float, default=0)
+    opportunity_quality_score: Mapped[float] = mapped_column(Float, default=0)
+    recommendation_score: Mapped[float] = mapped_column(Float, default=0, index=True)
+    priority: Mapped[str] = mapped_column(String(16), default="LOW", index=True)
+    confidence: Mapped[str] = mapped_column(String(16), default="LOW")
+    eligibility_matches: Mapped[str] = mapped_column(Text, default="[]")
+    similar_leads: Mapped[str] = mapped_column(Text, default="[]")
+    reasons: Mapped[str] = mapped_column(Text, default="[]")
+    risks: Mapped[str] = mapped_column(Text, default="[]")
+    model_version: Mapped[str] = mapped_column(String(64), default="")
+    taxonomy_version: Mapped[str] = mapped_column(String(64), default="")
+    feature_version: Mapped[str] = mapped_column(String(64), default="")
+    threshold_version: Mapped[str] = mapped_column(String(64), default="")
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+
+class HumanFeedback(Base):
+    """Immutable reviewer correction/decision; never replaced by a model run."""
+
+    __tablename__ = "human_feedback"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    opportunity_id: Mapped[int] = mapped_column(index=True)
+    owner: Mapped[str] = mapped_column(String(320), index=True)
+    decision: Mapped[str] = mapped_column(String(32), index=True)
+    corrected_verticals: Mapped[str] = mapped_column(Text, default="[]")
+    corrected_brands: Mapped[str] = mapped_column(Text, default="[]")
+    corrected_archetypes: Mapped[str] = mapped_column(Text, default="[]")
+    eligibility_override: Mapped[str] = mapped_column(String(24), default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    comment: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+
+class ExperienceEvent(Base):
+    """Append-only audit trail spanning predictions, reviews, actions and outcomes."""
+
+    __tablename__ = "experience_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    opportunity_id: Mapped[int | None] = mapped_column(index=True)
+    historical_lead_id: Mapped[int | None] = mapped_column(index=True)
+    event_type: Mapped[str] = mapped_column(String(32), index=True)
+    actor: Mapped[str] = mapped_column(String(320), default="")
+    model_version: Mapped[str] = mapped_column(String(64), default="")
+    prediction_confidence: Mapped[float | None] = mapped_column(Float)
+    reviewer_decision: Mapped[str] = mapped_column(String(32), default="")
+    user_action: Mapped[str] = mapped_column(String(32), default="")
+    outcome: Mapped[str] = mapped_column(String(32), default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    payload: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+
+class ModelRegistry(Base):
+    """Version and promotion history for classifiers and recommendation rules."""
+
+    __tablename__ = "model_registry"
+
+    version: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    metrics: Mapped[str] = mapped_column(Text, default="{}")
+    artifact_path: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class WrikeConnection(Base):

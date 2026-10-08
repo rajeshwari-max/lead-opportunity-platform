@@ -86,7 +86,8 @@ export function FiltersSidebar({ facets, filters, onChange, hideVerticals = fals
             selectedVerticals={filters.verticals} selectedBrands={filters.brands}
             availableBrands={facets?.brands ?? []}
             onVerticalChange={verticals => onChange({ ...filters, verticals, page: 1 })}
-            onBrandChange={brands => onChange({ ...filters, brands, page: 1 })} /> :
+            onBrandChange={brands => onChange({ ...filters, brands, page: 1 })}
+            onClear={() => onChange({ ...filters, verticals: [], brands: [], page: 1 })} /> :
             <section key={s.key} className="space-y-1">
               <div className="mb-1 flex items-baseline justify-between gap-2">
                 <h3 className="text-xs font-semibold text-muted-foreground">{s.title}</h3>

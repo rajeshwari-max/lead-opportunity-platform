@@ -56,9 +56,15 @@ interface Props {
   facets: Facets | null;
   /** Whether the dashboard is a read-only mirror. */
   readOnly?: boolean;
+  workspaceViewUrl?: string;
 }
 
-export function OpportunitiesTable({ data, loading, filters, onChange, facets }: Props) {
+export function OpportunitiesTable({ data, loading, filters, onChange, facets, workspaceViewUrl }: Props) {
+  const workspaceOpportunityUrl = (id: number) => {
+    const url = new URL(workspaceViewUrl || "?view=workspace", window.location.href);
+    url.searchParams.set("opportunity", String(id));
+    return `${url.pathname}${url.search}`;
+  };
   // Which rows are open. A Set of ids rather than a flag on the row, because
   // the row objects are replaced on every refetch and a flag would be lost.
   const [showInr, setShowInr] = useState<boolean>(() => loadPref("lop-show-inr", false));
@@ -564,7 +570,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets }:
                             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                               Title
                             </p>
-                            <p className="mt-0.5 font-medium leading-snug">{o.title}</p><SaveLeadButton id={o.id} /><ReviewLeadButton id={o.id} />{activityError&&<p role="alert">{activityError}</p>}
+                            <p className="mt-0.5 font-medium leading-snug">{o.title}</p><SaveLeadButton id={o.id} /><ReviewLeadButton id={o.id} />{workspaceViewUrl && <a className="ml-2 text-xs font-medium text-primary hover:underline" href={workspaceOpportunityUrl(o.id)}>Track in my workspace</a>}{activityError&&<p role="alert">{activityError}</p>}
                           </div>
 
                           {o.summary && (

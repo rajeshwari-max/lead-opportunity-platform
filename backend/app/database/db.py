@@ -294,6 +294,7 @@ def _run_migrations(conn) -> None:
         # already has — so nothing has to be re-classified to migrate, and no
         # historical row is retro-fitted with a confidence nobody measured.
         for name, ddl in (
+            ("archetypes",              "VARCHAR(128) NOT NULL DEFAULT ''"),
             ("classification_status",   "VARCHAR(16)"),
             ("classification_source",   "VARCHAR(16)"),
             ("classification_version",  "VARCHAR(32)"),
@@ -307,6 +308,10 @@ def _run_migrations(conn) -> None:
         conn.exec_driver_sql(
             "CREATE INDEX IF NOT EXISTS ix_opp_classification_status "
             "ON opportunities(classification_status)"
+        )
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_opportunities_archetypes "
+            "ON opportunities(archetypes)"
         )
 
     # ------------------------------------------- finish the vertical rename

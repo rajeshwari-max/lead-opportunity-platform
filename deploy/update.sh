@@ -21,6 +21,8 @@ RUN_TESTS=${RUN_TESTS:-1}
 RUN_WORLD_BANK_CHECK=${RUN_WORLD_BANK_CHECK:-1}
 ARCHIVE_PASSED=${ARCHIVE_PASSED:-1}
 WORLD_BANK_PAGES=${WORLD_BANK_PAGES:-3}
+RUN_INTELLIGENCE_BACKFILL=${RUN_INTELLIGENCE_BACKFILL:-1}
+INTELLIGENCE_BACKFILL_LIMIT=${INTELLIGENCE_BACKFILL_LIMIT:-10000}
 
 say() { printf "\n\033[1;36m==> %s\033[0m\n" "$*"; }
 die() { printf "\n\033[1;31mFAILED: %s\033[0m\n" "$*" >&2; exit 1; }
@@ -50,6 +52,21 @@ git log --oneline -1
 say "Checking the backend before publishing"
 [ -x "$PYTHON" ] || die "backend Python is missing at $PYTHON"
 cd "$REPO/backend"
+
+# The hierarchy model adds scikit-learn/joblib. Installing from the versioned
+# requirements file keeps EC2 in step with local training without introducing
+# a second deployment workflow; already-satisfied packages are a no-op.
+"$PYTHON" -m pip install --quiet -r requirements.txt
+
+# Fail before touching the live frontend or restarting the API if the model
+# artifact is missing/incompatible. Runtime inference still has a rule fallback
+# for unexpected failures, but deployment of an intended ML release should not
+# silently publish that fallback as success.
+"$PYTHON" -c 'from app.services.ml_hierarchy import model_status; s=model_status(); print("    classifier:", s["mode"], s["version"], "rows=", s["training_rows"], "reviewed=", s["gold_rows"]); assert s["loaded"], s["error"]'
+
+# Validate the reviewed-label export itself. The application applies matched
+# decisions first on startup, then the automatic backfill skips those rows.
+"$PYTHON" -c 'import json, pathlib; p=pathlib.Path("ml/review_labels.jsonl"); rows=[json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]; reviewed=sum(str(r.get("human_status", "")).casefold()=="reviewed" for r in rows); unresolved=len(rows)-reviewed; print(f"    review labels: {reviewed} reviewed, {unresolved} excluded"); assert reviewed > 0'
 
 # Proves that DevelopmentAid still uses the required filtered grant and tender
 # URLs.  This check does not need a signed-in session and prints both effective
@@ -142,7 +159,42 @@ done
          tail -60 $REPO/logs/supervisor-err.log
        To allow longer next time:  BOOT_TIMEOUT=600 ./deploy/update.sh"
 
-# -------------------------------------------------- 6. deadline maintenance
+# --------------------------------------- 6. company-intelligence history
+# The source workbook is never copied to EC2.  A versioned, privacy-reduced
+# JSONL export contains no assignee column and is imported by a stable title
+# fingerprint. Re-running the deployment therefore updates or skips the same
+# historical lead instead of duplicating it.
+history_file="$REPO/backend/ml/ost_historical_leads.jsonl"
+if [ -s "$history_file" ]; then
+  intelligence_marker="$REPO/backend/data/.historical-intelligence-imported"
+  if [ ! -f "$intelligence_marker" ]; then
+    intelligence_backup_dir="$REPO/backend/data/backups"
+    mkdir -p "$intelligence_backup_dir"
+    intelligence_stamp=$(date +%Y%m%d-%H%M%S)
+    intelligence_backup="$intelligence_backup_dir/pre-intelligence-$intelligence_stamp.db"
+    say "Taking a one-time database snapshot before historical learning"
+    cd "$REPO/backend"
+    "$PYTHON" scripts/snapshot_db.py --output "$intelligence_backup"
+    echo "    database backup: $intelligence_backup"
+  fi
+  say "Importing deduplicated historical opportunity outcomes"
+  cd "$REPO/backend"
+  "$PYTHON" scripts/import_historical_leads.py \
+    "$history_file" --apply --skip-classification
+  touch "$intelligence_marker"
+
+  if [ "$RUN_INTELLIGENCE_BACKFILL" = "1" ]; then
+    say "Calculating explainable company-fit recommendations"
+    "$PYTHON" scripts/intelligence_backfill.py \
+      --limit "$INTELLIGENCE_BACKFILL_LIMIT" --apply
+  else
+    echo "    company-intelligence backfill skipped because RUN_INTELLIGENCE_BACKFILL=$RUN_INTELLIGENCE_BACKFILL"
+  fi
+else
+  die "historical intelligence file is missing or empty: $history_file"
+fi
+
+# -------------------------------------------------- 7. deadline maintenance
 # Startup has completed its migrations, so the new audit can now safely read
 # the live schema.  It first writes a dry-run report.  Only genuinely passed,
 # dated Active rows are changed to Expired; undated and rolling rows remain in
@@ -181,7 +233,7 @@ fi
 workers=$(pgrep -fc gunicorn || true)
 [ "$workers" -le 2 ] || echo "    WARNING: $workers gunicorn processes — expected 2 (master + one worker)"
 
-# --------------------------------------------------------------- 7. verify
+# --------------------------------------------------------------- 8. verify
 say "Verifying"
 echo "    $cfg"
 

@@ -15,8 +15,9 @@ from sqlalchemy.orm import Session
 from app.core.auth import COOKIE_NAME, auth_required, current_user
 from app.core.config import settings
 from app.database.db import get_db
-from app.database.models import (ApplicationJourney, JourneyAttachment, JourneyEvent,
-    Opportunity, TeamMember, WorkspaceContact, WorkspaceCredential, WorkspaceProfile)
+from app.database.models import (ApplicationJourney, ExperienceEvent,
+    JourneyAttachment, JourneyEvent, Opportunity, OpportunityIntelligence, TeamMember, WorkspaceContact,
+    WorkspaceCredential, WorkspaceProfile)
 from app.services.actionable import strict_actionable_clause
 
 def private_cache(response: Response):
@@ -144,6 +145,13 @@ def track(body: Track, owner: str = Depends(personal), db: Session = Depends(get
         try:
             db.flush()
             db.add(JourneyEvent(journey_id=row.id, stage="Saved", note="Added to my journey"))
+            db.add(ExperienceEvent(
+                opportunity_id=row.opportunity_id,
+                event_type="journey_stage",
+                actor=owner,
+                user_action="saved",
+                payload=json.dumps({"journey_id": row.id, "stage": "Saved"}),
+            ))
             db.commit()
         except IntegrityError:
             db.rollback()
@@ -171,6 +179,25 @@ def update_journey(journey_id: int, body: JourneyInput, owner: str = Depends(per
         setattr(row, key, json.dumps(value) if key == "factors" else value)
     row.updated_at = datetime.now(timezone.utc)
     db.add(JourneyEvent(journey_id=row.id, stage=row.stage, note="Stage changed" if changed else "Application details updated"))
+    if changed:
+        outcome = {
+            "Accepted": "won",
+            "Unsuccessful": "lost",
+            "Withdrawn": "withdrawn",
+        }.get(row.stage, "")
+        db.add(ExperienceEvent(
+            opportunity_id=row.opportunity_id,
+            event_type="journey_stage",
+            actor=owner,
+            user_action=row.stage.casefold(),
+            outcome=outcome,
+            reason=row.notes.strip(),
+            payload=json.dumps({
+                "journey_id": row.id,
+                "stage": row.stage,
+                "factors": body.factors,
+            }, ensure_ascii=False),
+        ))
     db.commit()
     return journey_data(row, db)
 
@@ -320,6 +347,41 @@ def recommendations(q: str = "", owner: str = Depends(personal), db: Session = D
         wins, total = history.get(key, (0, 0))
         history[key] = (wins + int(stage == "Accepted"), total + 1)
     network = db.scalars(select(WorkspaceContact).where(WorkspaceContact.owner == owner)).all()
-    results = [{**opportunity_data(o), **rank(o, p, history, network)} for o in candidates]
+    # The company score is calculated separately from each person's private
+    # journey. Read the current snapshots in batches; this keeps the request
+    # bounded even when the 1,000-candidate search reaches SQLite's bind limit.
+    snapshots = {}
+    candidate_ids = [o.id for o in candidates]
+    for start in range(0, len(candidate_ids), 400):
+        rows = db.scalars(select(OpportunityIntelligence).where(
+            OpportunityIntelligence.opportunity_id.in_(candidate_ids[start:start + 400])
+        )).all()
+        snapshots.update((row.opportunity_id, row) for row in rows)
+    results = []
+    for opportunity in candidates:
+        personal_rank = rank(opportunity, p, history, network)
+        company = snapshots.get(opportunity.id)
+        if company:
+            company_points = round(max(0.0, min(100.0, company.recommendation_score)) / 5)
+            personal_rank["score"] += company_points
+            personal_rank["reasons"] = [
+                reason for reason in personal_rank["reasons"]
+                if reason != "No personal match yet; ordered by closing date"
+            ]
+            personal_rank["reasons"].append(
+                f"Company intelligence: {company.recommendation_score:.0f}/100 "
+                f"({company.confidence.lower()} confidence); "
+                f"historical similarity {company.historical_similarity:.0f}%"
+            )
+            personal_rank["company_intelligence"] = {
+                "score": company.recommendation_score,
+                "priority": company.priority,
+                "confidence": company.confidence,
+                "historical_similarity": company.historical_similarity,
+                "ranking_points": company_points,
+            }
+        else:
+            personal_rank["company_intelligence"] = None
+        results.append({**opportunity_data(opportunity), **personal_rank})
     results.sort(key=lambda r: -r["score"])
-    return {"items": results[:40], "considered": len(candidates), "method": "Explainable preference, network and outcome ranking; not a predicted probability. Searches rank up to 1,000 nearest-deadline active opportunities."}
+    return {"items": results[:40], "considered": len(candidates), "method": "Personal preferences, contacts and decided applications are combined with the latest company intelligence score (up to 20 ranking points when available). Ranking scores are not win probabilities. Searches rank up to 1,000 nearest-deadline active opportunities."}

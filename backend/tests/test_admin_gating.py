@@ -59,6 +59,7 @@ def cookie(is_admin: bool) -> dict[str, str]:
     "/api/review-queue",
     "/api/opportunities/unclassified",
     "/api/opportunities/unclassified/ids",
+    "/api/classification/status",
 ])
 def test_review_gets_are_forbidden_to_ordinary_users(client, path):
     assert client.get(path, cookies=cookie(False)).status_code == 403
@@ -68,6 +69,7 @@ def test_review_gets_are_forbidden_to_ordinary_users(client, path):
     "/api/review-queue",
     "/api/opportunities/unclassified",
     "/api/opportunities/unclassified/ids",
+    "/api/classification/status",
 ])
 def test_review_gets_are_available_to_admins(client, path):
     assert client.get(path, cookies=cookie(True)).status_code == 200
@@ -99,3 +101,4 @@ def test_frontend_cards_are_rendered_only_inside_admin_gate():
         encoding="utf-8")
     assert "{isAdmin && <ReviewQueueCard" in source
     assert "{isAdmin && <UnclassifiedCard" in source
+    assert "{isAdmin && <ClassificationModelCard" in source

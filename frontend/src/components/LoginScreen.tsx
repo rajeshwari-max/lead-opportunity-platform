@@ -26,7 +26,8 @@ export function LoginScreen({onSuccess}:{onSuccess:()=>void}) {
    // Keep #wrike=<id> from an email's "Add to Wrike" button across sign-in,
    // or the reader lands on the dashboard with no idea which row they clicked.
    const wrike=/^#wrike=\d+$/.test(location.hash)?location.hash:"";
-   history.replaceState({},"","?view=user"+wrike);setPassword("");onSuccess();
+   const target=new URLSearchParams(location.search).get("view")==="workspace"?location.search:"?view=user";
+   history.replaceState({},"",target+wrike);setPassword("");onSuccess();
   }catch(e){setError(e instanceof Error?e.message:"Server unavailable");}finally{setBusy(false);}
  }
  return <main className="login-page">

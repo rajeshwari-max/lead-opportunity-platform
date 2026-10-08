@@ -145,11 +145,10 @@ def test_a_where_narrows_what_is_read(db):
 
 # ------------------------------------ the call sites actually use it
 
-# ALL EIGHT passes main.py runs at startup — not the four I happened to grep
+# All whole-table passes main.py runs at startup — not the four I happened to grep
 # for the first time. Fixing half of them changed nothing measurable, because
-# `backfill_verticals` (the second pass, which also runs the classifier over
-# every row) was in the half I missed.
-STARTUP_PASSES = ["deadline_audit", "verticals", "links", "geography",
+# the hierarchy classifier was in the half I missed.
+STARTUP_PASSES = ["deadline_audit", "ml_hierarchy", "links", "geography",
                   "organization", "amounts", "work_type", "study_type"]
 
 
@@ -162,7 +161,8 @@ def test_no_startup_pass_loads_the_whole_table(module):
 
     mod = __import__(f"app.services.{module}", fromlist=["x"])
     src = inspect.getsource(mod)
-    assert "iter_opportunities" in src, f"{module} does not use the chunked walk"
+    assert ("iter_opportunities" in src or ".limit(1000)" in src), \
+        f"{module} does not use a bounded chunked walk"
     code = "\n".join(l for l in src.splitlines()
                      if not l.lstrip().startswith("#"))
     for bad in ("select(Opportunity)).scalars().all()",
@@ -186,7 +186,7 @@ def test_the_count_of_startup_passes_matches_main():
         assert any(k in src for k in (module, stem)), module
 
 
-def test_startup_still_runs_all_eight_passes():
+def test_startup_still_runs_all_core_passes():
     """The fix must not work by doing less. Every pass main.py ran before must
     still run — the change is how they read, not whether they run."""
     import inspect
@@ -194,7 +194,7 @@ def test_startup_still_runs_all_eight_passes():
     from app import main
 
     src = inspect.getsource(main)
-    for fn in ("audit_deadlines", "backfill_verticals", "repair_links",
+    for fn in ("audit_deadlines", "backfill_hierarchy", "repair_links",
                "backfill_geography", "backfill_organizations",
                "backfill_amounts", "backfill_work_types",
                "backfill_study_types"):

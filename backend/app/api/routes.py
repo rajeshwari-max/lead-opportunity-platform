@@ -55,6 +55,7 @@ def get_config(request: Request) -> dict:
     user = current_user(request.cookies.get(COOKIE_NAME))
     return {
         "read_only": settings.read_only,
+        "workspace_enabled": settings.workspace_enabled,
         "auth_required": auth_required(),
         "admin_required": admin_required(),
         **user,
@@ -102,6 +103,14 @@ def require_writable() -> None:
             status_code=403,
             detail="This is a read-only mirror. Scraper and schedule controls only work on the primary server.",
         )
+
+
+@router.get("/classification/status", dependencies=[Depends(require_admin)])
+def classification_status() -> dict:
+    """Expose the active classifier and training provenance to administrators."""
+    from app.services.ml_hierarchy import model_status
+
+    return model_status()
 
 
 def filters_dep(

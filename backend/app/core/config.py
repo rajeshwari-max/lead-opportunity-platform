@@ -26,6 +26,39 @@ class Settings(BaseSettings):
     max_pages_safety_cap: int = 2000    # hard stop against infinite pagination loops
     stale_page_streak: int = 3          # stop a source after N consecutive pages with nothing new
                                         # (listings are newest-first; deeper pages are only older)
+
+    # Public-web opportunity discovery ------------------------------------
+    #
+    # This does not try to crawl the whole internet from EC2. A general web
+    # index has already done that job; we query it for current calls and then
+    # send each result through the platform's normal opportunity/deadline/
+    # classification/deduplication pipeline. Scraping a search engine's HTML
+    # is brittle and usually violates its automated-access rules, so the
+    # integration uses Brave's supported Web Search API.
+    #
+    # The source is registered only when this is enabled and the key is
+    # present. An unconfigured EC2 instance therefore does not add a failing
+    # job to scheduled/all-source runs.
+    web_discovery_enabled: bool = False
+    brave_search_api_key: str = ""
+    # A run is bounded in both dimensions. With the defaults the absolute
+    # ceiling is 18 * 20 = 360 search results before URL deduplication and the
+    # strict page/deadline gates.
+    web_discovery_max_queries: int = 18
+    web_discovery_results_per_query: int = 20
+    web_discovery_fetch_concurrency: int = 4
+    # Brave freshness code: pd (day), pw (week), pm (31 days), py (year), or a
+    # supported custom date range. pm is right for scheduled discovery; use py
+    # deliberately for a one-off initial backfill.
+    web_discovery_freshness: str = "pm"
+    # Pipe-separated extra searches. They are appended to the built-in
+    # category/theme/geography searches and still obey max_queries.
+    web_discovery_extra_queries: str = ""
+    # A search result is not admitted merely because its title says "grant".
+    # Its own page must expose a readable, non-past deadline, or explicitly say
+    # that applications are rolling/open-ended. Keeping this true prevents
+    # undated news/programme pages from becoming permanent Active rows.
+    web_discovery_require_deadline: bool = True
     # How long an undated ("Ongoing") listing may go unseen by a scrape before it
     # is retired. These rows carry no deadline, so nothing else can ever close
     # them — without this they stay in the live view permanently, which is why
@@ -83,6 +116,12 @@ class Settings(BaseSettings):
     enabled_categories: list[str] = [
         "Grant", "RFP", "Tender", "Proposal",
     ]
+
+    # Hierarchical opportunity classifier. The tracked model artifact is used
+    # when present; disabling it or a load failure falls back to the existing
+    # auditable keyword rules without interrupting scraping.
+    ml_classifier_enabled: bool = True
+    ml_model_path: str = ""
     # Baseline filter options always shown, merged with values found in scraped
     # data. Countries only — "Global" is a scope, not a country, and belongs in
     # default_regions (listing it here put a region into the country filter).
@@ -396,7 +435,7 @@ class Settings(BaseSettings):
     # Shared password protecting the whole dashboard. Empty = no gate, which
     # keeps local development unchanged; set it on any public instance.
     personal_login: bool = True  # Disable only for isolated development demos.
-    workspace_enabled: bool = False  # Separate experimental workspace stays off production.
+    workspace_enabled: bool = True  # Personal workspace is available to signed-in users.
     dashboard_password: str = ""  # Legacy setting; not accepted for personal login.
 
     # Email domains that may sign in with the dashboard password without an

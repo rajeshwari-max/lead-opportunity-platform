@@ -1,0 +1,103 @@
+{
+  "metadata": {
+    "version": "tfidf-hierarchy-2026.10.06",
+    "trained_at": "2026-10-06T08:56:13.483379+00:00",
+    "python": "3.12.14",
+    "scikit_learn": "1.9.1",
+    "training_rows": 5360,
+    "weak_rows": 5262,
+    "gold_rows": 98,
+    "gold_test_rows": 17,
+    "gold_weight": 100.0,
+    "review_rows": 100,
+    "unresolved_rows_excluded": 2
+  },
+  "held_out_gold": {
+    "rows": 17,
+    "category_accuracy": 0.8235294117647058,
+    "category_report": {
+      "Grant": {
+        "precision": 0.6,
+        "recall": 1.0,
+        "f1-score": 0.75,
+        "support": 3.0
+      },
+      "Proposal": {
+        "precision": 1.0,
+        "recall": 0.7142857142857143,
+        "f1-score": 0.8333333333333334,
+        "support": 7.0
+      },
+      "RFP": {
+        "precision": 1.0,
+        "recall": 0.6666666666666666,
+        "f1-score": 0.8,
+        "support": 3.0
+      },
+      "Tender": {
+        "precision": 0.8,
+        "recall": 1.0,
+        "f1-score": 0.8888888888888888,
+        "support": 4.0
+      },
+      "accuracy": 0.8235294117647058,
+      "macro avg": {
+        "precision": 0.8500000000000001,
+        "recall": 0.8452380952380952,
+        "f1-score": 0.8180555555555556,
+        "support": 17.0
+      },
+      "weighted avg": {
+        "precision": 0.8823529411764706,
+        "recall": 0.8235294117647058,
+        "f1-score": 0.8258169934640524,
+        "support": 17.0
+      }
+    },
+    "brands": {
+      "micro_precision": 0.5294117647058824,
+      "micro_recall": 0.75,
+      "micro_f1": 0.6206896551724138,
+      "macro_f1": 0.19047619047619047,
+      "exact_match": 0.4117647058823529,
+      "hamming_loss": 0.09243697478991597,
+      "support": {
+        "CMS": 7,
+        "Swasti": 0,
+        "Vrutti": 4,
+        "Upfront": 0,
+        "Green Foundation": 1,
+        "Community Action Collab": 0,
+        "Setu": 0
+      }
+    },
+    "archetypes": {
+      "micro_precision": 0.5384615384615384,
+      "micro_recall": 1.0,
+      "micro_f1": 0.7,
+      "macro_f1": 0.35,
+      "exact_match": 0.6470588235294118,
+      "hamming_loss": 0.17647058823529413,
+      "support": {
+        "Devsol": 7,
+        "Social Business": 0
+      }
+    },
+    "verticals": {
+      "micro_precision": 0.42105263157894735,
+      "micro_recall": 0.7272727272727273,
+      "micro_f1": 0.5333333333333333,
+      "macro_f1": 0.25396825396825395,
+      "exact_match": 0.29411764705882354,
+      "hamming_loss": 0.13725490196078433,
+      "support": {
+        "Livelihood": 6,
+        "Health": 0,
+        "E4C(Evidence for Change)": 2,
+        "Climate/Sustainability(ESG)": 3,
+        "Worker Wellbeing": 0,
+        "Innovative Finance": 0
+      }
+    }
+  }
+}

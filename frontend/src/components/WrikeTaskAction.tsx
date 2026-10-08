@@ -13,6 +13,8 @@ export function WrikeTaskAction({ opportunityId, opportunityTitle, readOnly, onC
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const [showAssignees, setShowAssignees] = useState(false);
+  const [loadingAssignees, setLoadingAssignees] = useState(false);
   const [error, setError] = useState("");
   const [assigneeError, setAssigneeError] = useState("");
 
@@ -34,12 +36,6 @@ export function WrikeTaskAction({ opportunityId, opportunityTitle, readOnly, onC
           const destination = await api.wrikeFolder();
           if (cancelled) return;
           setFolder(destination);
-          try {
-            const members = await api.wrikeAssignees();
-            if (!cancelled) setAssignees(members);
-          } catch {
-            if (!cancelled) setAssigneeError("Assignees could not be loaded. You can still create the task without an assignee.");
-          }
         }
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Could not load Wrike details");
@@ -53,6 +49,24 @@ export function WrikeTaskAction({ opportunityId, opportunityTitle, readOnly, onC
 
   function toggleMember(id: number) {
     setSelected(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
+  }
+
+  async function revealAssignees() {
+    if (showAssignees) {
+      setShowAssignees(false);
+      setSelected([]);
+      return;
+    }
+    setShowAssignees(true);
+    if (assignees.length || loadingAssignees || assigneeError) return;
+    setLoadingAssignees(true);
+    try {
+      setAssignees(await api.wrikeAssignees());
+    } catch {
+      setAssigneeError("Assignees could not be loaded. You can still add the task to the folder without an assignee.");
+    } finally {
+      setLoadingAssignees(false);
+    }
   }
 
   async function create() {
@@ -74,7 +88,14 @@ export function WrikeTaskAction({ opportunityId, opportunityTitle, readOnly, onC
   }
 
   if (loading) return <section className="ud-wrike" aria-label="Wrike task"><h3>Wrike task</h3><p className="ud-sub">Checking connection…</p></section>;
-  if (!status?.connected && !error) return null;
+  if (status && !status.connected) return <section className="ud-wrike" aria-label="Wrike task">
+    <h3>Wrike task</h3>
+    <p className="ud-wrike-error">
+      {status.configured
+        ? "Wrike is configured but has not been connected on this server. An administrator must connect Wrike on this dashboard before tasks can be created."
+        : "Wrike is not configured on this server. An administrator must add the production Wrike settings first."}
+    </p>
+  </section>;
 
   return <section className="ud-wrike" aria-label="Wrike task">
     <h3>Wrike task</h3>
@@ -90,17 +111,22 @@ export function WrikeTaskAction({ opportunityId, opportunityTitle, readOnly, onC
     {link?.status === "not_created" && status?.enabled && readOnly && <p className="ud-sub">Task creation is unavailable on this read-only dashboard.</p>}
     {link?.status === "not_created" && status?.enabled && !readOnly && folder && <>
       {!reviewing ? <>
-        <p className="ud-sub">Destination: {folder.title}. Assignees are optional.</p>
-        <fieldset className="ud-wrike-assignees" disabled={creating}>
-          <legend>Assign to (optional)</legend>
+        <p className="ud-sub">Destination: {folder.title}</p>
+        <p className="ud-wrike-unassigned">No assignee will be added. You can assign the task later in Wrike.</p>
+        <button className="ud-wrike-optional" type="button" aria-expanded={showAssignees} onClick={() => void revealAssignees()}>
+          {showAssignees ? "Continue without assigning" : "Assign members (optional)"}
+        </button>
+        {showAssignees && <fieldset className="ud-wrike-assignees" disabled={creating || loadingAssignees}>
+          <legend>Choose members</legend>
+          {loadingAssignees && <p className="ud-sub">Loading members…</p>}
           {assignees.map(member => <label key={member.id}>
             <input type="checkbox" checked={selected.includes(member.id)} disabled={!member.available} onChange={() => toggleMember(member.id)} />
             <span>{member.name}<small>{member.available ? member.email : `${member.email} · No unique active Wrike match`}</small></span>
           </label>)}
           {assigneeError && <p className="ud-sub">{assigneeError}</p>}
-          {assignees.length === 0 && !assigneeError && <p className="ud-sub">No active platform team members are available.</p>}
-        </fieldset>
-        <button className="ud-approve" type="button" onClick={() => setReviewing(true)}>Review before creating</button>
+          {!loadingAssignees && assignees.length === 0 && !assigneeError && <p className="ud-sub">No active platform team members are available.</p>}
+        </fieldset>}
+        <button className="ud-approve" type="button" onClick={() => setReviewing(true)}>{selected.length ? "Review assigned task" : "Add to folder without assignee"}</button>
       </> : <div className="ud-wrike-confirm" role="group" aria-label="Confirm Wrike task creation">
         <p><strong>Create this Wrike task?</strong></p>
         <p className="ud-sub">Opportunity: {opportunityTitle}</p>

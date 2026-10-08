@@ -40,7 +40,6 @@ export function BrandBars({ values, verticals, onSelect, onVerticalSelect, onCms
       <div className="brand-children">
         <button type="button" className="brand-all" onClick={onCmsSelect}>View all CMS opportunities</button>
         <details open className="brand-devsol"><summary>Devsol</summary><div className="brand-children">{VERTICALS.filter(v => v !== "Social Business").map(verticalRow)}</div></details>
-        {verticalRow("Social Business")}
       </div>
     </details> :
     <button type="button" key={name} onClick={() => onSelect(name)} title={`${name}: ${value.toLocaleString()} opportunities`}>{heading(name, value)}</button>

@@ -1,4 +1,4 @@
-import type { ClassificationStatus, DigestRunResult, ReviewQueueResponse, ScraperHealth, UnclassifiedQuery, UnclassifiedResponse, EmailSettings, Facets, FilterState, Opportunity, Paginated, Progress, ScheduleStatus, SourceInfo, Stats, TeamMember, WrikeAssignee, WrikeFolder, WrikeStatus, WrikeTaskLink } from "./types";
+import type { ClassificationStatus, CompanyIntelligenceProfile, DigestRunResult, IntelligenceFeedbackInput, IntelligenceFeedbackResult, IntelligenceLearningSummary, OpportunityIntelligence, ReviewQueueResponse, ScraperHealth, UnclassifiedQuery, UnclassifiedResponse, EmailSettings, Facets, FilterState, Opportunity, Paginated, Progress, ScheduleStatus, SourceInfo, Stats, TeamMember, WrikeAssignee, WrikeFolder, WrikeStatus, WrikeTaskLink } from "./types";
 
 const BASE = "/api";
 
@@ -53,7 +53,36 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function sendJson<T>(path: string, method: "POST" | "PUT", body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { detail?: string | { msg?: string }[] };
+    const detail = Array.isArray(data.detail)
+      ? data.detail.map(item => item.msg ?? "Invalid value").join("; ")
+      : data.detail;
+    throw new Error(detail || `${res.status} ${res.statusText}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export const api = {
+  /** Company facts, outcome learning and explainable recommendation controls. */
+  intelligenceProfile: () => get<CompanyIntelligenceProfile>("/intelligence/profile"),
+  updateIntelligenceProfile: (body: Omit<CompanyIntelligenceProfile, "id" | "version" | "updated_by" | "updated_at">) =>
+    sendJson<CompanyIntelligenceProfile>("/intelligence/profile", "PUT", body),
+  intelligenceLearning: () => get<IntelligenceLearningSummary>("/intelligence/learning"),
+  opportunityIntelligence: (id: number) =>
+    get<OpportunityIntelligence>(`/intelligence/opportunities/${id}`),
+  submitIntelligenceFeedback: (id: number, body: IntelligenceFeedbackInput) =>
+    sendJson<IntelligenceFeedbackResult>(`/intelligence/opportunities/${id}/feedback`, "POST", body),
+  recalculateIntelligence: (limit = 500) =>
+    sendJson<{ processed: number; historical_leads: number }>(
+      "/intelligence/recalculate", "POST", { limit },
+    ),
   wrikeStatus: () => get<WrikeStatus>("/wrike/status"),
   wrikeFolder: () => get<WrikeFolder>("/wrike/folder"),
   wrikeAssignees: () => get<WrikeAssignee[]>("/wrike/assignees"),
@@ -76,7 +105,7 @@ export const api = {
   facets: (f?: FilterState) =>
     get<Facets>(f ? `/filters?${filterParams(f)}` : "/filters"),
   config: () => get<{
-    read_only: boolean; auth_required: boolean; admin_required: boolean;
+    read_only: boolean; workspace_enabled: boolean; auth_required: boolean; admin_required: boolean;
     authenticated: boolean; name: string; email: string; is_admin: boolean;
   }>("/config"),
   logout: () => fetch(`${BASE}/logout`, { method: "POST" }),

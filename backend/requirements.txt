@@ -10,6 +10,9 @@ lxml>=5.2
 python-dateutil>=2.9
 apscheduler>=3.10
 openpyxl>=3.1
+# Production hierarchy classifier and its versioned model artifact.
+scikit-learn==1.9.1
+joblib==1.6.0
 # Optional: only needed for JS-rendered sources (BaseScraper.requires_js)
 playwright>=1.45
 # Production process manager (EC2/Supervisor). Not used by `uvicorn --reload`

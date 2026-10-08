@@ -22,34 +22,37 @@ function Selection({ label, values, selected, onChange }: {
 }
 
 export function BrandFilters({ selectedVerticals, selectedBrands, availableBrands,
-  onVerticalChange, onBrandChange }: {
+  onVerticalChange, onBrandChange, onClear }: {
   selectedVerticals: string[];
   selectedBrands: string[];
   availableBrands: string[];
   onVerticalChange: (values: string[]) => void;
   onBrandChange: (values: string[]) => void;
+  onClear: () => void;
 }) {
   const selectedCount = selectedVerticals.length + selectedBrands.length;
+  useEffect(() => {
+    if (selectedVerticals.includes('Social Business')) {
+      onVerticalChange(selectedVerticals.filter(v => v !== 'Social Business'));
+    }
+  }, [selectedVerticals, onVerticalChange]);
   return <section className="ud-brand-tree" aria-label="Brands">
     <div className="flex items-center justify-between"><h3>Brands</h3>{selectedCount > 0 &&
-      <button type="button" onClick={() => { onVerticalChange([]); onBrandChange([]); }} className="text-xs underline">Clear</button>}</div>
-    <details open><summary><BrandLabel name="CMS"/></summary><div className="ud-brand-children">
-      <Selection label="All CMS" values={VERTICALS} selected={selectedVerticals} onChange={onVerticalChange} />
-      <details open className="ud-brand-branch"><summary>Devsol</summary><div className="ud-brand-children">
-        <Selection label="All Devsol" values={DEVSOL} selected={selectedVerticals} onChange={onVerticalChange} />
-        {DEVSOL.map(v => <Selection key={v} label={v} values={[v]} selected={selectedVerticals} onChange={onVerticalChange} />)}
+      <button type="button" onClick={onClear} className="text-xs underline">Clear</button>}</div>
+    <div className="ud-brand-children">
+      <details open><summary><BrandLabel name="CMS"/></summary><div className="ud-brand-children">
+        <Selection label="All CMS" values={DEVSOL} selected={selectedVerticals} onChange={onVerticalChange} />
+        <details open className="ud-brand-branch"><summary>Devsol</summary><div className="ud-brand-children">
+          <Selection label="All Devsol" values={DEVSOL} selected={selectedVerticals} onChange={onVerticalChange} />
+          {DEVSOL.map(v => <Selection key={v} label={v} values={[v]} selected={selectedVerticals} onChange={onVerticalChange} />)}
+        </div></details>
       </div></details>
-      <div className="ud-brand-branch ud-brand-social" role="group" aria-label="CMS / Social Business">
-        <Selection label="Social Business" values={['Social Business']} selected={selectedVerticals} onChange={onVerticalChange} />
-      </div>
-    </div></details>
-    <details open><summary>Other brands</summary><div className="ud-brand-children">
-      <Selection label="All other brands" values={availableBrands} selected={selectedBrands} onChange={onBrandChange} />
+      <Selection label="Select all below" values={availableBrands} selected={selectedBrands} onChange={onBrandChange} />
       {availableBrands.map(brand => <Selection key={brand} label={brand} values={[brand]}
         selected={selectedBrands} onChange={onBrandChange} />)}
-    </div></details>
+    </div>
     {PENDING_BRANDS.length > 0 && <p className="ud-brand-note">Keywords not yet supplied</p>}
     {PENDING_BRANDS.map(brand => <label key={brand} className="ud-brand-option ud-brand-pending">
-      <input type="checkbox" disabled /><span>{brand}</span></label>)}
+      <input type="checkbox" disabled /><BrandLabel name={brand} /></label>)}
   </section>;
 }

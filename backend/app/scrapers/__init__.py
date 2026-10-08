@@ -23,6 +23,10 @@ from app.scrapers.nih import NIHOpportunitiesScraper
 from app.scrapers.phf import PHFScraper
 from app.scrapers.unpp import UNPartnerPortalScraper
 from app.scrapers.worldbank import WorldBankScraper
+# Optional public-web discovery source. The class can always be imported for
+# tests, but its module registers it only when the feature switch and API key
+# are configured. An unconfigured EC2 instance therefore never schedules it.
+from app.scrapers.web_discovery import WebDiscoveryScraper
 from app.scrapers.registry import SCRAPER_REGISTRY, get_scrapers
 
 # Config-driven funder sites (backend/app/scrapers/sources.json). Imported last
@@ -41,5 +45,6 @@ __all__ = [
     "IndevJobsScraper", "PHFScraper", "PackardScraper", "OpenSocietyScraper",
     "BlueActionFundScraper", "UNPartnerPortalScraper", "WorldBankScraper",
     "NIHOpportunitiesScraper", "EuropeanUnionScraper",
+    "WebDiscoveryScraper",
     "generic_listing",
 ]

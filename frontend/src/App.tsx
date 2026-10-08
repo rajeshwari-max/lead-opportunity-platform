@@ -9,9 +9,12 @@ import { AutoEmailPanel } from "@/components/AutoEmailPanel";
 import { LoginScreen } from "@/components/LoginScreen";
 import { UserMenu } from "@/components/UserMenu";
 import { UserDashboard } from "@/components/UserDashboard";
+import { PersonalWorkspace } from "@/components/PersonalWorkspace";
 import { OpportunitiesTable } from "@/components/OpportunitiesTable";
 import { ReviewQueueCard } from "@/components/ReviewQueueCard";
 import { ScraperHealthCard } from "@/components/ScraperHealthCard";
+import { ClassificationModelCard } from "@/components/ClassificationModelCard";
+import { CompanyIntelligencePanel } from "@/components/CompanyIntelligencePanel";
 import { UnclassifiedCard } from "@/components/UnclassifiedCard";
 import { ScraperPanel } from "@/components/ScraperPanel";
 import { StatCards } from "@/components/StatCards";
@@ -32,10 +35,13 @@ function loadFilters(saved: Partial<FilterState> = {}): FilterState {
   // control to unset it. A link can still set it (see below); a stale saved
   // value cannot.
   delete (saved as Partial<FilterState>).work_type;
+  // Approval controls are retired; do not restore an invisible restriction.
+  delete saved.approved;
 
   const params = new URLSearchParams(window.location.search);
   // Switching layouts must not clear the saved opportunity filters.
   params.delete("view");
+  params.delete("opportunity");
   if (![...params.keys()].length) return { ...emptyFilters, ...saved };
 
   // A link is an explicit request for one view, so start from a clean slate
@@ -48,7 +54,6 @@ function loadFilters(saved: Partial<FilterState> = {}): FilterState {
   if (country) fromUrl.countries = [country];
   if (vertical) fromUrl.verticals = [vertical];
   if (params.get("work_type")) fromUrl.work_type = params.get("work_type") ?? "";
-  if (params.get("approved") === "true") fromUrl.approved = true;
   if (params.get("search")) fromUrl.search = params.get("search") ?? "";
   return { ...emptyFilters, ...fromUrl };
 }
@@ -64,6 +69,7 @@ export default function App() {
   // hide them instead of showing viewers "not configured" / "connect account"
   // warnings that look like something is broken.
   const [readOnly, setReadOnly] = useState(false);
+  const [workspaceEnabled, setWorkspaceEnabled] = useState(false);
   // null = we haven't asked the server yet, so render nothing rather than
   // flashing the dashboard before the gate is known.
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -77,6 +83,7 @@ export default function App() {
       .config()
       .then(async (c) => {
         setReadOnly(c.read_only);
+        setWorkspaceEnabled(c.workspace_enabled);
         if (!c.authenticated) { restoredOwner.current = null; setPreferencesReady(false); }
         if (c.authenticated && restoredOwner.current !== c.email) {
           setPreferencesReady(false);
@@ -97,6 +104,7 @@ export default function App() {
       .catch(() => {
         setIsAdmin(false);
         setReadOnly(false);
+        setWorkspaceEnabled(false);
         setAuthed(false);   // backend unreachable — don't trap the user behind a
                            // login form that cannot possibly succeed
       });
@@ -131,21 +139,24 @@ export default function App() {
 
 
 
-  const userView = new URLSearchParams(window.location.search).get("view") === "user";
+  const view = new URLSearchParams(window.location.search).get("view");
+  const userView = view === "user";
   const viewUrl = (view: string) => {
     const params = new URLSearchParams(window.location.search);
     params.set("view", view);
     return `${window.location.pathname}?${params}`;
   };
+  if (view === "workspace" && workspaceEnabled) return <PersonalWorkspace isAdmin={isAdmin} />;
   if (!isAdmin || userView) return <><p role="status">{preferencesError}</p><UserDashboard filters={filters} onChange={setFilters}
     onRefresh={resetAndRefresh} onDataRefresh={refresh} data={data} loading={loading}
     stats={stats} statsLoading={statsLoading} facets={facets} readOnly={readOnly}
-    user={user} adminViewUrl={isAdmin ? viewUrl("admin") : undefined} /></>;
+    user={user} adminViewUrl={isAdmin ? viewUrl("admin") : undefined}
+    workspaceViewUrl={workspaceEnabled ? viewUrl("workspace") : undefined} /></>;
 
   return (
     <div className="min-h-screen">
       <Header filters={filters} onChange={setFilters} onRefresh={resetAndRefresh} stats={stats}
-              userMenu={<div className="flex items-center gap-3"><a href="#my-leads" className="whitespace-nowrap rounded-md border border-border px-3 py-2 text-xs font-medium">My leads & team activity</a><a href={viewUrl("user")} className="whitespace-nowrap rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-accent">User dashboard</a><UserMenu name={user.name} email={user.email} isAdmin={isAdmin}
+              userMenu={<div className="flex items-center gap-3"><a href="#my-leads" className="whitespace-nowrap rounded-md border border-border px-3 py-2 text-xs font-medium">My leads & team activity</a>{workspaceEnabled && <a href={viewUrl("workspace")} className="whitespace-nowrap rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-accent">My workspace</a>}<a href={viewUrl("user")} className="whitespace-nowrap rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-accent">User dashboard</a><UserMenu name={user.name} email={user.email} isAdmin={isAdmin}
                                   authRequired={user.authRequired} /></div>} />
 
       <main className="mx-auto flex max-w-[1600px] flex-col gap-6 p-4 sm:p-6">
@@ -158,7 +169,7 @@ export default function App() {
           <FiltersSidebar brandHierarchy facets={facets} filters={filters} onChange={setFilters} />
           <div id="opportunities-table" className="flex min-w-0 flex-1 scroll-mt-20 flex-col gap-6">
             <OpportunitiesTable data={data} loading={loading} filters={filters} onChange={setFilters}
-                                facets={facets} readOnly={readOnly} />
+                                facets={facets} readOnly={readOnly} workspaceViewUrl={workspaceEnabled ? viewUrl("workspace") : undefined} />
           </div>
           <div className="flex w-full flex-col gap-6 lg:w-80 lg:shrink-0">
             {/* Administrative review queues. Hiding the cards is paired with
@@ -166,6 +177,8 @@ export default function App() {
                 UI and call their endpoints directly. */}
             {isAdmin && <ReviewQueueCard readOnly={readOnly} />}
             {isAdmin && <UnclassifiedCard readOnly={readOnly} />}
+            {isAdmin && <ClassificationModelCard />}
+            {isAdmin && <CompanyIntelligencePanel readOnly={readOnly} />}
             <ScraperHealthCard isAdmin={isAdmin} />
             {isAdmin && <ScraperPanel sources={sources} progress={progress} />}
             {/* Admin-only: this panel sets the send time and reminder days for

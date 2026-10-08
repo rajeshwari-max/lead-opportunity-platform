@@ -1,4 +1,4 @@
-# Deploy personal accounts and saved leads (without the separate workspace)
+# Deploy personal accounts, saved leads and the Workspace tab
 
 This release adds self-service registration without email verification, personal passwords,
 password recovery/change, saved leads and progress inside the dashboard, account
@@ -6,10 +6,10 @@ filter preferences and admin-only team activity. Common-password login is remove
 Existing shared-password users must register (if their address is new) or use Forgot password to establish
 their own password. Existing personal passwords remain valid.
 
-The separate workspace UI is not imported into this frontend build. Its API is
-disabled unless LOP_WORKSPACE_ENABLED=true; keep it false on EC2. The saved-lead
-feature reuses the existing journey storage/helpers without exposing workspace
-documents, recommendations or network screens. No local database is uploaded.
+The personal Workspace tab opens the existing application journey, recommendations,
+contacts and preferences screens. Its API uses the same signed-in account and remains
+owner-scoped. Set LOP_WORKSPACE_ENABLED=true on EC2 so the tab and API are available.
+The saved-lead feature continues to work inside the dashboard. No local database is uploaded.
 
 ## 1. On Windows: publish the application changes
 
@@ -53,7 +53,7 @@ git log -1 --oneline
 Keep the printed previous commit and backup path for recovery. Do not overwrite
 EC2 with a laptop database: that would overwrite server records and accounts.
 
-## 4. Configure EC2 account email and disable the separate workspace
+## 4. Configure EC2 account email and enable Workspace
 
 ```bash
 nano backend/.env
@@ -63,7 +63,7 @@ Set these values (edit existing entries rather than making duplicate entries):
 
 ```dotenv
 LOP_PERSONAL_LOGIN=true
-LOP_WORKSPACE_ENABLED=false
+LOP_WORKSPACE_ENABLED=true
 LOP_DASHBOARD_URL=http://15.207.68.78
 ```
 
@@ -106,8 +106,8 @@ before sign-in, `authenticated:false` and `is_admin:false`.
 
 Open http://15.207.68.78 and press Ctrl+Shift+R.
 
-1. Sign in with your EC2 admin account. Team activity and account management are
-   available within the dashboard; there is no My workspace entry.
+1. Sign in with your EC2 admin account. Team activity, account management and
+   My workspace are available from the dashboard.
 2. In an incognito window register a different email, including Gmail if desired,
    with a name and password (12+ characters). It should sign in immediately
    without sending an email. Test actual email receipt separately using Forgot password.
@@ -116,8 +116,9 @@ Open http://15.207.68.78 and press Ctrl+Shift+R.
    The same saved data must return. Verify another account cannot see it.
 5. In your admin dashboard expand Team activity and that user to inspect the lead.
 6. Change the user's password and test the new password and Forgot password flow.
-7. The common password must not sign in. A signed-in request to `/api/workspace/session`
-   must return 404 with the workspace disabled.
+7. The common password must not sign in. Open My workspace and verify its journey,
+   recommendations, contacts and preferences tabs. A signed-in request to
+   `/api/workspace/session` must return 200 for that account.
 
 My leads is a single collapsed bar above the dashboard. Opening it shows saved leads,
 distinct viewed/reviewed counts, source-link opens and the ten most recently visited

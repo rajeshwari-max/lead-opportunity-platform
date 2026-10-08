@@ -47,6 +47,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
+from app.core.config import settings
+
 
 class ScopeStatus(str, Enum):
     CONFIRMED = "confirmed"        # a person has stated what this yields
@@ -142,6 +144,25 @@ def _c(**kw) -> SourceContract:
 # Only the sources whose scope has actually been stated. Everything absent from
 # this dict gets the default contract below, marked needs_review.
 MANIFESTS: dict[str, SourceContract] = {
+    **({"web_discovery": _c(
+        key="web_discovery",
+        display_name="Whole Web Discovery",
+        listing_url="https://api.search.brave.com/res/v1/web/search",
+        expected_types=(RecordType.GRANT, RecordType.TENDER, RecordType.RFP,
+                        RecordType.RFQ, RecordType.CALL_FOR_PROPOSALS),
+        excluded_types=(RecordType.CONTRACT_AWARD, RecordType.PROJECT,
+                        RecordType.NEWS, RecordType.JOB),
+        deadline_format="dayfirst",
+        curated=False,
+        scope_status=ScopeStatus.CONFIRMED,
+        owner_note=(
+            "Public-web discovery through Brave's supported search API. A "
+            "search hit is only a candidate: its own page must pass the "
+            "deadline, opportunity, classification and duplicate gates before "
+            "it can be stored. It does not bypass source-specific scrapers."
+        ),
+    )} if settings.web_discovery_enabled and settings.brave_search_api_key.strip()
+       else {}),
     "phf": _c(
         key="phf",
         display_name="Paul Hamlyn Foundation",

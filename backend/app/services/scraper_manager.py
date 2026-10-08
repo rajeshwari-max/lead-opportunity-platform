@@ -26,8 +26,8 @@ from app.services.classification import (
     KeywordClassifier,
     category_hint_for_record_type,
 )
-from app.services.classification_model import classify as classify_vertical_model
-from app.services.brands import classify_brands, brands_to_str
+from app.services.brands import brands_to_str
+from app.services.ml_hierarchy import classify_hierarchy
 from app.services.deadline_parser import DeadlineParser
 from app.services.deduplication import make_unique_id
 from app.services.amounts import clean_amount, extract_amount
@@ -47,7 +47,7 @@ from app.services.deadline_audit import is_sentinel
 from app.services.spam import is_spam
 from app.services.organization import extract_organization, tidy_organization
 from app.services.verticals import VERTICALS as ALL_VERTICALS
-from app.services.verticals import verticals_to_str
+from app.services.verticals import VERTICAL_SOCIAL_BUSINESS, verticals_to_str
 from app.services.study_type import classify_study_type
 from app.services.work_type import classify_work_type
 
@@ -612,12 +612,25 @@ class ScraperManager:
                     category_hint_for_record_type(raw.record_type)
                     or raw.category_hint
                 )
-                category = self.classifier.classify(
+                rule_category = self.classifier.classify(
                     raw.title, raw.summary, category_hint)
                 vertical_body = " ".join(filter(None, [raw.summary, raw.vertical, raw.eligibility]))
-                vertical_result = classify_vertical_model(raw.title, vertical_body)
-                vertical_tags = vertical_result.labels
-                brand_result = classify_brands(raw.title, vertical_body)
+                hierarchy = classify_hierarchy(
+                    raw.title,
+                    raw.summary,
+                    raw.eligibility,
+                    raw.organization,
+                    raw.location,
+                    raw.country,
+                    raw.region,
+                    raw.source_website,
+                    rule_category,
+                )
+                category = hierarchy.category
+                vertical_tags = list(hierarchy.verticals)
+                if "Social Business" in hierarchy.archetypes:
+                    vertical_tags.append(VERTICAL_SOCIAL_BUSINESS)
+                non_cms_brands = [brand for brand in hierarchy.brands if brand != "CMS"]
                 if self.vertical_filter and not (set(vertical_tags) & self.vertical_filter):
                     self._count_off_vertical(raw.source_website)
                     continue
@@ -810,16 +823,17 @@ class ScraperManager:
                     funding_type=raw.funding_type,
                     vertical=raw.vertical,
                     verticals=verticals_to_str(vertical_tags),
-                    brands=brands_to_str(brand_result.labels),
-                    brand_scores=brand_result.scores_json(),
-                    brand_evidence=brand_result.evidence_json(),
-                    brand_classification_version=brand_result.version,
+                    archetypes=", ".join(hierarchy.archetypes),
+                    brands=brands_to_str(non_cms_brands),
+                    brand_scores=hierarchy.scores_json("brands"),
+                    brand_evidence=hierarchy.evidence_json(),
+                    brand_classification_version=hierarchy.version,
                     verticals_source="auto",
-                    classification_status=vertical_result.status,
-                    classification_source="rule",
-                    classification_version=vertical_result.version,
-                    vertical_scores=vertical_result.scores_json(),
-                    classification_evidence=vertical_result.evidence_json(),
+                    classification_status=hierarchy.status,
+                    classification_source=hierarchy.source,
+                    classification_version=hierarchy.version,
+                    vertical_scores=hierarchy.scores_json("verticals"),
+                    classification_evidence=hierarchy.evidence_json(),
                     classified_at=datetime.now(timezone.utc),
                     # Routing axis: research assignments and delivery work go to
                     # different teams even when both are filed as "RFP".

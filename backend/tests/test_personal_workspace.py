@@ -16,7 +16,9 @@ from app.api import workspace as w
 from app.api import accounts as a
 from app.core.auth import COOKIE_NAME, make_session_token, hash_password, password_version
 from app.database.db import get_db
-from app.database.models import Base, Opportunity, TeamMember, Category, ApplicationJourney, WorkspaceContact, WorkspaceCredential
+from app.database.models import (ApplicationJourney, Base, Category,
+    ExperienceEvent, Opportunity, OpportunityIntelligence, TeamMember, WorkspaceContact,
+    WorkspaceCredential)
 from app.services.actionable import application_today
 
 
@@ -159,6 +161,12 @@ class WorkspaceTests(unittest.TestCase):
         r = self.client.put(f'/api/workspace/journeys/{j}', json={'stage':'Accepted', 'notes':'Relevant experience won', 'factors':['Relevant experience']})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(len(self.client.get(f'/api/workspace/journeys/{j}/details').json()['events']), 2)
+        with self.sessions() as db:
+            memory = db.scalars(select(ExperienceEvent).order_by(ExperienceEvent.id)).all()
+            self.assertEqual([(row.user_action, row.outcome) for row in memory], [
+                ('saved', ''), ('accepted', 'won'),
+            ])
+            self.assertIn('Relevant experience won', memory[-1].reason)
         with patch.object(w.settings, 'read_only', True):
             self.assertEqual(self.client.put(f'/api/workspace/journeys/{j}', json={'stage':'Unsuccessful'}).status_code, 403)
         self.assertEqual(self.client.post('/api/workspace/contacts', json={'name':'x'}, headers={'Origin':'https://evil.example'}).status_code, 403)
@@ -194,6 +202,37 @@ class WorkspaceTests(unittest.TestCase):
         result = self.client.get('/api/workspace/recommendations').json()['items'][0]
         self.assertEqual(result['history']['decided'], 0)
         self.assertFalse(any('Your history' in r for r in result['reasons']))
+
+    def test_company_history_score_contributes_to_workspace_recommendations(self):
+        with self.sessions() as db:
+            second = Opportunity(
+                unique_id='company-ranked', title='Community health grant',
+                source_website='Source', organization='Second funder',
+                category=Category.GRANT,
+                deadline=application_today()+timedelta(days=11),
+            )
+            db.add(second)
+            db.flush()
+            db.add_all([
+                OpportunityIntelligence(
+                    opportunity_id=1, recommendation_score=20,
+                    priority='LOW', confidence='LOW', historical_similarity=5,
+                ),
+                OpportunityIntelligence(
+                    opportunity_id=second.id, recommendation_score=80,
+                    priority='HIGH', confidence='MEDIUM', historical_similarity=35,
+                ),
+            ])
+            db.commit()
+            second_id = second.id
+        response = self.client.get('/api/workspace/recommendations')
+        self.assertEqual(response.status_code, 200, response.text)
+        items = response.json()['items']
+        self.assertEqual([row['id'] for row in items], [second_id, 1])
+        self.assertEqual(items[0]['company_intelligence']['score'], 80)
+        self.assertEqual(items[0]['company_intelligence']['historical_similarity'], 35)
+        self.assertEqual(items[0]['company_intelligence']['ranking_points'], 16)
+        self.assertTrue(any('Company intelligence:' in reason for reason in items[0]['reasons']))
 
     def test_disabled_member_and_admin_access(self):
         self.unlock('bob')
