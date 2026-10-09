@@ -82,7 +82,7 @@ class CompanyProfileInput(StrictModel):
 
 @router.get("/profile", dependencies=[Depends(admin)])
 def company_profile(db: Session = Depends(get_db)) -> dict:
-    return profile_dict(get_or_create_profile(db))
+    return profile_dict(get_or_create_profile(db, create=not settings.read_only))
 
 
 @router.put("/profile", dependencies=[Depends(writable)])
@@ -101,7 +101,7 @@ def opportunity_intelligence(opportunity_id: int, _identity: dict = Depends(user
     opportunity = db.get(Opportunity, opportunity_id)
     if not opportunity or opportunity.unique_id.startswith("merged:"):
         raise HTTPException(404, "Opportunity not found")
-    return analyze_opportunity(db, opportunity)
+    return analyze_opportunity(db, opportunity, persist=not settings.read_only)
 
 
 class FeedbackInput(StrictModel):

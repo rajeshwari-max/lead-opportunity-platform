@@ -284,6 +284,7 @@ class TeamMember(Base):
     keywords: Mapped[str] = mapped_column(Text, default="")      # comma-separated, e.g. "climate, environment"
     categories: Mapped[str] = mapped_column(Text, default="")    # comma-separated Category values; empty = all
     verticals: Mapped[str] = mapped_column(Text, default="")     # comma-separated canonical verticals; empty = all
+    brands: Mapped[str] = mapped_column(Text, default="")        # comma-separated canonical brands incl. CMS; empty = all
     # Where this person works. Empty = everywhere, like every other routing
     # field here — anything else would change what all four members receive the
     # moment this deploys. See services/geo_routing.py.

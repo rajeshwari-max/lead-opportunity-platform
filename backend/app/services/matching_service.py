@@ -3,7 +3,8 @@
 A member matches an opportunity when:
   * any of their keywords appears in title/summary/vertical/eligibility (case-insensitive), AND
   * the opportunity's category is in their category list (empty list = all categories), AND
-  * the opportunity belongs to one of their verticals (empty list = all verticals), AND
+  * the opportunity belongs to one of their selected vertical or brand paths
+    (both empty = all ownership paths), AND
   * it hasn't already been sent to them (SentLog), unless include_sent=True.
 """
 from __future__ import annotations
@@ -12,12 +13,14 @@ import logging
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.database.models import Category, Opportunity, SentLog, Status, TeamMember
 from app.services import geo_priority, geo_routing, relevance
 from app.services.actionable import strict_actionable_clause
+from app.services.brand_keywords import BRANDS
+from app.services.filter_service import FilterService
 from app.services.vertical_names import normalize_vertical_csv
 from app.services.verticals import VERTICALS
 
@@ -106,10 +109,38 @@ class MatchingService:
                 member.email, ", ".join(unknown), ", ".join(VERTICALS),
             )
         verticals = _csv(normalized)
+        ownership_clauses = []
         if verticals:
-            stmt = stmt.where(
-                or_(*[Opportunity.verticals.like(f"%{s}%") for s in verticals])
+            ownership_clauses.append(FilterService._vertical_clause(verticals))
+
+        # The Brands tree has CMS plus six separately classified brands.
+        # CMS ownership is represented by archetypes/verticals in older rows,
+        # while non-CMS ownership lives in Opportunity.brands. A member who
+        # chooses both a vertical and a brand wants either branch, just as the
+        # dashboard filter does.
+        known_brands = {brand.casefold(): brand for brand in ("CMS", *BRANDS)}
+        selected_brands = []
+        unknown_brands = []
+        configured_brands = _csv(getattr(member, "brands", "") or "")
+        for value in configured_brands:
+            canonical = known_brands.get(value.casefold())
+            if canonical is None:
+                unknown_brands.append(value)
+            elif canonical not in selected_brands:
+                selected_brands.append(canonical)
+        if unknown_brands:
+            log.warning(
+                "[matching] %s has unrecognised brand(s) in their routing: %s",
+                member.email, ", ".join(unknown_brands),
             )
+        if selected_brands:
+            ownership_clauses.append(FilterService._brand_clause(selected_brands))
+        if ownership_clauses:
+            stmt = stmt.where(or_(*ownership_clauses))
+        elif configured_brands:
+            # A typo in saved brand routing must never turn into an unfiltered
+            # digest. New API writes reject it; this also protects old rows.
+            stmt = stmt.where(false())
 
         # Geography. Empty means everywhere, like every other field here, so
         # this changes nothing for anyone until they choose one.

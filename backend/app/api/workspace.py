@@ -19,6 +19,7 @@ from app.database.models import (ApplicationJourney, ExperienceEvent,
     JourneyAttachment, JourneyEvent, Opportunity, OpportunityIntelligence, TeamMember, WorkspaceContact,
     WorkspaceCredential, WorkspaceProfile)
 from app.services.actionable import strict_actionable_clause
+from app.services.company_intelligence import MODEL_VERSION as COMPANY_MODEL_VERSION
 
 def private_cache(response: Response):
     response.headers["Cache-Control"] = "no-store"
@@ -361,7 +362,7 @@ def recommendations(q: str = "", owner: str = Depends(personal), db: Session = D
     for opportunity in candidates:
         personal_rank = rank(opportunity, p, history, network)
         company = snapshots.get(opportunity.id)
-        if company:
+        if company and company.model_version == COMPANY_MODEL_VERSION:
             company_points = round(max(0.0, min(100.0, company.recommendation_score)) / 5)
             personal_rank["score"] += company_points
             personal_rank["reasons"] = [

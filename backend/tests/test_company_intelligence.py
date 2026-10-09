@@ -247,11 +247,73 @@ def test_eligibility_reports_match_mismatch_unknown_and_not_applicable(intellige
         for row in eligibility_matches(no_requirements, profile)
     }
     assert statuses == {
-        "Geography": "UNKNOWN",
+        "Geography": "NOT_APPLICABLE",
         "Organization type": "NOT_APPLICABLE",
         "Years of operation": "NOT_APPLICABLE",
         "Certification or registration": "NOT_APPLICABLE",
     }
+
+
+def test_project_location_and_default_focus_do_not_prove_eligibility(intelligence):
+    session = intelligence["session"]
+    opportunity = _opportunity(
+        session,
+        suffix="project-location",
+        eligibility="The project will serve communities in India.",
+    )
+    result = analyze_opportunity(session, opportunity, persist=False)
+    geography = next(row for row in result["eligibility_matches"]
+                     if row["criterion"] == "Geography")
+    assert geography["status"] == "NOT_APPLICABLE"
+    assert result["eligibility_level"] == "UNKNOWN"
+    assert result["eligibility_score"] == 0.0
+    assert result["company_fit_score"] == 0.0
+    assert result["confidence"] == "LOW"
+    assert session.scalar(select(func.count()).select_from(CompanyProfile)) == 0
+
+    # A broad geographic preference is not proof of operation/registration.
+    opportunity.eligibility = "Only registered NGOs in India may apply."
+    result = analyze_opportunity(session, opportunity, persist=False)
+    geography = next(row for row in result["eligibility_matches"]
+                     if row["criterion"] == "Geography")
+    assert geography["status"] == "UNKNOWN"
+    assert result["eligibility_level"] == "UNKNOWN"
+
+
+def test_broad_topics_and_funding_interest_cannot_establish_full_company_fit(intelligence):
+    session = intelligence["session"]
+    update_profile(session, _profile_payload(
+        industries=["Development"], sectors=["Health"],
+        focus_areas=["Maternal health"], capabilities=[], services=[],
+        project_types=[], target_beneficiaries=[],
+    ), "admin@catalysts.org")
+    opportunity = _opportunity(
+        session, suffix="broad-only",
+        summary="Maternal health research and development project.",
+        eligibility="The project will be implemented in India.",
+    )
+    result = analyze_opportunity(session, opportunity, persist=False)
+    assert result["company_fit_score"] == 50.0
+    assert result["confidence"] == "LOW"
+    assert any("Funding preference match" in reason for reason in result["reasons"])
+
+
+def test_read_only_intelligence_gets_do_not_write(intelligence, monkeypatch):
+    client = intelligence["client"]
+    session = intelligence["session"]
+    opportunity = _opportunity(session, suffix="read-only")
+    monkeypatch.setattr(settings, "read_only", True)
+
+    profile = client.get("/api/intelligence/profile", cookies=_cookie(admin=True))
+    score = client.get(
+        f"/api/intelligence/opportunities/{opportunity.id}",
+        cookies=_cookie(admin=False),
+    )
+    assert profile.status_code == 200
+    assert score.status_code == 200
+    assert session.scalar(select(func.count()).select_from(CompanyProfile)) == 0
+    assert session.scalar(select(func.count()).select_from(OpportunityIntelligence)) == 0
+    assert session.scalar(select(func.count()).select_from(ExperienceEvent)) == 0
 
 
 def test_recommendation_is_weighted_explainable_and_audited_once(intelligence):

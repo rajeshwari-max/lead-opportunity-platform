@@ -31,6 +31,7 @@ export function BrandFilters({ selectedVerticals, selectedBrands, availableBrand
   onClear: () => void;
 }) {
   const selectedCount = selectedVerticals.length + selectedBrands.length;
+  const otherBrands = availableBrands.filter(brand => brand !== 'CMS');
   useEffect(() => {
     if (selectedVerticals.includes('Social Business')) {
       onVerticalChange(selectedVerticals.filter(v => v !== 'Social Business'));
@@ -41,14 +42,14 @@ export function BrandFilters({ selectedVerticals, selectedBrands, availableBrand
       <button type="button" onClick={onClear} className="text-xs underline">Clear</button>}</div>
     <div className="ud-brand-children">
       <details open><summary><BrandLabel name="CMS"/></summary><div className="ud-brand-children">
-        <Selection label="All CMS" values={DEVSOL} selected={selectedVerticals} onChange={onVerticalChange} />
+        <Selection label="All CMS" values={['CMS']} selected={selectedBrands} onChange={onBrandChange} />
         <details open className="ud-brand-branch"><summary>Devsol</summary><div className="ud-brand-children">
           <Selection label="All Devsol" values={DEVSOL} selected={selectedVerticals} onChange={onVerticalChange} />
           {DEVSOL.map(v => <Selection key={v} label={v} values={[v]} selected={selectedVerticals} onChange={onVerticalChange} />)}
         </div></details>
       </div></details>
       <Selection label="Select all below" values={availableBrands} selected={selectedBrands} onChange={onBrandChange} />
-      {availableBrands.map(brand => <Selection key={brand} label={brand} values={[brand]}
+      {otherBrands.map(brand => <Selection key={brand} label={brand} values={[brand]}
         selected={selectedBrands} onChange={onBrandChange} />)}
     </div>
     {PENDING_BRANDS.length > 0 && <p className="ud-brand-note">Keywords not yet supplied</p>}

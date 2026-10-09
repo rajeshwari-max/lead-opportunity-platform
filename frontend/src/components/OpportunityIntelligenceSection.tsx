@@ -109,6 +109,9 @@ export function OpportunityIntelligenceSection({ opportunity, readOnly = false }
     }
   };
 
+  const statedCriteria = data?.eligibility_matches.filter(item => item.status !== "NOT_APPLICABLE") ?? [];
+  const matchedCriteria = statedCriteria.filter(item => item.status === "MATCH").length;
+
   return <section className="ud-intelligence" aria-label="Company intelligence">
     <div className="ud-intelligence-heading"><h3><Sparkles size={14} />Company intelligence</h3>
       {data && <span className={`ud-priority ud-priority-${data.priority.toLowerCase()}`}>{data.priority} priority</span>}
@@ -121,7 +124,7 @@ export function OpportunityIntelligenceSection({ opportunity, readOnly = false }
         <span>recommendation score<br />{data.confidence.toLowerCase()} confidence</span>
       </div>
       <div className="ud-intelligence-metrics">
-        <div><span>Eligibility</span><b>{score(data.eligibility_score)}</b><small>{data.eligibility_level}{data.eligibility_override ? ` · human override (calculated ${data.computed_eligibility_level})` : ""}</small></div>
+        <div><span>Eligibility</span><b>{data.computed_eligibility_level === "UNKNOWN" ? "—" : score(data.eligibility_score)}</b><small>{data.eligibility_level} · {statedCriteria.length ? `${matchedCriteria}/${statedCriteria.length} stated criteria matched` : "no stated criteria verified"}{data.eligibility_override ? ` · human override (calculated ${data.computed_eligibility_level})` : ""}</small></div>
         <div><span>Company fit</span><b>{score(data.company_fit_score)}</b></div>
         <div><span>Historical similarity</span><b>{score(data.historical_similarity)}</b></div>
         <div><span>Past success pattern</span><b>{score(data.success_pattern_score)}</b></div>
@@ -157,7 +160,7 @@ export function OpportunityIntelligenceSection({ opportunity, readOnly = false }
         <div><h4><CheckCircle2 size={13} />Why it may fit</h4><ul>{data.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul></div>
         <div><h4><AlertTriangle size={13} />Risks and gaps</h4>{data.risks.length
           ? <ul>{data.risks.map((risk, index) => <li key={index}>{risk}</li>)}</ul>
-          : <p className="ud-sub">No specific eligibility risk was identified.</p>}</div>
+          : <p className="ud-sub">{statedCriteria.length ? "No specific eligibility risk was identified." : "Eligibility cannot be verified from the available source and company profile."}</p>}</div>
       </div>
 
       <details className="ud-intelligence-details">

@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { VERTICALS, type TeamMember } from "@/lib/types";
 
-const emptyForm = { name: "", email: "", keywords: "", categories: "", verticals: "",
+const emptyForm = { name: "", email: "", keywords: "", categories: "", verticals: "", brands: "",
                     countries: "", regions: "", geo_include_unknown: true,
                     auto_send: true, active: true };
 
@@ -25,6 +25,7 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
   const [sending, setSending] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
+  const [brandOptions, setBrandOptions] = useState<string[]>(["CMS"]);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const notify = (kind: "ok" | "err", text: string) => {
@@ -42,6 +43,7 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
       setMembers(team);
       setEmailConfigured(status.configured);
       setCategoryOptions(facets.categories.filter((c) => c !== "Other"));
+      setBrandOptions(["CMS", ...facets.brands.filter((brand) => brand !== "CMS")]);
       // Preview how many NEW opportunities each member would receive
       const counts: Record<number, number> = {};
       await Promise.all(
@@ -81,7 +83,7 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
   const startEdit = (m: TeamMember) => {
     setEditingId(m.id);
     setForm({ name: m.name, email: m.email, keywords: m.keywords,
-              categories: m.categories, verticals: m.verticals ?? "",
+              categories: m.categories, verticals: m.verticals ?? "", brands: m.brands ?? "",
               countries: m.countries ?? "", regions: m.regions ?? "",
               geo_include_unknown: m.geo_include_unknown ?? true,
               auto_send: m.auto_send, active: m.active });
@@ -155,6 +157,12 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
     setForm({ ...form, verticals: [...set].join(", ") });
   };
 
+  const toggleBrand = (brand: string) => {
+    const set = new Set(form.brands.split(",").map((s) => s.trim()).filter(Boolean));
+    set.has(brand) ? set.delete(brand) : set.add(brand);
+    setForm({ ...form, brands: [...set].join(", ") });
+  };
+
   // Collapsed by default once the team grows: the panel renders every member
   // with their keyword, category and vertical rules, which runs to several
   // screens and pushes the Expert Pool below the fold.
@@ -208,7 +216,7 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
         const q = query.trim().toLowerCase();
         // Search the routing rules too, not just the person — "who is getting
         // the climate leads?" is the question this panel is usually opened for.
-        return [m.name, m.email, m.keywords, m.categories, m.verticals,
+        return [m.name, m.email, m.keywords, m.categories, m.verticals, m.brands,
                 m.regions, m.countries]
           .some((v) => (v || "").toLowerCase().includes(q));
       })
@@ -244,7 +252,7 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search name, email, keyword or vertical…"
+              placeholder="Search name, email, keyword, brand or vertical…"
               className="h-8 w-full rounded-md border border-border bg-transparent pl-8 pr-7 text-xs outline-none focus:border-primary"
             />
             {query && (
@@ -344,10 +352,25 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
                   );
                 })}
               </div>
-              {/* Vertical routing: only opportunities in the selected verticals are emailed */}
-              <p className="pt-1 text-[11px] font-semibold text-muted-foreground">Vertical</p>
+              <p className="pt-1 text-[11px] font-semibold text-muted-foreground">Brands</p>
               <div className="flex flex-wrap gap-1.5">
-                {VERTICALS.map((s) => {
+                {brandOptions.map((brand) => {
+                  const on = form.brands.split(",").map((s) => s.trim()).includes(brand);
+                  return (
+                    <button key={brand} type="button" onClick={() => toggleBrand(brand)}
+                            aria-pressed={on}
+                            className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                              on ? "border-accent bg-accent/20 text-accent"
+                                 : "border-border text-muted-foreground hover:bg-muted"}`}>
+                      {brand}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* CMS vertical routing; chosen verticals and brands form a union. */}
+              <p className="pt-1 text-[11px] font-semibold text-muted-foreground">CMS / Devsol verticals</p>
+              <div className="flex flex-wrap gap-1.5">
+                {VERTICALS.filter((s) => s !== "Social Business").map((s) => {
                   const on = form.verticals.includes(s);
                   return (
                     <button key={s} onClick={() => toggleVertical(s)}
@@ -395,7 +418,8 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
                 </label>
               )}
               <p className="text-[11px] text-muted-foreground">
-                Nothing selected = all categories / all verticals / everywhere.
+                Nothing selected = all categories / all brands and verticals / everywhere.
+                Any selected brand or vertical can match.
                 Auto-digest after each scrape is on by default.
               </p>
               <div className="flex gap-2">
@@ -436,10 +460,11 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
                   <Mail className="mr-1 inline h-3 w-3" />
                   {m.email}
                 </p>
-                {(m.keywords || m.categories || m.verticals) && (
+                {(m.keywords || m.categories || m.verticals || m.brands || m.regions || m.countries) && (
                   <p className="truncate text-xs text-muted-foreground">
                     {m.keywords && <span className="text-primary">{m.keywords}</span>}
                     {m.categories && <span className="ml-1">· {m.categories}</span>}
+                    {m.brands && <span className="ml-1 text-accent">· {m.brands}</span>}
                     {m.verticals && <span className="ml-1 text-accent">· {m.verticals}</span>}
                     {(m.regions || m.countries) && (
                       <span className="ml-1 text-muted-foreground">

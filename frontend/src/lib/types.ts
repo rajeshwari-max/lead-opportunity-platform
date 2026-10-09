@@ -174,6 +174,7 @@ export interface TeamMember {
   keywords: string;
   categories: string;
   verticals: string;
+  brands: string;
   auto_send: boolean;
   active: boolean;
   created_at: string;

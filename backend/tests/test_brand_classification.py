@@ -8,8 +8,8 @@ from datetime import date
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.database.models import Base, Category, Opportunity, Status
-from app.schemas.opportunity import OpportunityFilters
+from app.database.models import Base, Category, Opportunity, Status, TeamMember
+from app.schemas.opportunity import OpportunityFilters, TeamMemberIn
 from app.services.brand_keywords import (
     BRAND_KEYWORDS,
     BRAND_KEYWORD_SECTIONS,
@@ -17,6 +17,7 @@ from app.services.brand_keywords import (
 )
 from app.services.brands import classify_brands
 from app.services.filter_service import FilterService
+from app.services.matching_service import MatchingService
 
 
 @pytest.mark.parametrize(
@@ -136,6 +137,31 @@ def test_brand_filter_reaches_a_brand_match_without_a_cms_vertical():
         assert [item.unique_id for item in result.items] == ["vrutti-only"]
 
 
+def test_cms_brand_filter_reaches_archetype_without_devsol_vertical():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        common = dict(
+            source_website="Test", category=Category.GRANT, status=Status.ACTIVE,
+            deadline=date(2099, 1, 1), deadline_state="dated",
+            opportunity_url="https://example.org/call",
+        )
+        db.add_all([
+            Opportunity(unique_id="cms-only", title="Social business grant",
+                        archetypes="Social Business", verticals="", brands="", **common),
+            Opportunity(unique_id="legacy-cms", title="Health grant",
+                        archetypes="", verticals="Health", brands="", **common),
+            Opportunity(unique_id="other-only", title="Agriculture grant",
+                        archetypes="", verticals="", brands="Vrutti", **common),
+        ])
+        db.flush()
+        service = FilterService(db)
+        assert service.facets()["brands"][0] == "CMS"
+        result = service.query(OpportunityFilters(brands=["CMS"]))
+        assert {item.unique_id for item in result.items} == {"cms-only", "legacy-cms"}
+        assert service.stats(OpportunityFilters(has_vertical=False)).by_brand["CMS"] == 2
+
+
 def test_cms_and_other_brand_selections_are_a_union():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
@@ -157,6 +183,58 @@ def test_cms_and_other_brand_selections_are_a_union():
         result = FilterService(db).query(OpportunityFilters(
             verticals=["Health"], brands=["Vrutti"]))
         assert {item.unique_id for item in result.items} == {"health", "vrutti"}
+
+
+def test_team_member_brand_routing_matches_cms_and_other_brand_without_duplicates():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        common = dict(
+            source_website="Test", category=Category.GRANT,
+            status=Status.ACTIVE, deadline=date(2099, 1, 1),
+            deadline_state="dated", opportunity_url="https://example.org/call",
+        )
+        db.add_all([
+            Opportunity(unique_id="cms", title="CMS call", archetypes="Devsol",
+                        verticals="", brands="", **common),
+            Opportunity(unique_id="vrutti", title="FPO call", archetypes="",
+                        verticals="", brands="Vrutti", **common),
+            Opportunity(unique_id="both", title="Combined call", archetypes="Devsol",
+                        verticals="Health", brands="Vrutti", **common),
+            Opportunity(unique_id="other", title="Other call", archetypes="",
+                        verticals="", brands="Swasti", **common),
+        ])
+        member = TeamMember(name="Brand lead", email="brand@example.org",
+                            brands="CMS, Vrutti", verticals="", keywords="",
+                            categories="", auto_send=False)
+        db.add(member)
+        db.flush()
+        matches = MatchingService(db).matches_for(member)
+        assert {row.unique_id for row in matches} == {"cms", "vrutti", "both"}
+        assert len(matches) == 3
+        member.brands = "Swasti"
+        member.verticals = "Health"
+        assert {row.unique_id for row in MatchingService(db).matches_for(member)} == {"both", "other"}
+
+
+def test_team_brand_input_rejects_unknown_value_and_saved_typo_fails_closed():
+    with pytest.raises(ValueError, match="Unknown brand"):
+        TeamMemberIn(name="Lead", email="lead@example.org", brands="Vruttti")
+    body = TeamMemberIn(name="Lead", email="lead@example.org", brands="cms, VRUTTI, cms")
+    assert body.brands == "CMS, Vrutti"
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(Opportunity(unique_id="any", title="Any call", source_website="Test",
+                           category=Category.GRANT, status=Status.ACTIVE,
+                           deadline=date(2099, 1, 1), deadline_state="dated",
+                           opportunity_url="https://example.org/call"))
+        member = TeamMember(name="Old typo", email="old@example.org",
+                            brands="Vruttti", verticals="", keywords="", categories="")
+        db.add(member)
+        db.flush()
+        assert MatchingService(db).matches_for(member) == []
 
 
 def test_brand_stats_include_all_brands_and_count_assignments_once():

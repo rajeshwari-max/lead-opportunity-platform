@@ -23,9 +23,9 @@ from app.database.models import (
 )
 
 PROFILE_ID = 1
-MODEL_VERSION = "company-fit-rules-2026.10.08"
+MODEL_VERSION = "company-fit-rules-2026.10.08-evidence"
 TAXONOMY_VERSION = "lop-hierarchy-2026.10"
-FEATURE_VERSION = "company-fit-features-v2"
+FEATURE_VERSION = "company-fit-features-v3"
 THRESHOLD_VERSION = "company-fit-thresholds-v1"
 
 DEFAULT_WEIGHTS = {
@@ -63,6 +63,11 @@ DEFAULT_PROFILE_LISTS = {
     "funding_types_of_interest": [
         "Grant", "RFP", "Tender", "Proposal", "Fellowship", "Award", "Challenge",
     ],
+}
+
+_SOUTH_ASIA_COUNTRIES = {
+    "afghanistan", "bangladesh", "bhutan", "india", "maldives",
+    "nepal", "pakistan", "sri lanka",
 }
 
 _STOP = {
@@ -216,22 +221,65 @@ def _contains_any(text: str, values: Iterable[str]) -> list[str]:
     )]
 
 
+def _stated_applicant_geography(eligibility: str, locations: Iterable[str]) -> list[str]:
+    """Find applicant-location rules, not merely the project's delivery place.
+
+    Opportunity location is useful for geographic *interest*, but it cannot
+    prove that an applicant is eligible.  Require wording that ties a stated
+    place to the applicant or its registration before comparing company facts.
+    """
+    stated: list[str] = []
+    for location in locations:
+        place = re.escape(location)
+        patterns = (
+            rf"\b(?:registered|based|headquartered|incorporated|domiciled|resident|"
+            rf"established|located)\s+(?:in|within)\s+(?:the\s+)?{place}(?!\w)",
+            rf"(?<!\w){place}\s*[- ]\s*based\b",
+            rf"\bapplicants?\s+(?:from|in|of)\s+"
+            rf"(?:the\s+)?{place}(?!\w)",
+            rf"\b(?:registered|licensed|incorporated|eligible)\s+(?:\w+\s+){{0,5}}?"
+            rf"(?:organisations?|organizations?|ngos?|nonprofits?|charities|"
+            rf"institutions?|companies|entities)\s+(?:from|in|of)\s+"
+            rf"(?:the\s+)?{place}(?!\w)",
+            rf"\b(?:only|eligible|open to)\s+(?:\w+\s+){{0,8}}?"
+            rf"(?:applicants?|organisations?|organizations?|ngos?|nonprofits?|"
+            rf"charities|institutions?|companies|entities)\s+(?:from|in|of)\s+"
+            rf"(?:the\s+)?{place}(?!\w)",
+        )
+        if any(re.search(pattern, eligibility, re.I) for pattern in patterns):
+            stated.append(location)
+    return stated
+
+
+def _company_meets_geography(company_location: str, requirement: str) -> bool:
+    company = company_location.strip().casefold()
+    required = requirement.strip().casefold()
+    if company == required:
+        return True
+    if required == "south asia" and company in _SOUTH_ASIA_COUNTRIES:
+        return True
+    return False
+
+
 def eligibility_matches(opportunity: Opportunity, profile: dict) -> list[dict]:
     original = (opportunity.eligibility or "").strip()
     matches: list[dict] = []
 
-    company_geo = _clean_list(profile["countries_of_operation"] + profile["geographic_focus"])
+    # Geographic focus expresses interest, not where the company is registered
+    # or operates.  It must not establish eligibility on its own.
+    company_geo = _clean_list(profile["countries_of_operation"])
     required_geo = _clean_list([opportunity.country, opportunity.region, opportunity.location])
-    stated_geo = _contains_any(original, required_geo)
+    stated_geo = _stated_applicant_geography(original, required_geo)
     if not stated_geo:
         matches.append(_criterion("Geography", "No explicit geographic eligibility requirement found",
-                                  ", ".join(company_geo), "UNKNOWN", original))
+                                  ", ".join(company_geo), "NOT_APPLICABLE", original))
     elif not company_geo:
         matches.append(_criterion("Geography", ", ".join(stated_geo), "",
                                   "UNKNOWN", original))
     else:
-        required_text = " ".join(stated_geo).casefold()
-        hit = [g for g in company_geo if g.casefold() in required_text or required_text in g.casefold()]
+        hit = [g for g in company_geo if any(
+            _company_meets_geography(g, requirement) for requirement in stated_geo
+        )]
         matches.append(_criterion("Geography", ", ".join(stated_geo), ", ".join(company_geo),
                                   "MATCH" if hit else "MISMATCH",
                                   original))
@@ -303,17 +351,17 @@ def _eligibility_score(matches: list[dict]) -> tuple[float, str]:
 
 def _profile_fit(opportunity: Opportunity, profile: dict) -> tuple[float, float, list[str], int, int]:
     text = " ".join(filter(None, [opportunity.title, opportunity.summary,
-                                   opportunity.eligibility, opportunity.funding_type]))
+                                   opportunity.eligibility]))
     groups = (
         ("industries", "Industry"), ("sectors", "Sector"),
         ("focus_areas", "Focus area"),
         ("capabilities", "Capability"), ("services", "Service"),
         ("project_types", "Project type"),
         ("target_beneficiaries", "Target beneficiary"),
-        ("funding_types_of_interest", "Funding type"),
     )
     configured = 0
     matched = 0
+    substantive_match = False
     reasons: list[str] = []
     for field, label in groups:
         values = profile[field]
@@ -332,8 +380,19 @@ def _profile_fit(opportunity: Opportunity, profile: dict) -> tuple[float, float,
         if hits:
             matched += 1
             reasons.append(f"{label} match: {', '.join(hits[:3])}")
+            if field in {"capabilities", "services", "project_types", "target_beneficiaries"}:
+                substantive_match = True
     # A single broad match is useful but cannot establish complete company fit.
     strategic = round(100 * matched / max(3, configured), 1) if configured else 0.0
+    if not substantive_match:
+        strategic = min(strategic, 50.0)
+
+    funding_values = profile["funding_types_of_interest"]
+    funding_hits = _contains_any(opportunity.funding_type or "", funding_values) if (
+        profile["updated_by"] or funding_values != DEFAULT_PROFILE_LISTS["funding_types_of_interest"]
+    ) else []
+    if funding_hits:
+        reasons.append("Funding preference match: " + ", ".join(funding_hits[:3]))
 
     geography = 0.0
     geo_values = _clean_list(profile["countries_of_operation"] + profile["geographic_focus"])
@@ -423,7 +482,7 @@ def _weighted_score(parts: dict[str, float], weights: dict[str, float]) -> float
 def analyze_opportunity(db: Session, opportunity: Opportunity, *, persist: bool = True,
                         index: HistoricalIndex | None = None,
                         commit: bool = True) -> dict:
-    profile = profile_dict(get_or_create_profile(db))
+    profile = profile_dict(get_or_create_profile(db, create=persist))
     eligibility = eligibility_matches(opportunity, profile)
     eligibility_score, eligibility_level = _eligibility_score(eligibility)
     computed_eligibility_score = eligibility_score
@@ -479,9 +538,21 @@ def analyze_opportunity(db: Session, opportunity: Opportunity, *, persist: bool 
             f"A reviewer set eligibility to {eligibility_level}"
             + (f": {eligibility_feedback.reason}" if eligibility_feedback.reason else "")
         )
-    configured_profile_fields = sum(bool(profile[field]) for field in LIST_FIELDS)
-    evidence_points = configured_profile_fields + len(similar) + sum(m["status"] != "UNKNOWN" for m in eligibility)
-    confidence = "HIGH" if evidence_points >= 12 else "MEDIUM" if evidence_points >= 6 else "LOW"
+    resolved_requirements = sum(m["status"] in {"MATCH", "MISMATCH"} for m in eligibility)
+    substantive_matches = sum(
+        reason.startswith(("Capability match:", "Service match:",
+                           "Project type match:", "Target beneficiary match:"))
+        for reason in profile_reasons
+    )
+    reviewed_eligibility = bool(eligibility_feedback)
+    evidence_points = (resolved_requirements + 2 * len(decided)
+                       + min(2, substantive_matches) + 2 * reviewed_eligibility)
+    if evidence_points >= 6 and decided and (resolved_requirements or reviewed_eligibility):
+        confidence = "HIGH"
+    elif evidence_points >= 2 and (decided or resolved_requirements or reviewed_eligibility):
+        confidence = "MEDIUM"
+    else:
+        confidence = "LOW"
     result = {
         "opportunity_id": opportunity.id,
         "classification": {

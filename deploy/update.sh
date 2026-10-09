@@ -244,6 +244,18 @@ case "$cfg" in
               tail -60 $REPO/logs/supervisor-err.log" ;;
 esac
 
+# The frontend hides My workspace when this capability is false. A deployment
+# that publishes the new bundle but leaves the EC2 environment flag disabled
+# otherwise looks successful while the requested tab remains missing.
+case "$cfg" in
+  *'"workspace_enabled":true'*) echo "    personal Workspace is enabled" ;;
+  *) die "personal Workspace is disabled on EC2.
+       Edit $REPO/backend/.env and set:
+         LOP_WORKSPACE_ENABLED=true
+         LOP_PERSONAL_LOGIN=true
+       Then run ./deploy/update.sh again." ;;
+esac
+
 case "$cfg" in
   *'"auth_required":false'*)
     echo

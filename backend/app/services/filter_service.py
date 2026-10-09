@@ -219,10 +219,19 @@ class FilterService:
 
     @staticmethod
     def _brand_clause(selected: list[str]):
-        """Match exact members of the comma-separated canonical brand list."""
-        valid = [brand for brand in selected if brand in BRANDS]
+        """Match a brand, including CMS's separate archetype/vertical storage."""
+        valid = [brand for brand in selected if brand == "CMS" or brand in BRANDS]
         clauses = []
         for brand in valid:
+            if brand == "CMS":
+                # CMS is the parent of Devsol and Social Business, not a value
+                # written to the non-CMS `brands` column by the classifier.
+                # Keep older rows with canonical verticals discoverable too.
+                clauses.append(or_(
+                    Opportunity.archetypes.is_not(None) & (Opportunity.archetypes != ""),
+                    *(Opportunity.verticals.like(f"%{vertical}%") for vertical in VERTICALS),
+                ))
+                continue
             # Delimiters prevent a future brand name from matching merely
             # because it is a substring of another one.
             clauses.extend([
@@ -357,7 +366,7 @@ class FilterService:
             # one because the current selection has no rows in it removes the
             # only control that could widen the selection again.
             "verticals": list(VERTICALS),
-            "brands": list(BRANDS),
+            "brands": ["CMS", *BRANDS],
             "countries": keep_selected(narrowed_or_all("country", "countries"), f.countries),
             "regions": keep_selected(narrowed_or_all("region", "regions"), f.regions),
             # Only sources that actually have a row in the current view. The
@@ -401,7 +410,8 @@ class FilterService:
             return counts
 
         brand_counts = {"CMS": self.db.execute(select(func.count()).select_from(active).where(
-            or_(*(active.c.verticals.like(f"%{v}%") for v in VERTICALS))
+            or_(active.c.archetypes.is_not(None) & (active.c.archetypes != ""),
+                *(active.c.verticals.like(f"%{v}%") for v in VERTICALS))
         )).scalar_one()}
         for brand in ("Green Foundation", "Vrutti", "Swasti", "Setu", "Upfront", "Community Action Collab"):
             brand_counts[brand] = self.db.execute(

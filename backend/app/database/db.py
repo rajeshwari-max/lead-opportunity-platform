@@ -333,6 +333,7 @@ def _run_migrations(conn) -> None:
         # digest changes until they choose a geography: empty means everywhere,
         # exactly like keywords, categories and verticals already do.
         for name, ddl in (
+            ("brands",              "TEXT NOT NULL DEFAULT ''"),
             ("countries",           "TEXT NOT NULL DEFAULT ''"),
             ("regions",             "TEXT NOT NULL DEFAULT ''"),
             ("geo_include_unknown", "BOOLEAN NOT NULL DEFAULT 1"),

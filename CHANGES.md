@@ -5,6 +5,24 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-08 — Sources that found nothing no longer say "Stopped by a user"
+
+Source health showed "cancelled — Stopped by a user." for sources nobody had
+stopped (WFP Innovation Accelerator, Grantmakers Community Project, and others
+with 0 rows). `_run_source` sets the per-source stop signal in its `finally`
+on every exit path (so worker threads always end), and the cancelled flag was
+read after that, so every run that extracted 0 rows was classified CANCELLED.
+That hid the real outcome (blocked, parser found nothing, confirmed empty).
+
+The flag is now read before the signal is sent. A real Stop is still recorded
+as cancelled. (`backend/app/services/scraper_manager.py`,
+`backend/tests/test_zero_row_run_not_cancelled.py`)
+
+After the next scheduled scrape these sources will show their real outcome.
+That outcome is what to fix next; this change only stops it being hidden.
+
+---
+
 ## 2026-10-08 — Finish the half-done Codex work so it can deploy
 
 Codex left the ML hierarchy, company intelligence, web discovery and Wrike

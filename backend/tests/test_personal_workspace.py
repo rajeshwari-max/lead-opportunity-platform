@@ -20,6 +20,7 @@ from app.database.models import (ApplicationJourney, Base, Category,
     ExperienceEvent, Opportunity, OpportunityIntelligence, TeamMember, WorkspaceContact,
     WorkspaceCredential)
 from app.services.actionable import application_today
+from app.services.company_intelligence import MODEL_VERSION as COMPANY_MODEL_VERSION
 
 
 class WorkspaceTests(unittest.TestCase):
@@ -217,10 +218,12 @@ class WorkspaceTests(unittest.TestCase):
                 OpportunityIntelligence(
                     opportunity_id=1, recommendation_score=20,
                     priority='LOW', confidence='LOW', historical_similarity=5,
+                    model_version=COMPANY_MODEL_VERSION,
                 ),
                 OpportunityIntelligence(
                     opportunity_id=second.id, recommendation_score=80,
                     priority='HIGH', confidence='MEDIUM', historical_similarity=35,
+                    model_version=COMPANY_MODEL_VERSION,
                 ),
             ])
             db.commit()
@@ -233,6 +236,20 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(items[0]['company_intelligence']['historical_similarity'], 35)
         self.assertEqual(items[0]['company_intelligence']['ranking_points'], 16)
         self.assertTrue(any('Company intelligence:' in reason for reason in items[0]['reasons']))
+
+    def test_workspace_does_not_rank_with_stale_company_snapshot(self):
+        with self.sessions() as db:
+            db.add(OpportunityIntelligence(
+                opportunity_id=1, recommendation_score=100,
+                priority='HIGH', confidence='HIGH', historical_similarity=100,
+                model_version='retired-scoring-rules',
+            ))
+            db.commit()
+        response = self.client.get('/api/workspace/recommendations')
+        self.assertEqual(response.status_code, 200, response.text)
+        item = response.json()['items'][0]
+        self.assertIsNone(item['company_intelligence'])
+        self.assertFalse(any('Company intelligence:' in reason for reason in item['reasons']))
 
     def test_disabled_member_and_admin_access(self):
         self.unlock('bob')

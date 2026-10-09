@@ -664,6 +664,7 @@ def preview_auto_send(db: Session = Depends(get_db)) -> dict:
             # The dangerous case: empty rules match every opportunity, not none.
             "no_filters": not (m.keywords or "").strip()
                           and not (m.verticals or "").strip()
+                          and not (m.brands or "").strip()
                           and not (m.categories or "").strip(),
         })
     rows.sort(key=lambda r: -r["pending"])

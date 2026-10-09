@@ -4,9 +4,10 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator, Field
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator, Field
 
 from app.database.models import Category, Status
+from app.services.brand_keywords import BRANDS
 
 
 class RawOpportunity(BaseModel):
@@ -219,6 +220,26 @@ class TeamMemberIn(BaseModel):
     keywords: str = ""      # comma-separated, e.g. "climate, environment"
     categories: str = ""    # comma-separated Category values; empty = all
     verticals: str = ""     # comma-separated canonical verticals; empty = all
+    brands: str = ""        # comma-separated canonical brands incl. CMS; empty = all
+
+    @field_validator("brands")
+    @classmethod
+    def canonical_brands(cls, value: str) -> str:
+        known = {brand.casefold(): brand for brand in ("CMS", *BRANDS)}
+        chosen: list[str] = []
+        unknown: list[str] = []
+        for raw in value.split(","):
+            label = raw.strip()
+            if not label:
+                continue
+            canonical = known.get(label.casefold())
+            if canonical is None:
+                unknown.append(label)
+            elif canonical not in chosen:
+                chosen.append(canonical)
+        if unknown:
+            raise ValueError("Unknown brand(s): " + ", ".join(unknown))
+        return ", ".join(chosen)
     # Empty = everywhere. Unrecognised names are reported back rather than
     # dropped: a country nobody recognises matches nothing, which looks exactly
     # like a working filter that happens to find nothing.

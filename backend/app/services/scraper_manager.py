@@ -457,6 +457,12 @@ class ScraperManager:
             # crawl has already finished and this is a no-op; on timeout or
             # crash it is what lets the thread reach its own `finally`, close
             # its browser or HTTP client, and exit.
+            # Decide whether this run was STOPPED before signalling the worker
+            # below. The signal is sent on every exit path, so reading the
+            # Event after it made every run that found 0 rows look stopped by a
+            # user, and hid the real reason (blocked, parser broken, empty).
+            was_stopped = self._stop.is_set() or (
+                source_stop.is_set() and not prog["found"])
             source_stop.set()
             mirror.cancel()
             # What the run actually observed. Scrapers that record transport
@@ -485,7 +491,7 @@ class ScraperManager:
                 structure_signature=probe.get("structure_signature", ""),
                 last_good_signature=self._last_good_signature(scraper),
                 expected_container_present=probe.get("expected_container_present"),
-                cancelled=self._stop.is_set() or source_stop.is_set() and not prog["found"],
+                cancelled=was_stopped,
                 exception=crash,
             )
             self._close_run(run_id, prog, evidence)
