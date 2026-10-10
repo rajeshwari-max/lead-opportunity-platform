@@ -24,6 +24,7 @@ import re
 _CUR = r"(?:US\$|A\$|C\$|NZ\$|R\$|USD|EUR|GBP|INR|CHF|AUD|CAD|NZD|ZAR|SEK|NOK|DKK|JPY|CNY|KES|NGN|PHP|SGD|THB|IDR|BRL|MXN|Rs\.?|€|£|\$|₹|¥)"
 _NUM = r"\d[\d,.\s]*(?:\.\d+)?\s*(?:k\b|m\b|bn\b|million|billion|thousand|lakh|crore)?"
 _AMOUNT = rf"{_CUR}\s?{_NUM}|{_NUM}\s?{_CUR}"
+_PLAIN_NUMBER = re.compile(r"^\s*\d[\d,\s]*(?:\.\d+)?\s*$")
 
 # Values that carry no information — treat as absent.
 _JUNK_VALUES = {
@@ -64,7 +65,33 @@ def _tidy_number(value: str) -> str:
     return re.sub(r"\s+", " ", v).strip()
 
 
-def clean_amount(value: str) -> str:
+def _group_plain_number(value: str) -> str:
+    """Add separators to a source-provided number without changing its value."""
+    if not _PLAIN_NUMBER.fullmatch(value or ""):
+        return ""
+    compact = re.sub(r"[,\s]", "", value)
+    if not re.fullmatch(r"\d+(?:\.\d+)?", compact):
+        return ""
+    whole, dot, fraction = compact.partition(".")
+    formatted = f"{int(whole):,}"
+    if dot and fraction.rstrip("0"):
+        formatted += f".{fraction.rstrip('0')}"
+    return formatted
+
+
+def _currency_unknown_amount(value: str) -> str:
+    """Make a source-provided number readable without inventing a currency.
+
+    DevelopmentAid sometimes returns its budget as a JSON number while omitting
+    the currency.  Showing ``7651177`` verbatim looks like a database id; adding
+    separators and an explicit qualification preserves the useful magnitude and
+    makes the missing source data clear.
+    """
+    formatted = _group_plain_number(value)
+    return f"{formatted} (currency not listed)" if formatted else ""
+
+
+def clean_amount(value: str, currency: str = "") -> str:
     """Normalise an amount a source provided. Returns '' when it says nothing."""
     v = re.sub(r"\s+", " ", value or "").strip()
     v = _FURNITURE.sub("", v).strip(" ,;:-")
@@ -72,10 +99,22 @@ def clean_amount(value: str) -> str:
         return ""
     if not re.search(r"\d", v):
         return ""            # "other", "varies" — no figure, no value
+    # Some APIs split a budget into a numeric value and a currency code.  Only
+    # join a recognised currency: an arbitrary adjacent field must never turn
+    # into a confidently labelled amount.
+    currency = (currency or "").strip()
+    if (_PLAIN_NUMBER.fullmatch(v)
+            and currency
+            and re.fullmatch(_CUR, currency, re.IGNORECASE)):
+        v = f"{currency} {_group_plain_number(v)}"
     # Keep only up to the end of the last currency figure, dropping trailing prose.
     matches = list(re.finditer(_AMOUNT, v, re.IGNORECASE))
     if matches:
         v = v[: matches[-1].end()].strip(" ,;:-")
+    else:
+        unknown = _currency_unknown_amount(v)
+        if unknown:
+            return unknown[:256]
     return _tidy_number(v)[:256]
 
 

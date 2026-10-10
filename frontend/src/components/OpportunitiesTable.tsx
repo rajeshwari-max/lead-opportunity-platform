@@ -22,7 +22,7 @@ import { SendSelectionBar } from "@/components/SendSelectionBar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { daysLeft, formatDate } from "@/lib/utils";
-import { RATES_AS_OF, toInr } from "@/lib/money";
+import { formatFundingAmount, RATES_AS_OF, toInr } from "@/lib/money";
 import type { Facets, FilterState, Opportunity, Paginated } from "@/lib/types";
 import { miscLabel, miscTitle } from "@/lib/miscellaneous";
 
@@ -354,7 +354,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, w
         const inr = showInr ? toInr(raw) : "";
         return (
           <div className="min-w-0">
-            <span className="block break-words leading-snug">{raw || "—"}</span>
+            <span className="block break-words leading-snug">{formatFundingAmount(raw) || "—"}</span>
             {inr && (
               <span
                 className="mt-0.5 block break-words text-[11px] leading-snug text-muted-foreground"
@@ -603,7 +603,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, w
                             {o.region && <span><b className="font-semibold text-foreground">Region:</b> {o.region}</span>}
                             {o.funding_amount && (
                               <span>
-                                <b className="font-semibold text-foreground">Amount:</b> {o.funding_amount}
+                                <b className="font-semibold text-foreground">Amount:</b> {formatFundingAmount(o.funding_amount)}
                                 {toInr(o.funding_amount) && (
                                   <span className="ml-1 opacity-80">({toInr(o.funding_amount)})</span>
                                 )}

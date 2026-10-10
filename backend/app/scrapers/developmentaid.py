@@ -1014,6 +1014,12 @@ class DevelopmentAidScraper(BaseScraper):
         deadline = _clean_sentinel_deadline(
             self._pick(item, "deadline", "closing", "expir"))
         where = self._pick(item, "location", "countr", "region")
+        raw_amount = self._pick(item, "budget", "amount", "value", allow_numeric=True)
+        # DevelopmentAid payloads can put the code beside the numeric budget
+        # instead of including it in the same value.  Preserve that code when
+        # present; clean_amount deliberately refuses to guess one when absent.
+        amount_currency = self._pick(
+            item, "budgetcurrency", "currencycode", "currency")
         return RawOpportunity(
             title=title[:500],
             # Name-bearing keys first (abbreviatedDonorNames, donors) so a bare
@@ -1021,8 +1027,7 @@ class DevelopmentAidScraper(BaseScraper):
             organization=(self._pick(item, "donorname", "fundingagency", "agencyname")
                           or self._pick(item, "funding", "donor", "agency", "authority",
                                         "client", "organization", "organisation"))[:512],
-            funding_amount=clean_amount(
-                self._pick(item, "budget", "amount", "value", allow_numeric=True)),
+            funding_amount=clean_amount(raw_amount, amount_currency),
             location=where[:512],
             # Feed the same text to `country` so normalize_geo can resolve a
             # country and derive a region. Without this the Country filter and the

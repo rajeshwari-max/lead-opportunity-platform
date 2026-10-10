@@ -86,6 +86,27 @@ function amountsIn(text: string): number[] {
   return out;
 }
 
+/**
+ * Human-readable source amount. A bare database value such as `7651177` is a
+ * real source-provided magnitude, but without a currency it resembles a random
+ * identifier. Format it while explicitly refusing to guess the currency.
+ */
+export function formatFundingAmount(text: string | null | undefined): string {
+  const raw = (text || "").trim();
+  if (!raw) return "";
+
+  const suffix = /\s*\(currency not listed\)\s*$/i;
+  const candidate = raw.replace(suffix, "").trim();
+  if (!/^\d[\d,\s]*(?:\.\d+)?$/.test(candidate)) return raw;
+
+  const compact = candidate.replace(/[,\s]/g, "");
+  if (!/^\d+(?:\.\d+)?$/.test(compact)) return raw;
+  const value = Number(compact);
+  if (!Number.isFinite(value) || value <= 0) return raw;
+
+  return `${value.toLocaleString("en-US", { maximumFractionDigits: 20 })} (currency not listed)`;
+}
+
 /** Indian grouping: ₹1.2 Cr, ₹45 L, ₹8,500. */
 export function formatInr(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "";

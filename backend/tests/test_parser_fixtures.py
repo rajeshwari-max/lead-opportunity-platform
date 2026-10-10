@@ -330,6 +330,24 @@ def test_developmentaid_carries_the_source_location_into_country():
     assert _devaid_items()[0].country == "Kenya"
 
 
+def test_developmentaid_does_not_present_a_numeric_budget_as_an_identifier():
+    assert _devaid_items()[0].funding_amount == "250,000 (currency not listed)"
+
+
+def test_developmentaid_combines_a_separate_currency_code_with_the_budget():
+    from app.scrapers.developmentaid import DevelopmentAidScraper
+
+    item = DevelopmentAidScraper()._raw_from_item({
+        "id": 118346,
+        "title": "Consultancy services for a rural water programme",
+        "status": "Open",
+        "budget": 250000,
+        "currencyCode": "EUR",
+    }, "tenders")
+    assert item is not None
+    assert item.funding_amount == "EUR 250,000"
+
+
 # --------------------------------------------------------- UN Partner Portal
 
 def _unpp_items():
