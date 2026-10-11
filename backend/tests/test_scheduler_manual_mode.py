@@ -1,9 +1,4 @@
-"""A scrape starts at a configured time, or because someone clicked Start.
-
-Nothing else — and specifically not "the application restarted". Before this,
-`ScrapeScheduler.start()` could launch a full ~85-source scrape the moment the
-process came up, which meant a deploy, a crash-loop or a supervisor restart at
-the wrong hour began an unbounded run nobody initiated.
+"""A scrape starts at a configured time, a once-per-day recovery, or manually.
 
 These tests exercise the decision, not APScheduler: the scheduler object is
 replaced with a recorder so no jobs are really registered and no event loop is
@@ -43,12 +38,14 @@ class RecordingScheduler:
         self.kwargs = kwargs
         self.running = False
         self.jobs: dict[str, object] = {}
+        self.job_options: dict[str, dict] = {}
 
     def start(self) -> None:
         self.running = True
 
     def add_job(self, func, trigger=None, id=None, replace_existing=False, **kw):
         self.jobs[id] = (func, trigger)
+        self.job_options[id] = kw
         return FakeJob()
 
     def remove_job(self, job_id):
@@ -95,31 +92,9 @@ def test_manual_mode_registers_no_scrape_job(sched):
     )
 
 
-def test_restart_does_not_start_a_scrape_by_default(sched, monkeypatch):
-    """The regression this phase exists for."""
-    started: list[str] = []
-    monkeypatch.setattr(sched, "_scrape_all", lambda: started.append("scrape"))
-    monkeypatch.setattr(sched, "_missed_run_today", lambda: True)   # slot was missed
-    sched.current = _weekly_monday_0200()
-
-    sched.start()
-
-    assert started == [], (
-        "restarting the application must not begin a scrape — catch-up is off"
-    )
-
-
-def test_catchup_runs_only_when_explicitly_enabled(sched, monkeypatch):
+def test_restart_recovers_one_missed_scheduled_run(sched, monkeypatch):
     import asyncio
 
-    # Patch the exact settings object held by scheduler.py. Several earlier
-    # tests reload app.core.config to point at a temporary database, so patching
-    # the newly reloaded module can otherwise leave this already-imported
-    # scheduler holding a different Settings instance in a full-suite run.
-    from app.services import scheduler as scheduler_module
-
-    monkeypatch.setattr(
-        scheduler_module.settings, "scheduler_catchup_on_restart", True)
     created: list[object] = []
     monkeypatch.setattr(asyncio, "create_task", lambda coro: created.append(coro))
     monkeypatch.setattr(sched, "_scrape_all", lambda: "coro")
@@ -128,14 +103,17 @@ def test_catchup_runs_only_when_explicitly_enabled(sched, monkeypatch):
 
     sched.start()
 
-    assert created == ["coro"], "opting in must restore the old behaviour exactly"
+    assert created == ["coro"], "a missed daily slot must recover once after restart"
 
 
 def test_scheduled_slot_still_registers_its_job(sched):
-    """Turning catch-up off must not turn scheduling off."""
     sched.current = _weekly_monday_0200()
     sched.start()
     assert "scheduled-scrape" in sched._scheduler.jobs
+    options = sched._scheduler.job_options["scheduled-scrape"]
+    assert options["max_instances"] == 1
+    assert options["coalesce"] is True
+    assert options["misfire_grace_time"] == 86400
 
 
 def test_job_defaults_are_stated_not_inherited(sched):

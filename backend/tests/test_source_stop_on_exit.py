@@ -123,8 +123,10 @@ def test_all_three_jobs_carry_the_guards():
     from app.services import scheduler as s
 
     src = _i.getsource(s)
-    assert src.count("**_JOB_GUARDS") == 3, (
-        "the scrape, the digest and the deadline audit all need them")
+    assert src.count("**_JOB_GUARDS") == 2, (
+        "the digest and deadline audit need the standard guards")
+    assert src.count("**_SCRAPE_JOB_GUARDS") == 1, (
+        "the scrape needs its longer recovery window plus the same concurrency guards")
 
 
 def test_jobs_still_replace_rather_than_duplicate():

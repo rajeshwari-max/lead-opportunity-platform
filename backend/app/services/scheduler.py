@@ -41,6 +41,14 @@ _DIGEST_JOB_ID = "daily-digest"
 # coalesce=True    several missed fire times collapse into one run, so a
 #                  restart after downtime does not queue up a backlog.
 _JOB_GUARDS = {"max_instances": 1, "coalesce": True, "misfire_grace_time": 300}
+# A daily scrape is expensive but important. If the event loop is occupied at
+# the exact minute, APScheduler may start it later the same day; coalescing and
+# the database lease still guarantee that this produces at most one run.
+_SCRAPE_JOB_GUARDS = {
+    "max_instances": 1,
+    "coalesce": True,
+    "misfire_grace_time": 86400,
+}
 
 _STATE_FILE: Path = BASE_DIR / "data" / "schedule.json"
 
@@ -125,36 +133,15 @@ class ScrapeScheduler:
                 self.current = ScheduleRequest(mode="manual")
                 return
 
-            # Restart catch-up: OFF unless explicitly enabled.
-            #
-            # The original reasoning holds for a laptop — an in-process
-            # scheduler only fires while the process is alive, so a machine
-            # closed overnight misses every 02:00 window forever. On a server
-            # the same code means "restarting the application can begin a full
-            # scrape of ~85 sources", which fires on deploys, crash-loops and
-            # supervisor restarts. None of those is a person clicking Start or
-            # a configured time arriving, and both of those are the only two
-            # things allowed to start a scrape.
-            #
-            # It is logged either way. A trigger nobody can see is worse than
-            # one nobody wants.
-            if not settings.scheduler_catchup_on_restart:
-                if self._missed_run_today():
-                    log.info(
-                        "Scheduler: today's %s slot (%02d:%02d) was missed while the "
-                        "server was down. NOT catching up — restart catch-up is "
-                        "disabled. The next run is the next scheduled slot. Set "
-                        "LOP_SCHEDULER_CATCHUP_ON_RESTART=true to change that.",
-                        self.current.mode, self.current.hour, self.current.minute,
-                    )
-                return
-
+            # An in-process scheduler cannot fire while the service is down.
+            # Recover one missed slot when it comes back, exactly as the first
+            # production scheduler did. _missed_run_today checks persisted run
+            # history, while manager.start() also takes the cross-process DB
+            # lease, so restarts cannot create duplicate or overlapping runs.
             if self._missed_run_today():
                 log.warning(
                     "Scheduler: missed today's %s run (server wasn't running "
-                    "at %02d:%02d) — catching up now because "
-                    "LOP_SCHEDULER_CATCHUP_ON_RESTART is enabled. A scrape is "
-                    "starting that no one initiated.",
+                    "at %02d:%02d) — catching up once now.",
                     self.current.mode, self.current.hour, self.current.minute,
                 )
                 asyncio.create_task(self._scrape_all())
@@ -302,7 +289,7 @@ class ScrapeScheduler:
                 raise ValueError(f"Unknown schedule mode: {req.mode}")
 
         self._scheduler.add_job(self._scrape_all, trigger, id=_JOB_ID,
-                                replace_existing=True, **_JOB_GUARDS)
+                                replace_existing=True, **_SCRAPE_JOB_GUARDS)
         log.info("Scheduler: %s scrape configured (%02d:%02d)", req.mode, req.hour, req.minute)
         if persist:
             self._save_state()
