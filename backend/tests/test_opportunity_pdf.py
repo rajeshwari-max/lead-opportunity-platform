@@ -95,10 +95,23 @@ def test_a_direct_pdf_link_needs_no_fetch():
 
 # ------------------------------------------------------------------ links + rendering
 
+def _patch_settings(monkeypatch, **values):
+    """Set values on every live `settings` object these modules can see.
+
+    Several test modules importlib.reload(app.core.config), which leaves
+    modules imported earlier holding the OLD settings object. Patching only
+    the current one passed in isolation and failed in a full sequential run
+    (it read the real LOP_PUBLIC_BASE_URL from EC2's .env).
+    """
+    import app.core.auth as auth
+    import app.core.config as config
+    for target in {id(o): o for o in (config.settings, auth.settings, P.settings)}.values():
+        for name, value in values.items():
+            monkeypatch.setattr(target, name, value)
+
+
 def test_signed_links_are_per_opportunity(monkeypatch):
-    from app.core.config import settings
-    monkeypatch.setattr(settings, "approval_secret", "s3cret")
-    monkeypatch.setattr(settings, "public_base_url", "http://15.0.0.1")
+    _patch_settings(monkeypatch, approval_secret="s3cret", public_base_url="http://15.0.0.1")
     url = P.brief_url(7)
     assert url.startswith("http://15.0.0.1/api/brief/7.pdf?sig=")
     sig = url.split("sig=")[1]
@@ -124,12 +137,10 @@ def brief_client(monkeypatch):
     from sqlalchemy.orm import Session
     from sqlalchemy.pool import StaticPool
 
-    from app.api.documents import router
-    from app.core.config import settings
-    from app.database.db import get_db
+    from app.api import documents
     from app.database.models import Base
 
-    monkeypatch.setattr(settings, "approval_secret", "test-secret")
+    _patch_settings(monkeypatch, approval_secret="test-secret")
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
                            poolclass=StaticPool)
     Base.metadata.create_all(engine)
@@ -139,8 +150,11 @@ def brief_client(monkeypatch):
                      pdf_url="https://funder.example.org/docs/tor.pdf"))
     session.commit()
     app = FastAPI()
-    app.include_router(router, prefix="/api")
-    app.dependency_overrides[get_db] = lambda: session
+    app.include_router(documents.router, prefix="/api")
+    # Override the get_db the ROUTE holds. After another test reloads
+    # app.database.db, the module's current get_db is a different function and
+    # an override keyed on it is ignored — the route then read the real database.
+    app.dependency_overrides[documents.get_db] = lambda: session
     with TestClient(app) as c:
         yield c
     session.close()

@@ -5,6 +5,20 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-12 — PDF tests passed alone but failed in the full run on EC2
+
+Three tests in `tests/test_opportunity_pdf.py` failed in EC2's sequential
+`update.sh` run (and passed in isolation). Other test modules
+`importlib.reload` `app.core.config` and `app.database.db`; afterwards modules
+imported earlier hold the old `settings` object and the old `get_db`. The tests
+patched only the new ones, so the signed-link test read EC2's real
+`LOP_PUBLIC_BASE_URL`, and the endpoint tests' database override was ignored
+(the route queried the real database). The tests now patch every live
+`settings` object and override the `get_db` the route actually holds. No
+application code changed. Verified with a sequential run: 1219 passed.
+
+---
+
 ## 2026-10-12 — Company intelligence assessed against Catalyst teams (Codex work, recorded here)
 
 Codex made these changes without a log entry; recorded on review.
