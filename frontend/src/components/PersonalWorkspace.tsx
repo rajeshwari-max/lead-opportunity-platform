@@ -105,7 +105,7 @@ export function PersonalWorkspace({ isAdmin }: { isAdmin: boolean }) {
   const wins = journeys.filter(j => j.stage === "Accepted").length;
   const filtered = journeys.filter(j => !filter || j.stage === filter);
   return <main className={`pw pw-${profile.accent}`}>
-    <header className="pw-header"><a href="?view=user" className="pw-logo">CMS</a><div><h1>{profile.title}</h1><p>{session?.owner || "Personal workspace"}</p></div><nav><a href="?view=user">Opportunities</a>{isAdmin && <a href="?view=admin">Admin dashboard</a>}</nav></header>
+    <header className="pw-header"><a href="?view=user" className="pw-logo">The Catalysts</a><div><h1>{profile.title}</h1><p>{session?.owner || "Personal workspace"}</p></div><nav><a href="?view=user">Opportunities</a>{isAdmin && <a href="?view=admin">Admin dashboard</a>}</nav></header>
     <div aria-live="polite">{error && <p role="alert" className="pw-error">{error}</p>}{message && <p className="pw-success">{message}</p>}{busy && <p role="status">Working…</p>}</div>
     {session?.development && <p className="pw-notice">Development workspace: authentication is disabled. Enable individual workspace passwords before using real private records on a shared server.</p>}
     {session?.read_only && <p className="pw-notice">Read-only mode: changes and uploads are unavailable.</p>}

@@ -106,8 +106,12 @@ def test_restart_recovers_one_missed_scheduled_run(sched, monkeypatch):
     assert created == ["coro"], "a missed daily slot must recover once after restart"
 
 
-def test_scheduled_slot_still_registers_its_job(sched):
+def test_scheduled_slot_still_registers_its_job(sched, monkeypatch):
     sched.current = _weekly_monday_0200()
+    # Registration only. Without this, on a real Monday after 02:00 start()
+    # takes the catch-up branch and calls asyncio.create_task outside a running
+    # loop, so this test failed one day a week (and blocked that day's deploy).
+    monkeypatch.setattr(sched, "_missed_run_today", lambda: False)
     sched.start()
     assert "scheduled-scrape" in sched._scheduler.jobs
     options = sched._scheduler.job_options["scheduled-scrape"]

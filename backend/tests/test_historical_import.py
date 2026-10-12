@@ -29,6 +29,7 @@ def _wrike_style_workbook(path: Path) -> None:
         "All finished", "6. Awarded/Accepted/Attended", None, None, "", "", "",
         "Hello team@example.org", "", "", "", "", "",
     ])
+    sheet["A2"].hyperlink = "https://www.wrike.com/open.htm?id=1016662725"
     sheet.append([
         "Ignore this heading", "", "Someone", "", "", None, None, "", "", "",
         "", "", "", "", "", "",
@@ -90,6 +91,8 @@ def test_reader_recovers_bad_dimension_and_removes_personal_data(tmp_path):
     assert rows[0]["focus_area"] == "Hello [email removed]"
     assert rows[0]["outcome"] == "Positive / accepted"
     assert rows[0]["won_lost"] == ""
+    assert rows[0]["opportunity_url"] == "https://www.wrike.com/open.htm?id=1016662725"
+    assert rows[0]["external_id"] == "1016662725"
     assert "assignee" not in rows[0]["raw_data"]
     assert "Person" not in json.dumps(rows[0])
 

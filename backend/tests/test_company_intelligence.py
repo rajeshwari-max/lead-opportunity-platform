@@ -202,6 +202,7 @@ def test_eligibility_reports_match_mismatch_unknown_and_not_applicable(intellige
     session = intelligence["session"]
     opportunity = _opportunity(
         session,
+        brands="Swasti",
         eligibility=(
             "Only registered NGOs in India with a minimum of 5 years of "
             "operation and ISO 9001 certification may apply."
@@ -211,10 +212,12 @@ def test_eligibility_reports_match_mismatch_unknown_and_not_applicable(intellige
         update_profile(session, _profile_payload(), "admin@catalysts.org")
     )
 
-    matched = {row["criterion"]: row for row in eligibility_matches(opportunity, profile)}
+    history = [{"event_date": "2018-01-01"}]
+    matched = {row["criterion"]: row for row in eligibility_matches(opportunity, profile, history)}
     assert matched["Geography"]["status"] == "MATCH"
-    assert matched["Organization type"]["status"] == "MATCH"
-    assert matched["Years of operation"]["status"] == "MATCH"
+    assert matched["Catalyst brand / vertical"]["status"] == "MATCH"
+    assert matched["Legal entity fit"]["status"] == "MATCH"
+    assert matched["Relevant experience history"]["status"] == "MATCH"
     assert matched["Certification or registration"]["status"] == "MATCH"
 
     mismatch_profile = dict(profile)
@@ -227,11 +230,11 @@ def test_eligibility_reports_match_mismatch_unknown_and_not_applicable(intellige
     })
     mismatched = {
         row["criterion"]: row
-        for row in eligibility_matches(opportunity, mismatch_profile)
+        for row in eligibility_matches(opportunity, mismatch_profile, [{"event_date": "2025-01-01"}])
     }
     assert mismatched["Geography"]["status"] == "MISMATCH"
-    assert mismatched["Organization type"]["status"] == "MISMATCH"
-    assert mismatched["Years of operation"]["status"] == "MISMATCH"
+    assert mismatched["Legal entity fit"]["status"] == "MATCH"
+    assert mismatched["Relevant experience history"]["status"] == "MISMATCH"
     assert mismatched["Certification or registration"]["status"] == "UNKNOWN"
 
     no_requirements = _opportunity(
@@ -247,9 +250,10 @@ def test_eligibility_reports_match_mismatch_unknown_and_not_applicable(intellige
         for row in eligibility_matches(no_requirements, profile)
     }
     assert statuses == {
+        "Catalyst brand / vertical": "MATCH",
         "Geography": "NOT_APPLICABLE",
-        "Organization type": "NOT_APPLICABLE",
-        "Years of operation": "NOT_APPLICABLE",
+        "Legal entity fit": "NOT_APPLICABLE",
+        "Relevant experience history": "NOT_APPLICABLE",
         "Certification or registration": "NOT_APPLICABLE",
     }
 
@@ -277,7 +281,7 @@ def test_project_location_and_default_focus_do_not_prove_eligibility(intelligenc
     geography = next(row for row in result["eligibility_matches"]
                      if row["criterion"] == "Geography")
     assert geography["status"] == "UNKNOWN"
-    assert result["eligibility_level"] == "UNKNOWN"
+    assert result["eligibility_level"] == "LOW"
 
 
 def test_broad_topics_and_funding_interest_cannot_establish_full_company_fit(intelligence):
@@ -319,14 +323,14 @@ def test_read_only_intelligence_gets_do_not_write(intelligence, monkeypatch):
 def test_recommendation_is_weighted_explainable_and_audited_once(intelligence):
     session = intelligence["session"]
     update_profile(session, _profile_payload(), "admin@catalysts.org")
-    opportunity = _opportunity(session)
+    opportunity = _opportunity(session, brands="Swasti")
     session.add(HistoricalLead(
         fingerprint="won-health-india",
         title="India maternal health research grant",
         opportunity_type="Grant",
         sector="Health",
         verticals="Health",
-        brands="CMS",
+        brands="Swasti",
         archetypes="Devsol",
         geography="India",
         focus_area="Maternal health research",
@@ -347,7 +351,8 @@ def test_recommendation_is_weighted_explainable_and_audited_once(intelligence):
     )
     assert result["recommendation_score"] == expected
     assert result["priority"] == "HIGH"
-    assert result["eligibility_level"] == "HIGH"
+    # One recent historical lead cannot prove a five-year experience rule.
+    assert result["eligibility_level"] == "LOW"
     assert result["similar_leads"][0]["won_lost"] == "won"
     assert any("closest decided historical leads were won" in reason
                for reason in result["reasons"])

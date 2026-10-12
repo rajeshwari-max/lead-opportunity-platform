@@ -327,6 +327,15 @@ class ScraperManager:
         from app.services.data_integrity import maintain_database
         self._log(f"Identity maintenance: {maintain_database()}")
 
+        # Find the source's own PDF for newly saved opportunities. Its own
+        # try/except: a slow or failing site must not fail the maintenance pass.
+        if settings.pdf_discovery_enabled:
+            from app.services.opportunity_pdf import discover_pdfs
+            try:
+                self._log(f"PDF discovery: {discover_pdfs()}")
+            except Exception:                                   # noqa: BLE001
+                log.exception("PDF discovery failed")
+
     async def _run_source(self, scraper: BaseScraper) -> None:
         prog = self.progress[scraper.name]
         prog["status"] = "running"

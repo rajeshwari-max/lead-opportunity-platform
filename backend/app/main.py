@@ -150,6 +150,9 @@ async def _require_password(request, call_next):
             path.startswith(f"{settings.api_prefix}/login")
             or path.startswith(f"{settings.api_prefix}/config")
             or path.startswith(f"{settings.api_prefix}/approve/")
+            # Signed summary-PDF links from emails; the HMAC is checked by
+            # the route itself (app/api/documents.py).
+            or path.startswith(f"{settings.api_prefix}/brief/")
         )
         if not exempt and not current_user(request.cookies.get(COOKIE_NAME))["authenticated"]:
             if path.startswith(settings.api_prefix):
@@ -173,6 +176,9 @@ app.include_router(wrike_router, prefix=settings.api_prefix)
 
 from app.api.intelligence import router as intelligence_router
 app.include_router(intelligence_router, prefix=settings.api_prefix)
+
+from app.api.documents import router as documents_router
+app.include_router(documents_router, prefix=settings.api_prefix)
 
 # Serve the built dashboard (frontend/dist, copied to ./static in the Docker
 # Serve the built dashboard (frontend/dist, copied to ./static in the Docker

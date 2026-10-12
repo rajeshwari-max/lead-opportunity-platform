@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     # Run the deadline/link/junk maintenance pass automatically at the end of
     # every scrape. These repairs existed but were never called by anything.
     run_maintenance_after_scrape: bool = True
+    # After each scrape, look for the source's own PDF on pages not yet
+    # checked (services/opportunity_pdf.py). Plain HTTP, no login, no browser;
+    # bounded by count and time so it never delays the next scrape.
+    pdf_discovery_enabled: bool = True
+    pdf_discovery_limit: int = 400
+    pdf_discovery_concurrency: int = 4
+    pdf_discovery_budget_s: float = 900.0
 
     # ------------------------------------------------------------- scheduling
     # Re-run a schedule slot the server was not alive for.

@@ -160,6 +160,11 @@ def status(ttl_s: int = DEFAULT_TTL_S) -> dict:
         return {"held": False, "holder": None, "stale": False,
                 "acquired_at": None, "heartbeat_at": None, "label": ""}
     beat = row[2]
+    if isinstance(beat, str):
+        # Raw SQL on SQLite hands DATETIME columns back as text. Subtracting
+        # that from a datetime raised TypeError, so startup recovery could
+        # never release a lease left behind by a restart mid-scrape.
+        beat = datetime.fromisoformat(beat)
     age = (_now() - beat).total_seconds() if beat else float("inf")
     return {
         "held": True, "holder": row[0], "stale": age > ttl_s,

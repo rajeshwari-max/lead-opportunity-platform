@@ -1,3 +1,4 @@
+import { OpportunityDocument } from "./OpportunityDocument";
 import { SaveLeadButton, ReviewLeadButton, recordLeadActivity } from "./DashboardLeads";
 import {
   createColumnHelper,
@@ -551,7 +552,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, w
                             />
                             <div className="min-w-0 flex-1">
                               {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                              <div className="mt-2"><SaveLeadButton id={o.id} /></div>
+                              <div className="mt-2"><SaveLeadButton id={o.id} /><OpportunityDocument opportunity={o} /></div>
                             </div>
                           </div>
                         ) : (

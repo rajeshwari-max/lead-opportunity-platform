@@ -84,8 +84,11 @@ def cmd_status(_args) -> int:
     print(f"  exists     : {SESSION_FILE.exists()}")
     print(f"  connected  : {has_profile()}")
     print("checking the live site…")
-    print(f"  signed in  : {verify_session()}")
-    return 0
+    signed_in = verify_session()
+    print(f"  signed in  : {signed_in}")
+    # deploy/update.sh reads this exit code. Returning 0 unconditionally made
+    # it print "DevelopmentAid session is ready" when signed in was False.
+    return 0 if signed_in else 3
 
 
 def cmd_push(args) -> int:

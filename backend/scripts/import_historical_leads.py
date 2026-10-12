@@ -30,7 +30,10 @@ ROW_FIELDS = (
     "eligibility_text", "funding", "company_relevance", "action_taken", "status",
     "outcome", "won_lost", "reason", "reviewer_comment", "event_date",
 )
-RAW_DATA_FIELDS = ("status_group", "project_or_folder", "start_date", "due_date")
+RAW_DATA_FIELDS = (
+    "status_group", "project_or_folder", "start_date", "due_date",
+    "duration", "duration_hours",
+)
 
 
 def text(value) -> str:
@@ -125,6 +128,12 @@ def status_mapping(status: str) -> tuple[str, str, str, str]:
 def read_excel(path: Path) -> list[dict]:
     from openpyxl import load_workbook
 
+    # Read values in streaming mode, but open a second lightweight view for
+    # hyperlinks. Wrike stores the useful lead URL on the Title cell and the
+    # old importer silently discarded it. A normal-mode workbook is required
+    # because read-only cells do not expose hyperlinks.
+    link_workbook = load_workbook(path, read_only=False, data_only=True)
+    link_sheet = link_workbook[link_workbook.sheetnames[0]]
     workbook = load_workbook(path, read_only=True, data_only=True)
     sheet = workbook[workbook.sheetnames[0]]
     # Wrike's Excel export can carry a stale ``<dimension ref="A1">`` even
@@ -143,7 +152,7 @@ def read_excel(path: Path) -> list[dict]:
     if missing:
         raise ValueError(f"Historical workbook is missing column(s): {', '.join(missing)}")
     prepared: list[dict] = []
-    for values in rows:
+    for row_number, values in enumerate(rows, start=2):
         source = dict(zip(headers, values))
         if text(source.get("Item type")).casefold() not in ALLOWED_ITEM_TYPES:
             continue
@@ -157,12 +166,17 @@ def read_excel(path: Path) -> list[dict]:
             continue
         outcome, won_lost, action, reason = status_mapping(status_raw)
         event_date = iso_date(source.get("Due date")) or iso_date(source.get("Start date"))
+        title_column = headers.index("Title") + 1
+        title_cell = link_sheet.cell(row=row_number, column=title_column)
+        hyperlink = title_cell.hyperlink.target if title_cell.hyperlink else ""
+        opportunity_url = safe_text(hyperlink, limit=4000)
+        external_match = re.search(r"[?&]id=([^&#]+)", opportunity_url)
         prepared.append({
             "fingerprint": fingerprint_for(title),
-            "external_id": "",
+            "external_id": safe_text(external_match.group(1), limit=128) if external_match else "",
             "title": title,
             "source": "OST Analytics",
-            "opportunity_url": "",
+            "opportunity_url": opportunity_url,
             "opportunity_type": "",
             "sector": "",
             "verticals": "",
@@ -185,8 +199,12 @@ def read_excel(path: Path) -> list[dict]:
                 "project_or_folder": safe_text(source.get("Project or folder")),
                 "start_date": iso_date(source.get("Start date")),
                 "due_date": iso_date(source.get("Due date")),
+                "duration": safe_text(source.get("Duration"), limit=128),
+                "duration_hours": safe_text(source.get("Duration (Hours)"), limit=128),
             },
         })
+    link_workbook.close()
+    workbook.close()
     return prepared
 
 

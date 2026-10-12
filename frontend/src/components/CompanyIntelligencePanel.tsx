@@ -17,7 +17,7 @@ const listFields: { key: ListField; label: string; help: string }[] = [
   { key: "industries", label: "Industries", help: "Industries in which the company has experience" },
   { key: "sectors", label: "Sectors", help: "Programme sectors and technical domains" },
   { key: "focus_areas", label: "Focus areas", help: "Themes the company actively wants to pursue" },
-  { key: "organization_types", label: "Organisation types", help: "For example NGO, social enterprise or research institution" },
+  { key: "organization_types", label: "Catalyst brands and Devsol verticals", help: "The Catalyst teams used to route and assess opportunities" },
   { key: "capabilities", label: "Capabilities", help: "What the company can demonstrably deliver" },
   { key: "services", label: "Services", help: "Specific services offered to funders and partners" },
   { key: "project_types", label: "Project types", help: "Research, implementation, evaluation and similar work" },
@@ -115,7 +115,7 @@ export function CompanyIntelligencePanel({ readOnly = false }: { readOnly?: bool
               <input className="mt-1 w-full rounded-md border bg-background px-2 py-1.5" value={profile.company_size}
                 disabled={readOnly || busy} onChange={event => setProfile({ ...profile, company_size: event.target.value })} />
             </label>
-            <label className="font-medium">Years operating
+            <label className="font-medium">Organisation-wide years (optional)
               <input type="number" min={0} max={500} className="mt-1 w-full rounded-md border bg-background px-2 py-1.5"
                 value={profile.years_of_operation ?? ""} disabled={readOnly || busy}
                 onChange={event => setProfile({ ...profile, years_of_operation: event.target.value ? Number(event.target.value) : null })} />

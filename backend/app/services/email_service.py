@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.database.models import Opportunity, TeamMember
 from app.services import geo_priority
 from app.services.links import link_kind, resolve_link
+from app.services.opportunity_pdf import lead_link
 
 log = logging.getLogger("scraper")
 
@@ -219,10 +220,11 @@ def _opportunity_email_html(
     """Render digests and reminders with one responsive, size-safe UI."""
     groups = _group_for_digest(opportunities)
     n = len(opportunities)
+    intel = _intelligence_for(opportunities)
     if n <= _COMPACT_ABOVE:
         html = _render_digest(
             member, groups, n, compact=False, cap=None,
-            reminder_days=reminder_days,
+            reminder_days=reminder_days, intel=intel,
         )
         if len(html) <= _SIZE_BUDGET:
             return html
@@ -230,7 +232,7 @@ def _opportunity_email_html(
     for cap in _CAP_LADDER:
         html = _render_digest(
             member, groups, n, compact=True, cap=cap,
-            reminder_days=reminder_days,
+            reminder_days=reminder_days, intel=intel,
         )
         if len(html) <= _SIZE_BUDGET:
             return html
@@ -258,6 +260,7 @@ def _render_digest(
     compact: bool,
     cap: int | None,
     reminder_days: int | None = None,
+    intel: dict | None = None,
 ) -> str:
 
     # Contents strip: counts per region, each an anchor link. Gives the reader
@@ -303,11 +306,11 @@ def _render_digest(
             '<table style="border-collapse:collapse;width:100%;background:#ffffff;">'
             '<tr style="text-align:left;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.03em;">'
             '<th style="padding:8px 10px;">Opportunity</th>'
-            '<th style="padding:8px 10px;">Work / Archetype</th>'
+            '<th style="padding:8px 10px;">Type</th>'
             '<th style="padding:8px 10px;">Deadline</th>'
             + ('<th style="padding:8px 10px;">Action</th>' if _show_wrike() else '')
             + '</tr>'
-            f'{"".join(_digest_rows(member, shown, compact))}{more}</table>'
+            f'{"".join(_digest_rows(member, shown, compact, intel))}{more}</table>'
         )
 
     if reminder_days is not None:
@@ -352,8 +355,67 @@ def _render_digest(
     </div>"""
 
 
+def _intelligence_for(opportunities: list[Opportunity]) -> dict[int, dict]:
+    """Company-intelligence summary per opportunity, keyed by id.
+
+    The same calculation as the dashboard's Company intelligence panel, run
+    without saving. One historical index is built for the whole email. Any
+    failure returns what it has so far: intelligence must never stop an email.
+    """
+    out: dict[int, dict] = {}
+    ids = [o.id for o in opportunities if getattr(o, "id", None)]
+    if not ids:
+        return out
+    try:
+        from app.database.db import session_scope
+        from app.services.company_intelligence import HistoricalIndex, analyze_opportunity
+
+        with session_scope() as db:
+            index = HistoricalIndex.from_db(db)
+            for oid in ids:
+                row = db.get(Opportunity, oid)
+                if row is None:
+                    continue
+                r = analyze_opportunity(db, row, persist=False, index=index)
+                out[oid] = {
+                    "score": r.get("recommendation_score", 0.0),
+                    "priority": r.get("priority", ""),
+                    "confidence": r.get("confidence", ""),
+                    "reasons": list(r.get("reasons") or [])[:2],
+                    "risks": list(r.get("risks") or [])[:2],
+                }
+    except Exception:                                           # noqa: BLE001
+        log.exception("company intelligence for the email failed; sending without it")
+    return out
+
+
+_PRIORITY_COLOUR = {"HIGH": "#047857", "MEDIUM": "#b45309", "LOW": "#64748b"}
+
+
+def _intelligence_block(info: dict | None, compact: bool) -> str:
+    if not info:
+        return ""
+    colour = _PRIORITY_COLOUR.get(info["priority"], "#64748b")
+    badge = (f'<span style="display:inline-block;background:{colour}1a;color:{colour};'
+             f'border-radius:9999px;padding:1px 8px;font-weight:600;">'
+             f'{round(float(info["score"] or 0))}% · {_text(info["priority"].title())} priority</span> '
+             f'<span style="color:#6b7280;">{_text(info["confidence"].lower())} confidence</span>')
+    lines = [f'<div style="color:#4b5563;font-size:12px;margin-top:7px;line-height:1.5;">'
+             f'<b>Company intelligence:</b> {badge}</div>']
+    reasons = info["reasons"][:1] if compact else info["reasons"]
+    risks = [] if compact else info["risks"]
+    if reasons:
+        lines.append('<div style="color:#4b5563;font-size:12px;margin-top:2px;line-height:1.45;">'
+                     f'<b>Why:</b> {"; ".join(_short(r, 140) for r in reasons)}</div>')
+    if risks:
+        lines.append('<div style="color:#4b5563;font-size:12px;margin-top:2px;line-height:1.45;">'
+                     f'<b>Check:</b> {"; ".join(_short(r, 140) for r in risks)}</div>')
+    return "".join(lines)
+
+
 def _digest_rows(
-    member: TeamMember, opportunities: list[Opportunity], compact: bool = False
+    member: TeamMember, opportunities: list[Opportunity], compact: bool = False,
+    intel: dict | None = None,
 ) -> list[str]:
     rows = []
     for o in opportunities:
@@ -382,17 +444,23 @@ def _digest_rows(
         # returns a search on the source site that will find it — far more use
         # in an inbox than plain text plus a homepage, which left the reader to
         # retype the title into the site's own search box.
+        # The title opens the call's PDF: the source's own when the post-scrape
+        # check found one; otherwise retain the source listing with an unavailable notice
+        # The original listing remains available.
         href, kind = resolve_link(o.opportunity_url, o.website, o.source_website, o.title)
-        title = (f'<a href="{_text(href)}" style="color:#4f46e5;font-weight:600;'
+        pdf_href, pdf_kind = lead_link(o)
+        title = (f'<a href="{_text(pdf_href or href)}" style="color:#4f46e5;font-weight:600;'
                  f'text-decoration:none;">{_text(o.title)}</a>')
+        pdf_note = ("PDF from the source" if pdf_kind == "source_pdf"
+                    else "Official document unavailable")
         if kind == "search":
-            title += ('<div style="color:#9ca3af;font-size:11px;margin-top:2px;">'
-                      f'no direct link published — opens a search on {_text(o.source_website)}</div>')
+            original = f"no direct link published — search {_text(o.source_website)}"
         elif link_kind(o.opportunity_url) == "listing":
-            # Lands on an index rather than the call itself. Best available, but
-            # the reader shouldn't be surprised by it.
-            title += ('<div style="color:#9ca3af;font-size:11px;margin-top:2px;">'
-                      'opens a listing page — find it there</div>')
+            original = "original listing page (find it there)"
+        else:
+            original = "open the original listing"
+        title += ('<div style="color:#9ca3af;font-size:11px;margin-top:2px;">'
+                  f'{pdf_note} · <a href="{_text(href)}" style="color:#6b7280;">{original}</a></div>')
         rows.append(f"""
         <tr>
           <td style="padding:10px;border-bottom:1px solid #eee;vertical-align:top;">
@@ -404,7 +472,8 @@ def _digest_rows(
             <div style="color:#4b5563;font-size:12px;margin-top:5px;line-height:1.45;"><b>Eligibility:</b> {eligibility}</div>
             <div style="color:#4b5563;font-size:12px;margin-top:5px;line-height:1.45;"><b>Brand:</b> {_labels(o.brands)}</div>
             <div style="color:#4b5563;font-size:12px;margin-top:3px;line-height:1.45;"><b>Vertical:</b> {_labels(o.verticals)}</div>
-            <div style="color:#4b5563;font-size:12px;margin-top:3px;line-height:1.45;"><b>Archetype:</b> {_text(o.category.value)}</div>
+            <div style="color:#4b5563;font-size:12px;margin-top:3px;line-height:1.45;"><b>Archetype:</b> {_labels(o.archetypes or '')}</div>
+            {_intelligence_block((intel or {}).get(o.id), compact)}
           </td>
           <td style="padding:10px;border-bottom:1px solid #eee;font-size:12px;vertical-align:top;">{_type_cell(o)}</td>
           <td style="padding:10px;border-bottom:1px solid #eee;font-size:12px;vertical-align:top;">{_deadline_cell(o)}</td>

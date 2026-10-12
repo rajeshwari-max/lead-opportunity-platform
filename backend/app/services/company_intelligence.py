@@ -23,7 +23,7 @@ from app.database.models import (
 )
 
 PROFILE_ID = 1
-MODEL_VERSION = "company-fit-rules-2026.10.08-evidence"
+MODEL_VERSION = "company-fit-rules-2026.10.10-catalyst-evidence"
 TAXONOMY_VERSION = "lop-hierarchy-2026.10"
 FEATURE_VERSION = "company-fit-features-v3"
 THRESHOLD_VERSION = "company-fit-thresholds-v1"
@@ -60,9 +60,28 @@ DEVSOL_VERTICALS = (
 # never re-seeded on restart.
 DEFAULT_PROFILE_LISTS = {
     "geographic_focus": ["India", "South Asia"],
+    # This compatibility field used to contain generic legal entity types.
+    # For Catalyst it now represents the teams against which an opportunity is
+    # routed. The API name remains unchanged so existing deployments migrate
+    # without a destructive database change.
+    "organization_types": [*BRANDS, *DEVSOL_VERTICALS],
     "funding_types_of_interest": [
         "Grant", "RFP", "Tender", "Proposal", "Fellowship", "Award", "Challenge",
     ],
+}
+
+# Only facts explicitly supplied in the completed brand forms are recorded
+# here. Unknowns remain unknown: a historical win demonstrates experience, not
+# a legal registration. CAC opportunities can be routed through the ICF/CMS
+# entity, but CAC itself is not represented as a separately registered entity.
+BRAND_ENTITY_FACTS = {
+    "CMS": {"For-profit"},
+    "Swasti": {"Non-profit / NGO"},
+    "Vrutti": {"Non-profit / NGO"},
+    "Green Foundation": {"Non-profit / NGO"},
+    "Upfront": set(),
+    "Community Action Collab": set(),
+    "Setu": set(),
 }
 
 _SOUTH_ASIA_COUNTRIES = {
@@ -173,7 +192,10 @@ def profile_dict(profile: CompanyProfile) -> dict:
         "updated_at": profile.updated_at,
     }
     for field in LIST_FIELDS:
-        result[field] = _loads(getattr(profile, field), [])
+        values = _loads(getattr(profile, field), [])
+        if not profile.updated_by and not values and field in DEFAULT_PROFILE_LISTS:
+            values = list(DEFAULT_PROFILE_LISTS[field])
+        result[field] = values
     result["recommendation_weights"] = {
         **DEFAULT_WEIGHTS, **_loads(profile.recommendation_weights, {})
     }
@@ -261,7 +283,8 @@ def _company_meets_geography(company_location: str, requirement: str) -> bool:
     return False
 
 
-def eligibility_matches(opportunity: Opportunity, profile: dict) -> list[dict]:
+def eligibility_matches(opportunity: Opportunity, profile: dict,
+                        similar_leads: list[dict] | None = None) -> list[dict]:
     original = (opportunity.eligibility or "").strip()
     matches: list[dict] = []
 
@@ -284,6 +307,18 @@ def eligibility_matches(opportunity: Opportunity, profile: dict) -> list[dict]:
                                   "MATCH" if hit else "MISMATCH",
                                   original))
 
+    selected_brands = _csv(opportunity.brands)
+    selected_verticals = [value for value in _csv(opportunity.verticals)
+                          if value != "Social Business"]
+    routed_to = selected_brands + selected_verticals
+    matches.append(_criterion(
+        "Catalyst brand / vertical",
+        "Best-fit Catalyst team for this opportunity",
+        ", ".join(routed_to),
+        "MATCH" if routed_to else "UNKNOWN",
+        "Based on the opportunity classification; a reviewer can correct these labels.",
+    ))
+
     org_patterns = {
         "Non-profit / NGO": r"\b(non[- ]?profit|not[- ]for[- ]profit|ngos?|civil society)\b",
         "For-profit": r"\b(for[- ]?profit|private compan(?:y|ies)|commercial entit(?:y|ies))\b",
@@ -291,33 +326,47 @@ def eligibility_matches(opportunity: Opportunity, profile: dict) -> list[dict]:
         "Government": r"\b(government|public sector|municipal|local authorit)\b",
     }
     required_org = [name for name, pattern in org_patterns.items() if re.search(pattern, original, re.I)]
-    company_org = profile["organization_types"]
+    entity_facts = {
+        fact for brand in selected_brands for fact in BRAND_ENTITY_FACTS.get(brand, set())
+    }
     if not required_org:
-        matches.append(_criterion("Organization type", "No organization type requirement found",
-                                  ", ".join(company_org), "NOT_APPLICABLE", original))
-    elif not company_org:
-        matches.append(_criterion("Organization type", ", ".join(required_org), "",
+        matches.append(_criterion("Legal entity fit", "No legal entity requirement found",
+                                  ", ".join(sorted(entity_facts)), "NOT_APPLICABLE", original))
+    elif not entity_facts:
+        matches.append(_criterion("Legal entity fit", ", ".join(required_org), "",
                                   "UNKNOWN", original))
     else:
         required_tokens = _tokens(" ".join(required_org))
-        company_tokens = _tokens(" ".join(company_org))
+        company_tokens = _tokens(" ".join(entity_facts))
         status = "MATCH" if required_tokens & company_tokens else "MISMATCH"
-        matches.append(_criterion("Organization type", ", ".join(required_org),
-                                  ", ".join(company_org), status, original))
+        matches.append(_criterion("Legal entity fit", ", ".join(required_org),
+                                  ", ".join(sorted(entity_facts)), status, original))
 
     years = [int(v) for v in re.findall(r"(?:minimum|at least|min\.?)[^\d]{0,15}(\d{1,2})\s+years?", original, re.I)]
+    similar_leads = similar_leads or []
+    dated_history = sorted(
+        (row for row in similar_leads if row.get("event_date")),
+        key=lambda row: row["event_date"],
+    )
+    oldest_year = int(dated_history[0]["event_date"][:4]) if dated_history else None
+    evidenced_years = max(0, datetime.now(timezone.utc).year - oldest_year) if oldest_year else None
+    history_summary = (
+        f"{evidenced_years}+ years evidenced by similar leads (oldest: {oldest_year})"
+        if evidenced_years is not None else "No dated similar lead found"
+    )
     if not years:
-        matches.append(_criterion("Years of operation", "No minimum years found",
-                                  str(profile["years_of_operation"] or ""), "NOT_APPLICABLE", original))
-    elif profile["years_of_operation"] is None:
-        matches.append(_criterion("Years of operation", f"At least {max(years)} years", "",
-                                  "UNKNOWN", original))
+        matches.append(_criterion("Relevant experience history", "No minimum experience period found",
+                                  history_summary, "NOT_APPLICABLE",
+                                  "Derived from linked historical leads, not assumed company age."))
+    elif evidenced_years is None:
+        matches.append(_criterion("Relevant experience history", f"At least {max(years)} years", "",
+                                  "UNKNOWN", "No dated similar historical lead was found."))
     else:
         required = max(years)
-        matches.append(_criterion("Years of operation", f"At least {required} years",
-                                  f"{profile['years_of_operation']} years",
-                                  "MATCH" if profile["years_of_operation"] >= required else "MISMATCH",
-                                  original))
+        matches.append(_criterion("Relevant experience history", f"At least {required} years",
+                                  history_summary,
+                                  "MATCH" if evidenced_years >= required else "MISMATCH",
+                                  "Calculated from the oldest dated similar historical lead."))
 
     cert_required = bool(re.search(r"\b(certif|accredit|registration|registered under|licen[cs])", original, re.I))
     certifications = profile["certifications"]
@@ -335,7 +384,11 @@ def eligibility_matches(opportunity: Opportunity, profile: dict) -> list[dict]:
 
 
 def _eligibility_score(matches: list[dict]) -> tuple[float, str]:
-    material = [m for m in matches if m["status"] != "NOT_APPLICABLE"]
+    # Brand/vertical routing is strategic fit, not proof that an applicant is
+    # legally eligible. Show it in the same evidence panel for convenience but
+    # never let it manufacture an eligibility score.
+    material = [m for m in matches if m["status"] != "NOT_APPLICABLE"
+                and m["criterion"] != "Catalyst brand / vertical"]
     if not material:
         return 0.0, "UNKNOWN"
     counts = Counter(m["status"] for m in material)
@@ -407,13 +460,30 @@ def _profile_fit(opportunity: Opportunity, profile: dict) -> tuple[float, float,
 
 
 def _historical_text(row: HistoricalLead) -> str:
-    # Imported taxonomy labels are machine generated. Matching on them alone
-    # makes unrelated leads appear similar, so titles establish the overlap.
-    return row.title or ""
+    raw = _loads(row.raw_data, {})
+    return " ".join(filter(None, [
+        row.title, row.focus_area, row.geography, row.brands, row.verticals,
+        raw.get("description", ""), raw.get("brief_description", ""),
+    ]))
 
 
 def _opportunity_text(row: Opportunity) -> str:
-    return row.title or ""
+    return " ".join(filter(None, [
+        row.title, row.summary, row.eligibility, row.brands, row.verticals,
+        row.country, row.region, row.location,
+    ]))
+
+
+def _historical_period(row: HistoricalLead) -> str:
+    raw = _loads(row.raw_data, {})
+    start = raw.get("start_date")
+    due = raw.get("due_date")
+    duration = raw.get("duration")
+    pieces = [value for value in (start, due) if value]
+    period = " to ".join(pieces)
+    if duration:
+        period = f"{period} ({duration})" if period else str(duration)
+    return period
 
 
 @dataclass
@@ -457,6 +527,11 @@ class HistoricalIndex:
                 "reason": row.reason,
                 "matched_terms": sorted(query & _tokens(_historical_text(row))),
                 "event_date": row.event_date.isoformat() if row.event_date else None,
+                "opportunity_url": row.opportunity_url,
+                "brands": _csv(row.brands),
+                "verticals": _csv(row.verticals),
+                "geography": row.geography,
+                "lead_period": _historical_period(row),
             }
             for score, row in scored[:limit]
         ]
@@ -483,7 +558,9 @@ def analyze_opportunity(db: Session, opportunity: Opportunity, *, persist: bool 
                         index: HistoricalIndex | None = None,
                         commit: bool = True) -> dict:
     profile = profile_dict(get_or_create_profile(db, create=persist))
-    eligibility = eligibility_matches(opportunity, profile)
+    index = index or HistoricalIndex.from_db(db)
+    similar = index.similar(opportunity, 5)
+    eligibility = eligibility_matches(opportunity, profile, similar)
     eligibility_score, eligibility_level = _eligibility_score(eligibility)
     computed_eligibility_score = eligibility_score
     computed_eligibility_level = eligibility_level
@@ -504,8 +581,6 @@ def analyze_opportunity(db: Session, opportunity: Opportunity, *, persist: bool 
     # values are needed here.
     strategic_fit, geographic_fit, profile_reasons, _matched, _configured = _profile_fit(
         opportunity, profile)
-    index = index or HistoricalIndex.from_db(db)
-    similar = index.similar(opportunity, 5)
     historical_similarity = similar[0]["similarity"] if similar else 0.0
     decided = [row for row in similar if row["won_lost"] in {"won", "lost"}]
     success_score = round(100 * sum(row["won_lost"] == "won" for row in decided) / len(decided), 1) if decided else 0.0

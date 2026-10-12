@@ -5,6 +5,131 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-12 — Company intelligence assessed against Catalyst teams (Codex work, recorded here)
+
+Codex made these changes without a log entry; recorded on review.
+
+- Eligibility now includes **"Catalyst brand / vertical"** (the team the
+  opportunity is routed to), **"Legal entity fit"** (only facts stated in the
+  brand forms: CMS for-profit; Swasti, Vrutti, Green Foundation non-profit;
+  others unknown — never assumed), and **"Relevant experience history"**,
+  measured from the oldest dated similar historical lead rather than an
+  assumed company age. (`services/company_intelligence.py`)
+- The profile field "Organisation types" is relabelled "Catalyst brands and
+  Devsol verticals" and defaults to those teams; "Years operating" is now
+  optional. (`CompanyIntelligencePanel.tsx`)
+- Similar historical leads link to their original lead and show brands,
+  verticals, geography and lead period. (`OpportunityIntelligenceSection.tsx`)
+- `scripts/import_historical_leads.py` keeps the lead URL stored on the Title
+  cell's hyperlink in the Wrike export (and the external id from it), plus
+  duration fields. Only affects a re-import from the workbook.
+- Workspace header reads "The Catalysts".
+
+---
+
+## 2026-10-12 — Official documents only; Monday deploys no longer blocked by a test
+
+**No generated summary PDFs.** This replaces the "generated summary PDF" part
+of the 2026-10-10 entry below. Emails and both dashboards now link only the
+source's own PDF:
+- Email title → the source PDF when one was found, otherwise the original
+  listing, with "Official document unavailable" under the title.
+- User brief and admin table show "Open source PDF ↗" or "Official document
+  unavailable" (`frontend/src/components/OpportunityDocument.tsx`;
+  `pdf_url`/`pdf_status` added to `OpportunityOut` and the frontend type).
+- Old signed `/api/brief/<id>.pdf` links from earlier emails redirect to the
+  source PDF if one has since been found, otherwise answer 404 "Official
+  document unavailable". `fpdf2` is no longer a dependency.
+- `scripts/pdf_backfill.py` gained `--all` (resumable batches until no row is
+  unchecked), `--include-archived`, and `--retry-missing`.
+- DevelopmentAid stays skipped except where an exact, verified original call
+  page is mapped (`discovery_page`; currently grant 1697956 → the EIT Culture &
+  Creativity call). See `docs/official-opportunity-documents.md`.
+
+**`test_scheduled_slot_still_registers_its_job` failed every Monday.** The
+fixture's schedule is weekly, Monday 02:00, so on a real Monday after 02:00
+`start()` took the catch-up branch and called `asyncio.create_task` with no
+running loop. `deploy/update.sh` runs the suite, so a Monday deploy stopped
+there. The test now pins `_missed_run_today` to False (it tests registration
+only); production is unaffected — `start()` runs inside the app's event loop.
+
+Verify: `pytest -q` → 1219 passed, 3 skipped; `npx tsc -b --noEmit` clean.
+
+---
+
+## 2026-10-10 — Emails: company intelligence, real archetype, and a PDF behind every lead
+
+**Company intelligence in emails.** Each digest/reminder row now shows the
+recommendation score, priority and confidence, plus up to two reasons ("Why")
+and two risks ("Check") — the same calculation as the dashboard panel, run
+without saving. If it fails for any reason the email still goes out without it.
+(`email_service._intelligence_for`, `_intelligence_block`)
+
+**Archetype was showing the category.** "Archetype: RFP" printed the document
+type. It now prints the CMS archetype (Devsol / Social Business) or "Not
+classified". The column header "Work / Archetype" is now "Type", which is what
+it always showed.
+
+**A PDF behind every lead.** The email title now opens a PDF:
+- the source's own PDF (RFP, ToR, call document) when one is found, or
+- a generated summary PDF with the details and the link to the actual listing.
+The original listing is still linked under the title.
+
+How the source PDF is found (`services/opportunity_pdf.py`):
+- After every scrape (in post-scrape maintenance), up to 400 live opportunities
+  not yet checked are looked at, newest first, 4 at a time, within 15 minutes.
+- Plain HTTP fetch of the opportunity's own page, then the PDF link scored as
+  about this call (ToR/RFP/guidelines words, title overlap) and never footer
+  PDFs (annual report, privacy policy). Listing/index pages are skipped.
+- No login, no browser, no retries past a bot check: 401/403/429 or a challenge
+  page is stored as `blocked`. DevelopmentAid (session-only) is never fetched.
+- Results go in three new nullable columns: `pdf_url`, `pdf_status`,
+  `pdf_checked_at` (added automatically at startup). Network work happens with
+  no transaction open; writes are short batches.
+- Settings: `LOP_PDF_DISCOVERY_ENABLED`, `_LIMIT`, `_CONCURRENCY`, `_BUDGET_S`.
+- `scripts/pdf_backfill.py` covers opportunities that were live before this.
+
+Generated PDFs are rendered on request at `/api/brief/<id>.pdf?sig=...`. The
+signature is an HMAC of the id, so the link opens from an inbox without a
+login but cannot be guessed or reused for another opportunity; the path is
+exempt from the dashboard login like the old approval links. If the source PDF
+is found later, the same link redirects to it. New dependency: `fpdf2`.
+
+Tests: `tests/test_opportunity_pdf.py` (19).
+
+---
+
+## 2026-10-10 — Deploy no longer claims DevelopmentAid is ready; source sector labelled honestly
+
+- **DevelopmentAid status.** `scripts/devaid_session.py status` always exited
+  0, so `deploy/update.sh` printed "DevelopmentAid session is ready" directly
+  under "signed in : False". It now exits 3 when not signed in, and the deploy
+  prints its existing warning instead. Test: `tests/test_devaid_status_exit_code.py`.
+- **Source sector in the brief.** When an opportunity had no CMS vertical, the
+  user dashboard fell back to the source website's own sector (e.g. "Gender &
+  Human Rights") and displayed it as "CMS / Devsol / Gender & Human Rights".
+  Only real CMS verticals are shown as CMS tags now; the source's sector appears
+  on its own line as "Source sector". (`frontend/src/components/UserDashboard.tsx`)
+
+---
+
+## 2026-10-09 — Live check of every scraper; startup can release a stuck lease
+
+- **`backend/scripts/check_all_sources.py`** (new): crawls each registered
+  source for 2 pages exactly as production does, writes nothing, and gives a
+  verdict per source — WORKING, WORKING QUIET, EMPTY, BLOCKED, PARSER BROKEN,
+  CRASHED — next to its dashboard state. Results also go to
+  `backend/data/debug/source_check_<date>.json/.csv`. Refuses to run while a
+  scrape holds the lease (override with `--force`).
+- **`run_lock.status()`** subtracted a text timestamp from a datetime (raw SQL
+  on SQLite returns text), so whenever a lease was held — e.g. a restart in the
+  middle of a scrape — startup recovery raised and the lease was not released.
+  It now parses the text. Test: `tests/test_run_lock_status_text_dates.py`.
+
+Verify: `pytest -q` → 1192 passed, 3 skipped.
+
+---
+
 ## 2026-10-08 — Sources that found nothing no longer say "Stopped by a user"
 
 Source health showed "cancelled — Stopped by a user." for sources nobody had

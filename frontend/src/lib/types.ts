@@ -21,6 +21,9 @@ export interface Opportunity {
   deadline: string | null;
   website: string;
   opportunity_url: string;
+  pdf_url?: string | null;
+  pdf_status?: string | null;
+  pdf_checked_at?: string | null;
   /** Always-clickable destination, computed by the backend.
    *  "direct"  = the opportunity's own page
    *  "listing" = the funder's index/section page — the call is on it somewhere,
@@ -419,6 +422,11 @@ export interface SimilarHistoricalLead {
   won_lost: string;
   reason: string;
   event_date: string | null;
+  opportunity_url: string;
+  brands: string[];
+  verticals: string[];
+  geography: string;
+  lead_period: string;
 }
 
 export interface OpportunityIntelligence {

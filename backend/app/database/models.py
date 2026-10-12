@@ -92,6 +92,13 @@ class Opportunity(Base):
     vertical_scores: Mapped[str | None] = mapped_column(Text)
     classification_evidence: Mapped[str | None] = mapped_column(Text)
     classified_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # The source's own PDF for this call (RFP, ToR, guidelines), found after
+    # each scrape by services/opportunity_pdf.py. pdf_status says what the
+    # check saw: found | none | blocked | error | skipped. NULL checked_at =
+    # not looked at yet. Emails link the PDF, or a generated summary PDF.
+    pdf_url: Mapped[str | None] = mapped_column(String(1024))
+    pdf_status: Mapped[str | None] = mapped_column(String(16))
+    pdf_checked_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
     # Research vs Implementation — decides which team an RFP is routed to.
     # Empty means genuinely unclear from the text; see services/work_type.py.
     work_type: Mapped[str] = mapped_column(String(32), default="", index=True)

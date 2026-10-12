@@ -109,7 +109,8 @@ export function OpportunityIntelligenceSection({ opportunity, readOnly = false }
     }
   };
 
-  const statedCriteria = data?.eligibility_matches.filter(item => item.status !== "NOT_APPLICABLE") ?? [];
+  const statedCriteria = data?.eligibility_matches.filter(item =>
+    item.status !== "NOT_APPLICABLE" && item.criterion !== "Catalyst brand / vertical") ?? [];
   const matchedCriteria = statedCriteria.filter(item => item.status === "MATCH").length;
 
   return <section className="ud-intelligence" aria-label="Company intelligence">
@@ -131,7 +132,7 @@ export function OpportunityIntelligenceSection({ opportunity, readOnly = false }
       </div>
 
       <details className="ud-intelligence-details" open>
-        <summary>Eligibility criteria</summary>
+        <summary>Eligibility and Catalyst fit</summary>
         <div className="ud-criteria">{data.eligibility_matches.map((item, index) => <article key={`${item.criterion}-${index}`}>
           <div><strong>{item.criterion}</strong><span className={`ud-criterion ud-criterion-${item.status.toLowerCase()}`}>{item.status.replace("_", " ")}</span></div>
           <p><b>Required:</b> {item.requirement}</p>
@@ -166,8 +167,14 @@ export function OpportunityIntelligenceSection({ opportunity, readOnly = false }
       <details className="ud-intelligence-details">
         <summary><History size={13} /> Similar historical leads ({data.similar_leads.length})</summary>
         {data.similar_leads.length ? <div className="ud-similar-leads">{data.similar_leads.map(lead => <article key={lead.id}>
-          <strong>{lead.title}</strong><span>{score(lead.similarity)} similar</span>
+          <strong>{lead.opportunity_url
+            ? <a href={lead.opportunity_url} target="_blank" rel="noreferrer">{lead.title}</a>
+            : lead.title}</strong><span>{score(lead.similarity)} similar</span>
           <p>{[lead.status, lead.won_lost, lead.outcome].filter(Boolean).join(" · ") || "Outcome not verified"}</p>
+          {(lead.brands.length || lead.verticals.length || lead.geography) && <p className="ud-sub">
+            {[...lead.brands, ...lead.verticals, lead.geography].filter(Boolean).join(" · ")}
+          </p>}
+          {lead.lead_period && <p className="ud-sub">Lead period: {lead.lead_period}</p>}
           {lead.reason && <p className="ud-sub">{lead.reason}</p>}
         </article>)}</div> : <p className="ud-sub">No sufficiently similar historical lead was found.</p>}
       </details>

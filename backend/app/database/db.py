@@ -314,6 +314,22 @@ def _run_migrations(conn) -> None:
             "ON opportunities(archetypes)"
         )
 
+        # ------------------------------------------------- source PDF
+        # Additive and nullable: NULL pdf_checked_at means "not looked at yet",
+        # which is exactly what every existing row is.
+        for name, ddl in (
+            ("pdf_url",        "VARCHAR(1024)"),
+            ("pdf_status",     "VARCHAR(16)"),
+            ("pdf_checked_at", "DATETIME"),
+        ):
+            if name not in columns("opportunities"):
+                conn.exec_driver_sql(
+                    f"ALTER TABLE opportunities ADD COLUMN {name} {ddl}")
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_opportunities_pdf_checked_at "
+            "ON opportunities(pdf_checked_at)"
+        )
+
     # ------------------------------------------- finish the vertical rename
     #
     # The verticals were renamed ("E4C" -> "E4C(Evidence for Change)",

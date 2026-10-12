@@ -82,6 +82,9 @@ class OpportunityOut(BaseModel):
     status: Status
     source_website: str
     date_scraped: datetime
+    pdf_url: str | None = None
+    pdf_status: str | None = None
+    pdf_checked_at: datetime | None = None
     approved: bool = False
     approved_at: datetime | None = None
     approved_by: str = ""
