@@ -1,5 +1,6 @@
 """Engine/session management + SQLite FTS5 full-text index."""
 import logging
+import os
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -35,8 +36,16 @@ def _sqlite_pragmas(dbapi_conn, _record) -> None:  # pragma: no cover
     #   synchronous=NORMAL  skip an fsync per commit; with WAL this is still
     #                 crash-safe (only a power loss can lose the last commits)
     #   cache_size    ~64 MB page cache, so dedup lookups stay in memory
+    # LOP_SQLITE_BUSY_TIMEOUT_MS lets one-off scripts wait longer than the
+    # API does. deploy/update.sh sets it for the jobs it runs right after a
+    # restart, while the API's startup maintenance is still rewriting rows; at
+    # 30s those jobs failed with "database is locked" (2026-10-12).
+    try:
+        busy_ms = max(1000, int(os.environ.get("LOP_SQLITE_BUSY_TIMEOUT_MS", "30000")))
+    except ValueError:
+        busy_ms = 30000
     for pragma in (
-        "PRAGMA busy_timeout=30000",
+        f"PRAGMA busy_timeout={busy_ms}",
         "PRAGMA synchronous=NORMAL",
         "PRAGMA cache_size=-64000",
         "PRAGMA temp_store=MEMORY",
@@ -248,16 +257,23 @@ def _run_migrations(conn) -> None:
         # Only rows that have never been classified — so this is a one-time
         # backfill that a later re-check can override, not a repeated overwrite
         # of whatever the scrapers have since determined.
-        conn.exec_driver_sql(
-            "UPDATE opportunities "
-            "   SET deadline_state = 'dated', deadline_confidence = 'parsed' "
-            " WHERE deadline_state IS NULL AND deadline IS NOT NULL"
-        )
-        conn.exec_driver_sql(
-            "UPDATE opportunities "
-            "   SET deadline_state = 'rolling', deadline_confidence = 'legacy_assumed' "
-            " WHERE deadline_state IS NULL AND deadline IS NULL"
-        )
+        # Checked with a read first. An UPDATE takes the database write lock
+        # even when it matches nothing, so running these on every init_db()
+        # made every script that calls it queue behind whatever else was
+        # writing — and fail after the busy timeout.
+        if conn.exec_driver_sql(
+            "SELECT 1 FROM opportunities WHERE deadline_state IS NULL LIMIT 1"
+        ).first():
+            conn.exec_driver_sql(
+                "UPDATE opportunities "
+                "   SET deadline_state = 'dated', deadline_confidence = 'parsed' "
+                " WHERE deadline_state IS NULL AND deadline IS NOT NULL"
+            )
+            conn.exec_driver_sql(
+                "UPDATE opportunities "
+                "   SET deadline_state = 'rolling', deadline_confidence = 'legacy_assumed' "
+                " WHERE deadline_state IS NULL AND deadline IS NULL"
+            )
         conn.exec_driver_sql(
             "CREATE INDEX IF NOT EXISTS ix_opp_actionable "
             "ON opportunities(status, deadline_state, deadline)"
@@ -447,7 +463,8 @@ def _run_migrations(conn) -> None:
     # The cross-process scrape lease. create_all() makes the table; this seeds
     # the single row it will ever hold, so acquire() never has to decide whether
     # it is inserting or updating under a race.
-    if "scrape_lease" in _tables(conn):
+    if "scrape_lease" in _tables(conn) and not conn.exec_driver_sql(
+            "SELECT 1 FROM scrape_lease WHERE id = 1").first():
         conn.exec_driver_sql(
             "INSERT OR IGNORE INTO scrape_lease (id, worker_id, acquired_at, "
             "heartbeat_at, label) VALUES (1, NULL, NULL, NULL, '')"

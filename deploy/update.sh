@@ -24,6 +24,13 @@ WORLD_BANK_PAGES=${WORLD_BANK_PAGES:-3}
 RUN_INTELLIGENCE_BACKFILL=${RUN_INTELLIGENCE_BACKFILL:-1}
 INTELLIGENCE_BACKFILL_LIMIT=${INTELLIGENCE_BACKFILL_LIMIT:-10000}
 
+# The jobs below that run after the restart (historical import, intelligence
+# backfill, deadline audit) share the SQLite file with the API's startup
+# maintenance, which rewrites rows for several minutes. At the API's 30-second
+# lock wait they failed with "database is locked". Only processes started by
+# this script see this; the API keeps its own 30 seconds.
+export LOP_SQLITE_BUSY_TIMEOUT_MS=${LOP_SQLITE_BUSY_TIMEOUT_MS:-600000}
+
 say() { printf "\n\033[1;36m==> %s\033[0m\n" "$*"; }
 die() { printf "\n\033[1;31mFAILED: %s\033[0m\n" "$*" >&2; exit 1; }
 

@@ -302,6 +302,31 @@ def test_broad_topics_and_funding_interest_cannot_establish_full_company_fit(int
     assert any("Funding preference match" in reason for reason in result["reasons"])
 
 
+def test_brand_routing_is_not_evidence_for_confidence(intelligence):
+    """Being classified to a Catalyst team is not evidence about the fit.
+
+    Before the fix: the routing criterion (MATCH for every classified row)
+    plus one capability match made 2 evidence points, so this weak,
+    no-history opportunity showed MEDIUM confidence.
+    """
+    session = intelligence["session"]
+    update_profile(session, _profile_payload(
+        countries_of_operation=[], certifications=[], capabilities=["Research"],
+        services=[], geographic_focus=[],
+    ), "admin@catalysts.org")
+    opportunity = _opportunity(
+        session, suffix="routing-only", brands="Vrutti", verticals="Livelihood",
+        eligibility="", summary="A research study on smallholder farming.",
+    )
+    result = analyze_opportunity(session, opportunity, persist=False)
+    routing = next(m for m in result["eligibility_matches"]
+                   if m["criterion"] == "Catalyst brand / vertical")
+    assert routing["status"] == "MATCH"            # still shown in the panel
+    assert result["eligibility_score"] == 0.0      # and still not scored
+    assert any(r.startswith("Capability match") for r in result["reasons"])
+    assert result["confidence"] == "LOW"
+
+
 def test_read_only_intelligence_gets_do_not_write(intelligence, monkeypatch):
     client = intelligence["client"]
     session = intelligence["session"]

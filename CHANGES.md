@@ -5,6 +5,52 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-12 — Deploy jobs no longer fail with "database is locked" after the restart
+
+`update.sh` failed at "Calculating explainable company-fit recommendations":
+`intelligence_backfill.py` → `init_db()` → `database is locked` on
+`UPDATE opportunities SET deadline_state = 'dated' …`.
+
+Why: after the restart the API answers requests and then runs its startup
+maintenance (deadline audit, hierarchy classification, links, geography …)
+in the background, rewriting rows for minutes. The deploy's next jobs start
+straight away. `init_db()` ran two one-time UPDATEs and an INSERT OR IGNORE on
+every call; in SQLite those take the write lock even when they change nothing,
+so the script queued behind the maintenance and gave up after 30 seconds.
+
+- `init_db()` reads first and only runs those writes when there is something to
+  write, so on an up-to-date database it needs no write lock.
+- The lock wait is configurable: `LOP_SQLITE_BUSY_TIMEOUT_MS` (default 30000).
+  `deploy/update.sh` sets 600000 (10 minutes) for the jobs it starts; the API
+  keeps 30 seconds.
+
+Test: `tests/test_init_db_lock_free.py` (init_db succeeds while another process
+holds the write lock — it failed with "database is locked" before the fix).
+Full suite, sequential: 1222 passed, 3 skipped.
+
+---
+
+## 2026-10-12 — Confidence no longer counts the opportunity's own classification
+
+The "Catalyst brand / vertical" check is MATCH for every classified
+opportunity. It was already excluded from the eligibility score, but it was
+still counted as a resolved requirement when working out **confidence**, so
+every classified opportunity got a free evidence point. With one capability
+match on top, a weak opportunity (e.g. a 10% recommendation) showed "medium
+confidence".
+
+Confidence now counts only real eligibility checks (geography, legal entity,
+experience history, certification), verified won/lost history, substantive
+profile matches and reviewer decisions. The routing check is still shown in
+the panel; it just isn't evidence. One constant, `ROUTING_CRITERION`, now
+names it in both places. `MODEL_VERSION` → `company-fit-rules-2026.10.12-
+confidence-evidence`; `update.sh` recalculates stored snapshots on deploy.
+
+Test: `test_brand_routing_is_not_evidence_for_confidence` (MEDIUM before the
+fix, LOW after). Full suite, sequential: 1220 passed, 3 skipped.
+
+---
+
 ## 2026-10-12 — PDF tests passed alone but failed in the full run on EC2
 
 Three tests in `tests/test_opportunity_pdf.py` failed in EC2's sequential

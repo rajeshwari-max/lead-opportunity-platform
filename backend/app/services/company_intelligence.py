@@ -23,7 +23,7 @@ from app.database.models import (
 )
 
 PROFILE_ID = 1
-MODEL_VERSION = "company-fit-rules-2026.10.10-catalyst-evidence"
+MODEL_VERSION = "company-fit-rules-2026.10.12-confidence-evidence"
 TAXONOMY_VERSION = "lop-hierarchy-2026.10"
 FEATURE_VERSION = "company-fit-features-v3"
 THRESHOLD_VERSION = "company-fit-thresholds-v1"
@@ -37,6 +37,10 @@ DEFAULT_WEIGHTS = {
     "opportunity_quality": 5.0,
 }
 DEFAULT_THRESHOLDS = {"high": 70.0, "medium": 45.0}
+# Shown with the eligibility checks for convenience, but it is the
+# opportunity's own classification, not evidence about eligibility. It must
+# count towards neither the eligibility score nor the confidence.
+ROUTING_CRITERION = "Catalyst brand / vertical"
 LIST_FIELDS = (
     "countries_of_operation", "industries", "sectors", "focus_areas",
     "organization_types", "capabilities", "services", "project_types",
@@ -312,7 +316,7 @@ def eligibility_matches(opportunity: Opportunity, profile: dict,
                           if value != "Social Business"]
     routed_to = selected_brands + selected_verticals
     matches.append(_criterion(
-        "Catalyst brand / vertical",
+        ROUTING_CRITERION,
         "Best-fit Catalyst team for this opportunity",
         ", ".join(routed_to),
         "MATCH" if routed_to else "UNKNOWN",
@@ -388,7 +392,7 @@ def _eligibility_score(matches: list[dict]) -> tuple[float, str]:
     # legally eligible. Show it in the same evidence panel for convenience but
     # never let it manufacture an eligibility score.
     material = [m for m in matches if m["status"] != "NOT_APPLICABLE"
-                and m["criterion"] != "Catalyst brand / vertical"]
+                and m["criterion"] != ROUTING_CRITERION]
     if not material:
         return 0.0, "UNKNOWN"
     counts = Counter(m["status"] for m in material)
@@ -613,7 +617,11 @@ def analyze_opportunity(db: Session, opportunity: Opportunity, *, persist: bool 
             f"A reviewer set eligibility to {eligibility_level}"
             + (f": {eligibility_feedback.reason}" if eligibility_feedback.reason else "")
         )
-    resolved_requirements = sum(m["status"] in {"MATCH", "MISMATCH"} for m in eligibility)
+    # Only real eligibility checks. The routing criterion is MATCH for every
+    # classified opportunity, so counting it gave each one a free evidence
+    # point and let a weak match (e.g. 10%) show "medium confidence".
+    resolved_requirements = sum(m["status"] in {"MATCH", "MISMATCH"} for m in eligibility
+                                if m["criterion"] != ROUTING_CRITERION)
     substantive_matches = sum(
         reason.startswith(("Capability match:", "Service match:",
                            "Project type match:", "Target beneficiary match:"))
