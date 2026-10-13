@@ -135,7 +135,22 @@ def _refresh_access_token(
             connection.expires_at = int(time.time()) + expires_in
             db.commit()
             return access, connection.host
-        except (httpx.HTTPError, SQLAlchemyError, KeyError, TypeError, ValueError) as exc:
+        except httpx.HTTPStatusError as exc:
+            db.rollback()
+            if exc.response.status_code in (400, 401, 403):
+                # invalid_grant: the refresh token was revoked, or rotated by
+                # another installation using a copy of this database. Only a
+                # new sign-in fixes it; retrying never will.
+                raise WrikeNotConnected(
+                    "Wrike rejected the saved sign-in. Reconnect Wrike "
+                    "(open /api/wrike/connect while signed in to the dashboard)."
+                ) from exc
+            raise WrikeConnectionError(
+                f"Wrike token refresh failed (HTTP {exc.response.status_code})") from exc
+        except httpx.HTTPError as exc:
+            db.rollback()
+            raise WrikeConnectionError("Wrike could not be reached to renew the sign-in") from exc
+        except (SQLAlchemyError, KeyError, TypeError, ValueError) as exc:
             db.rollback()
             raise WrikeConnectionError("Wrike token refresh failed") from exc
         except Exception:

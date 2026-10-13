@@ -162,3 +162,33 @@ def test_missed_run_today_compares_clocks_consistently(sched, monkeypatch):
             "a run recorded seconds ago was reported as missed — the UTC/local "
             "mismatch is back"
         )
+
+
+def test_two_pm_india_trigger_is_eight_thirty_utc(sched):
+    from app.schemas.opportunity import ScheduleRequest
+    sched.configure(ScheduleRequest(mode="daily", hour=14, timezone="Asia/Kolkata"))
+    trigger = sched._scheduler.jobs["scheduled-scrape"][1]
+    fire = trigger.get_next_fire_time(None, datetime(2026, 10, 12, 0, tzinfo=timezone.utc))
+    assert fire.astimezone(timezone.utc) == datetime(2026, 10, 12, 8, 30, tzinfo=timezone.utc)
+
+
+def test_invalid_cron_keeps_previous_job(sched):
+    from app.schemas.opportunity import ScheduleRequest
+    sched.configure(ScheduleRequest(mode="daily", hour=14, timezone="Asia/Kolkata"))
+    previous = sched._scheduler.jobs["scheduled-scrape"]
+    with pytest.raises(ValueError):
+        sched.configure(ScheduleRequest(mode="cron", cron="bad"))
+    assert sched._scheduler.jobs["scheduled-scrape"] == previous
+    assert sched.current.hour == 14
+
+
+@pytest.mark.parametrize("statuses, expected", [
+    (["completed", "completed"], "success"),
+    (["completed", "failed"], "partial_success"),
+    (["failed", "failed"], "failed"),
+    (["stopped"], "stopped"),
+    ([], "skipped"),
+])
+def test_run_outcome_is_honest(statuses, expected):
+    from app.services.scheduler import scrape_outcome
+    assert scrape_outcome({str(i): {"status": s} for i, s in enumerate(statuses)}) == expected

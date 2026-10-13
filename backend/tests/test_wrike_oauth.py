@@ -38,7 +38,7 @@ def setup(monkeypatch):
     app = FastAPI()
     app.include_router(wrike.router, prefix="/api")
     app.dependency_overrides[get_db] = lambda: session
-    app.dependency_overrides[wrike.require_wrike_admin] = lambda: {
+    app.dependency_overrides[wrike.require_wrike_connector] = lambda: {
         "email": "admin@example.org", "is_admin": True
     }
     with TestClient(app) as client:
@@ -123,7 +123,7 @@ def test_callback_rejects_untrusted_token_host(setup, monkeypatch):
 
 def test_connect_rejects_auth_disabled(setup, monkeypatch):
     client, _, app = setup
-    del app.dependency_overrides[wrike.require_wrike_admin]
+    del app.dependency_overrides[wrike.require_wrike_connector]
     monkeypatch.setattr(settings, "personal_login", False)
     response = client.get("/api/wrike/connect", follow_redirects=False)
     assert response.status_code == 403
@@ -224,6 +224,45 @@ def test_verify_retries_once_after_unauthorized(setup, monkeypatch):
 
 def test_verify_requires_real_sign_in(setup, monkeypatch):
     client, _, app = setup
-    del app.dependency_overrides[wrike.require_wrike_admin]
+    del app.dependency_overrides[wrike.require_wrike_connector]
     monkeypatch.setattr(settings, "personal_login", False)
     assert client.post("/api/wrike/verify").status_code == 403
+
+
+def test_rejected_refresh_says_reconnect_instead_of_bad_gateway(setup, monkeypatch):
+    """A revoked/rotated refresh token (e.g. a laptop running on a copy of the
+    EC2 database) used to surface as a bare "502 Bad Gateway"."""
+    client, session, _ = setup
+    _save_connection(session, expires_at=0)
+
+    def fake_post(url, *, data, timeout):
+        return _http_response(400, {"error": "invalid_grant"}, url)
+
+    monkeypatch.setattr(wrike_service.httpx, "post", fake_post)
+    response = client.post("/api/wrike/verify")
+    assert response.status_code == 409
+    assert "Reconnect Wrike" in response.json()["detail"]
+
+
+def test_unreachable_wrike_is_named_as_such(setup, monkeypatch):
+    client, session, _ = setup
+    _save_connection(session, expires_at=0)
+
+    def fake_post(url, *, data, timeout):
+        raise httpx.ConnectError("no route", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(wrike_service.httpx, "post", fake_post)
+    response = client.post("/api/wrike/verify")
+    assert response.status_code == 502
+    assert "could not be reached" in response.json()["detail"]
+
+
+def test_a_regular_team_member_can_reconnect_wrike(setup, monkeypatch):
+    """Not admin-only: any signed-in, active team member may (re)connect."""
+    client, _, app = setup
+    del app.dependency_overrides[wrike.require_wrike_connector]
+    monkeypatch.setattr(wrike, "auth_required", lambda: True)
+    monkeypatch.setattr(wrike, "workspace_account", lambda request, db: "person@catalysts.org")
+    response = client.get("/api/wrike/connect", follow_redirects=False)
+    assert response.status_code == 302
+    assert "wrike_oauth_state" in response.headers["set-cookie"]

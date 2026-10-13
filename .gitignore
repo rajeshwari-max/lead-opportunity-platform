@@ -45,3 +45,7 @@ backend/scripts/team.txt
 # "local changes would be overwritten" — which silently left EC2 running old
 # code while the deploy appeared to succeed.
 *.tsbuildinfo
+
+# Pytest caches and the scratch folders test runs leave behind (--basetemp)
+.pytest_cache/
+backend/.pytest-*/

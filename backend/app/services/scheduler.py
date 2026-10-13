@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -77,6 +78,18 @@ async def _daily_digest_and_reminders() -> None:
             log.info("Daily reminders: %s deadline reminder(s) sent", n)
     except Exception:
         log.exception("Deadline reminders failed")
+
+
+def scrape_outcome(progress: dict) -> str:
+    statuses = [p.get("status") for p in progress.values()]
+    if not statuses:
+        return "skipped"
+    completed = statuses.count("completed")
+    if completed == len(statuses):
+        return "success"
+    if completed:
+        return "partial_success"
+    return "failed" if "failed" in statuses else "stopped"
 
 
 class ScrapeScheduler:
@@ -214,22 +227,11 @@ class ScrapeScheduler:
         exact-to-the-second. cron mode is too generic to safely reason about
         here, so it's excluded (falls back to waiting for its next real fire).
 
-        Clock note. `last_run` is stored as naive UTC (`datetime.now(timezone.utc)
-        .replace(tzinfo=None)`), while CronTrigger fires on the scheduler's local
-        timezone. Comparing `last_run.date()` against a naive LOCAL `now.date()`
-        mixes the two: on a UTC host they agree, but on a UTC+5:30 laptop any run
-        between 18:30 and midnight local is stamped with tomorrow's UTC date, so
-        the comparison reports "not run today" for a run that just happened — and
-        with catch-up enabled that starts a second scrape.
-
-        Both sides are now read in UTC. That leaves the scheduled-instant
-        comparison approximate on a non-UTC host, which is acceptable for a
-        yes/no catch-up decision and is why this stays 'best-effort'; the real
-        fix for scheduling across timezones is an explicit application timezone,
-        which belongs with the rest of the Phase 2 scheduling work.
+        Schedule wall-clock times use the saved IANA timezone. Run history
+        remains UTC; compare actual instants to handle midnight consistently.
         """
         req = self.current
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).astimezone(ZoneInfo(req.timezone))
         if req.mode == "daily":
             due_today = True
         elif req.mode == "weekly":
@@ -245,7 +247,7 @@ class ScrapeScheduler:
         scheduled = now.replace(hour=req.hour, minute=req.minute, second=0, microsecond=0)
         if now < scheduled:
             return False
-        return self.last_run is None or self.last_run.date() != now.date()
+        return self.last_run is None or self.last_run.replace(tzinfo=timezone.utc) < scheduled.astimezone(timezone.utc)
 
     def shutdown(self) -> None:
         if self._scheduler.running:
@@ -262,6 +264,21 @@ class ScrapeScheduler:
         a scrape schedule set. Nothing surfaced the loss: the schedule card
         showed the scrape times correctly and the digest simply never fired.
         """
+        if req.mode != "manual":
+            triggers = {
+                "daily": CronTrigger(hour=req.hour, minute=req.minute, timezone=req.timezone),
+                "weekly": CronTrigger(day_of_week="mon", hour=req.hour, minute=req.minute, timezone=req.timezone),
+                "monthly": CronTrigger(day=1, hour=req.hour, minute=req.minute, timezone=req.timezone),
+                "yearly": CronTrigger(month=1, day=1, hour=req.hour, minute=req.minute, timezone=req.timezone),
+            }
+            if req.mode == "cron":
+                if not req.cron:
+                    raise ValueError("cron expression required when mode='cron'")
+                trigger = CronTrigger.from_crontab(req.cron, timezone=req.timezone)
+            else:
+                trigger = triggers.get(req.mode)
+                if trigger is None:
+                    raise ValueError(f"Unknown schedule mode: {req.mode}")
         try:
             self._scheduler.remove_job(_JOB_ID)
         except Exception:
@@ -272,21 +289,6 @@ class ScrapeScheduler:
             if persist:
                 self._save_state()
             return
-
-        triggers = {
-            "daily": CronTrigger(hour=req.hour, minute=req.minute),
-            "weekly": CronTrigger(day_of_week="mon", hour=req.hour, minute=req.minute),
-            "monthly": CronTrigger(day=1, hour=req.hour, minute=req.minute),
-            "yearly": CronTrigger(month=1, day=1, hour=req.hour, minute=req.minute),
-        }
-        if req.mode == "cron":
-            if not req.cron:
-                raise ValueError("cron expression required when mode='cron'")
-            trigger = CronTrigger.from_crontab(req.cron)
-        else:
-            trigger = triggers.get(req.mode)
-            if trigger is None:
-                raise ValueError(f"Unknown schedule mode: {req.mode}")
 
         self._scheduler.add_job(self._scrape_all, trigger, id=_JOB_ID,
                                 replace_existing=True, **_SCRAPE_JOB_GUARDS)
@@ -318,15 +320,14 @@ class ScrapeScheduler:
             self.last_status = "skipped"
             self._save_state()
             return
+        self.last_status = "running"
+        self._save_state()
         # Wait for the job to finish so the outcome can be recorded.
         try:
             while manager.state != "idle":
                 await asyncio.sleep(2)
-            failed = any(
-                p.get("status") == "failed" for p in manager.progress.values()
-            )
-            self.last_status = "failed" if failed else "success"
-            if not failed:
+            self.last_status = scrape_outcome(manager.progress)
+            if self.last_status == "success":
                 self.last_success = datetime.now(timezone.utc).replace(tzinfo=None)
             log.info("Scheduled scrape finished: %s", self.last_status)
         except Exception:

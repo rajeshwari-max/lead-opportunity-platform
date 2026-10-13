@@ -21,6 +21,7 @@ const statusColor: Record<string, string> = {
   failed: "text-red-500",
   stopped: "text-amber-500",
   success: "text-emerald-500",
+  partial_success: "text-amber-500",
   skipped: "text-amber-500",
 };
 
@@ -33,6 +34,9 @@ export function ScraperPanel({ sources, progress }: Props) {
   const [siteQuery, setSiteQuery] = useState("");
   const [scrapeVerticals, setScrapeVerticals] = useState<string[]>([]);
   const [schedule, setSchedule] = useState<ScheduleStatus | null>(null);
+  const [scheduleTime, setScheduleTime] = useState("14:00");
+  const [scheduleZone, setScheduleZone] = useState("Asia/Kolkata");
+  const [scheduleError, setScheduleError] = useState("");
   const [cron, setCron] = useState("0 2 * * *");
   const active = progress != null && progress.state !== "idle";
   const allSelected = sources.length > 0 && selected.length === sources.length;
@@ -53,6 +57,8 @@ export function ScraperPanel({ sources, progress }: Props) {
       .getSchedule()
       .then((s) => {
         setSchedule(s);
+        setScheduleZone(s.timezone || "UTC");
+        setScheduleTime(`${String(s.hour).padStart(2,"0")}:${String(s.minute).padStart(2,"0")}`);
         if (s.cron) setCron(s.cron);
       })
       .catch(console.error);
@@ -79,12 +85,15 @@ export function ScraperPanel({ sources, progress }: Props) {
     setScrapeVerticals((prev) => (checked ? [...prev, s] : prev.filter((x) => x !== s)));
 
   const applySchedule = async (mode: string) => {
+    try {
     const result = await api.setSchedule(
       mode === "cron"
-        ? { mode, cron }
-        : { mode, hour: schedule?.hour ?? 2, minute: schedule?.minute ?? 0 }
+        ? { mode, cron, timezone: scheduleZone }
+        : { mode, hour: Number(scheduleTime.split(":")[0]), minute: Number(scheduleTime.split(":")[1]), timezone: scheduleZone }
     );
-    if (result) setSchedule(result);
+    if (result) { setSchedule(result); setScheduleError(""); }
+    else setScheduleError("Schedule was not saved. Check the time and cron expression.");
+    } catch { setScheduleError("Could not reach the server. The schedule was not changed."); }
   };
 
   return (
@@ -251,6 +260,15 @@ export function ScraperPanel({ sources, progress }: Props) {
             )}
           </div>
 
+          <div className="flex flex-wrap gap-2 text-xs">
+            <label>Time <input type="time" value={scheduleTime} onChange={e => setScheduleTime(e.target.value)} /></label>
+            <label>Timezone <select value={scheduleZone} onChange={e => setScheduleZone(e.target.value)}>
+              {[...new Set([scheduleZone, "Asia/Kolkata", "UTC"])].map(zone => <option key={zone}>{zone}</option>)}
+            </select></label>
+            <Button size="sm" onClick={() => applySchedule(schedule?.mode || "daily")}>Save schedule</Button>
+          </div>
+          <p className="text-xs text-muted-foreground">Custom cron uses the selected timezone. For multiple daily hours, use a cron expression.</p>
+          {scheduleError && <p role="alert" className="text-xs text-red-500">{scheduleError}</p>}
           {schedule && schedule.mode !== "manual" && (
             <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg border border-border bg-muted/30 p-2.5 text-[11px]">
               <span className="text-muted-foreground">Next Run</span>
@@ -259,9 +277,9 @@ export function ScraperPanel({ sources, progress }: Props) {
               <span className="text-right font-medium">{fmtWhen(schedule.last_run)}</span>
               <span className="text-muted-foreground">Status</span>
               <span className={`text-right font-medium ${statusColor[schedule.last_status ?? ""] ?? ""}`}>
-                {schedule.last_status ?? "not run yet"}
+                {schedule.last_status === "partial_success" ? "Partial success — some sources failed or stopped" : schedule.last_status ?? "not run yet"}
               </span>
-              <span className="text-muted-foreground">Last Success</span>
+              <span className="text-muted-foreground">Last fully successful run</span>
               <span className="text-right font-medium">{fmtWhen(schedule.last_success)}</span>
             </div>
           )}

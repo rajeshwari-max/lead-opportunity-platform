@@ -49,7 +49,13 @@ function unclassifiedParams(q: UnclassifiedQuery): URLSearchParams {
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    // Prefer the server's own explanation ("Wrike rejected the saved sign-in")
+    // over the bare status line ("502 Bad Gateway").
+    const data = await res.json().catch(() => ({})) as { detail?: unknown };
+    throw new Error(typeof data.detail === "string" && data.detail
+      ? data.detail : `${res.status} ${res.statusText}`);
+  }
   return res.json() as Promise<T>;
 }
 
@@ -133,7 +139,7 @@ export const api = {
   resume: () => fetch(`${BASE}/scrape/resume`, { method: "POST" }),
   stop: () => fetch(`${BASE}/stop`, { method: "POST" }),
   getSchedule: () => get<ScheduleStatus>("/schedule"),
-  setSchedule: async (body: { mode: string; cron?: string; hour?: number; minute?: number }): Promise<ScheduleStatus | null> => {
+  setSchedule: async (body: { mode: string; cron?: string; hour?: number; minute?: number; timezone?: string }): Promise<ScheduleStatus | null> => {
     const res = await fetch(`${BASE}/schedule`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },

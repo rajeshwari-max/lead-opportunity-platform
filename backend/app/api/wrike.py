@@ -71,6 +71,13 @@ def require_wrike_member(request: Request, db: Session = Depends(get_db)) -> str
     return workspace_account(request, db)
 
 
+def require_wrike_connector(request: Request, db: Session = Depends(get_db)) -> dict:
+    """Who may connect / reconnect / verify Wrike: any signed-in, active team
+    member, the same people who can create Wrike tasks. (Admin-only made a
+    rejected sign-in a dead end for everyone else.) Sign-in must be enabled."""
+    return {"email": require_wrike_member(request, db)}
+
+
 class CreateWrikeTaskIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     member_ids: list[int] = Field(default_factory=list, max_length=20)
@@ -97,8 +104,8 @@ def wrike_folder(
         raise HTTPException(503, "Wrike destination folder is not configured")
     try:
         folder = get_folder(db, settings.wrike_folder_id)
-    except WrikeConnectionError:
-        raise HTTPException(502, "Wrike destination folder could not be verified")
+    except WrikeConnectionError as exc:
+        raise HTTPException(502, f"Wrike destination folder could not be verified: {exc}")
     return {"id": folder["id"], "title": folder.get("title", "Wrike folder")}
 
 
@@ -112,8 +119,8 @@ def wrike_assignees(
     ).all()
     try:
         matches = contact_ids_by_email(db, [member.email for member in members])
-    except WrikeConnectionError:
-        raise HTTPException(502, "Wrike assignees could not be loaded")
+    except WrikeConnectionError as exc:
+        raise HTTPException(502, f"Wrike assignees could not be loaded: {exc}")
     return [{
         "id": member.id,
         "name": member.name,
@@ -164,8 +171,8 @@ def create_wrike_task_for_opportunity(
     try:
         matches = contact_ids_by_email(db, [member.email for member in members]) if members else {}
         get_folder(db, settings.wrike_folder_id)
-    except WrikeConnectionError:
-        raise HTTPException(502, "Wrike contacts or folder could not be verified")
+    except WrikeConnectionError as exc:
+        raise HTTPException(502, f"Wrike contacts or folder could not be verified: {exc}")
     responsible_ids: list[str] = []
     for member in members:
         ids = matches.get(member.email.strip().lower(), set())
@@ -223,20 +230,20 @@ def create_wrike_task_for_opportunity(
 @router.post("/verify")
 def wrike_verify(
     db: Session = Depends(get_db),
-    _admin=Depends(require_wrike_admin),
+    _member=Depends(require_wrike_connector),
 ):
     try:
         return {"reachable": verify_wrike_connection(db)}
-    except WrikeNotConnected:
-        raise HTTPException(409, "Wrike has not been connected")
-    except WrikeConnectionError:
-        raise HTTPException(502, "Could not verify the Wrike connection")
+    except WrikeNotConnected as exc:
+        raise HTTPException(409, str(exc) or "Wrike has not been connected")
+    except WrikeConnectionError as exc:
+        raise HTTPException(502, f"Could not verify the Wrike connection: {exc}")
 
 
 @router.get("/connect")
 def wrike_connect(
     request: Request,
-    _admin=Depends(require_wrike_admin),
+    _member=Depends(require_wrike_connector),
 ):
     if not all((
         settings.wrike_client_id,
@@ -272,7 +279,7 @@ def _callback_error(message: str, status_code: int) -> PlainTextResponse:
 def wrike_oauth_callback(
     request: Request,
     db: Session = Depends(get_db),
-    admin=Depends(require_wrike_admin),
+    member=Depends(require_wrike_connector),
 ):
     supplied_state = request.query_params.get("state")
     expected_state = request.cookies.get(_STATE_COOKIE)
@@ -319,7 +326,7 @@ def wrike_oauth_callback(
     connection.refresh_token_encrypted = encrypted_refresh
     connection.host = host.lower()
     connection.expires_at = int(time.time()) + expires_in
-    connection.connected_by = admin["email"]
+    connection.connected_by = member["email"]
     try:
         db.commit()
     except Exception:

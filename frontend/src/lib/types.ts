@@ -235,6 +235,7 @@ export const VERTICAL_DESCRIPTIONS: Record<string, string> = {
 };
 
 export interface ScheduleStatus {
+  timezone: string;
   mode: string;
   cron: string | null;
   hour: number;

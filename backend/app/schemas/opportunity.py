@@ -193,8 +193,19 @@ class ScrapeRequest(BaseModel):
 class ScheduleRequest(BaseModel):
     mode: str = "manual"        # manual | daily | weekly | monthly | yearly | cron
     cron: str | None = None     # used when mode == "cron"
-    hour: int = 2
-    minute: int = 0
+    hour: int = Field(default=2, ge=0, le=23)
+    minute: int = Field(default=0, ge=0, le=59)
+    timezone: str = "UTC"  # Preserve the interpretation of existing EC2 schedules.
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value: str) -> str:
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("Unknown schedule timezone") from exc
+        return value
 
 
 class ScheduleStatusOut(ScheduleRequest):

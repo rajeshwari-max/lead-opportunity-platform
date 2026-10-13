@@ -112,8 +112,10 @@ def acquire(label: str = "", ttl_s: int = DEFAULT_TTL_S) -> str:
             "WHERE id = :id"), {"id": LEASE_ID}).first()
 
     holder = (row[0] if row else None) or "another process"
-    since = row[1] if row else None
-    beat = row[2] if row else None
+    # Same text-timestamp problem as status(): "a scrape is already running"
+    # surfaced as a TypeError instead of LeaseNotAcquired.
+    since = _as_datetime(row[1]) if row else None
+    beat = _as_datetime(row[2]) if row else None
     age = (now - beat).total_seconds() if beat else float("inf")
     raise LeaseNotAcquired(holder, since, age)
 
@@ -149,6 +151,16 @@ def release(me: str) -> None:
                     "it was taken over while this run was in progress", me)
 
 
+def _as_datetime(value):
+    """Raw SQL on SQLite hands DATETIME columns back as text."""
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return value
+
+
 def status(ttl_s: int = DEFAULT_TTL_S) -> dict:
     """Who holds it, and is that holder still alive? For the dashboard."""
     with session_scope() as db:
@@ -159,12 +171,9 @@ def status(ttl_s: int = DEFAULT_TTL_S) -> dict:
     if not row or not row[0]:
         return {"held": False, "holder": None, "stale": False,
                 "acquired_at": None, "heartbeat_at": None, "label": ""}
-    beat = row[2]
-    if isinstance(beat, str):
-        # Raw SQL on SQLite hands DATETIME columns back as text. Subtracting
-        # that from a datetime raised TypeError, so startup recovery could
-        # never release a lease left behind by a restart mid-scrape.
-        beat = datetime.fromisoformat(beat)
+    # Text from SQLite; subtracting it from a datetime raised TypeError, so
+    # startup recovery could never release a lease left by a mid-scrape restart.
+    beat = _as_datetime(row[2])
     age = (_now() - beat).total_seconds() if beat else float("inf")
     return {
         "held": True, "holder": row[0], "stale": age > ttl_s,

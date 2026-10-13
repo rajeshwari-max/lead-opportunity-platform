@@ -205,3 +205,28 @@ def test_a_row_whose_new_date_has_already_passed_stays_expired(db_mod):
     row = stored(db_mod, "notice_id=8")
     assert row.deadline == date(2020, 1, 1)
     assert row.status is Status.EXPIRED
+
+
+def test_classification_does_not_hold_write_lock_and_previous_row_is_committed(db_mod, monkeypatch):
+    import sqlite3
+    from app.services import scraper_manager as sm
+    from sqlalchemy import select, func
+    from app.database.models import Opportunity
+    original = sm.classify_hierarchy
+    counts = []
+
+    def classify_without_lock(*args, **kwargs):
+        # A separate writer (e.g. run heartbeat) must work during classification.
+        with sqlite3.connect(db_mod.engine.url.database, timeout=0.1) as other:
+            other.execute("BEGIN IMMEDIATE")
+            other.commit()
+        with db_mod.session_scope() as session:
+            counts.append(session.scalar(select(func.count()).select_from(Opportunity)))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(sm, "classify_hierarchy", classify_without_lock)
+    rows = [raw("Request for Proposals: Solar Mini-Grid Study", "https://example.org/notices/1"),
+            raw("Request for Proposals: Water Supply Study", "https://example.org/notices/2")]
+    result = ingest(db_mod, rows)
+    assert result[0] == 2
+    assert counts == [0, 1]

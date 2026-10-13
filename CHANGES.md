@@ -5,6 +5,87 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-13 — Scrape schedule in your own timezone; honest run status; scrapers stop locking each other out (Codex work, recorded here)
+
+Codex made these changes without a log entry; recorded on review.
+
+- **Schedule timezone.** The scrape schedule now stores an IANA timezone
+  (`ScheduleRequest.timezone`, validated). Daily/weekly/monthly/yearly and
+  cron triggers fire in that zone, so "14:00 Asia/Kolkata" fires at 08:30 UTC.
+  Existing saved schedules have no zone and keep meaning UTC, exactly as before.
+  The scraper panel gains a time picker and a timezone choice (Asia/Kolkata or
+  UTC). Missed-run catch-up compares real instants instead of calendar dates,
+  so midnight in one zone is no longer "a different day" in the other.
+  Changing to an invalid cron now leaves the previous schedule in place.
+  (`services/scheduler.py`, `schemas/opportunity.py`, `ScraperPanel.tsx`)
+- **Run status says what happened.** A scheduled run is `success` only when
+  every source completed; some completed → `partial_success` (shown as
+  "Partial success — some sources failed or stopped"); none → `failed` or
+  `stopped`. It used to say `success` unless a source was marked failed.
+  "Last success" is relabelled "Last fully successful run".
+- **Ingest no longer holds the database write lock while classifying.** Each
+  row is classified first; only the duplicate check and insert run inside the
+  write transaction, committed row by row. Other sources, the lease heartbeat,
+  and dashboard writes (saving a lead, intelligence scores) are no longer
+  queued behind a whole page of classification — the cause of "database is
+  locked" crashes such as Pershing Square's. Run bookkeeping (open/close run,
+  lease acquire/release) moved off the event loop, and starting two scrapes at
+  once is serialised by a lock.
+- `.gitignore` now covers `.pytest_cache/` and the `backend/.pytest-*/`
+  scratch folders test runs leave behind.
+
+Tests: `test_two_pm_india_trigger_is_eight_thirty_utc`,
+`test_invalid_cron_keeps_previous_job`, `test_run_outcome_is_honest`,
+`test_classification_does_not_hold_write_lock_and_previous_row_is_committed`.
+Full suite, sequential: 1234 passed, 3 skipped. `tsc` clean.
+
+---
+
+## 2026-10-12 — Any signed-in team member can reconnect Wrike
+
+Connecting, reconnecting and verifying Wrike were admin-only, so when Wrike
+rejected the saved sign-in only an administrator could get the team going
+again. They now use `require_wrike_connector`: any signed-in, active team
+member — the same people who can already create Wrike tasks. Sign-in must
+still be enabled, and `connected_by` records who connected. The Wrike dialog's
+"Reconnect Wrike" error now includes a "Reconnect Wrike now" link.
+(`api/wrike.py`, `WrikeTaskAction.tsx`)
+
+Note: the connection is shared, so the person who reconnects is the Wrike
+account every new task is created through until someone reconnects again.
+
+Test: `test_a_regular_team_member_can_reconnect_wrike`. Full suite,
+sequential: 1226 passed, 3 skipped. `tsc` clean.
+
+---
+
+## 2026-10-12 — Wrike errors say what is wrong; a second scrape no longer crashes on the lock
+
+**"502 Bad Gateway" in the Wrike dialog.** Every Wrike failure reached the
+browser as the bare status line: the routes replaced the reason with a generic
+message, and the frontend's `get()` ignored the server's message altogether.
+- A rejected token refresh (Wrike answers 400/401/403 — the sign-in was
+  revoked, or another installation using a copy of this database already
+  rotated the refresh token) is now `WrikeNotConnected`: "Wrike rejected the
+  saved sign-in. An administrator needs to reconnect Wrike". A network failure
+  says Wrike "could not be reached". (`services/wrike_service.py`)
+- The folder, assignees, task-creation and verify routes include that reason
+  in their response. (`api/wrike.py`)
+- `get()` in `frontend/src/lib/api.ts` shows the server's `detail` when there
+  is one, falling back to "502 Bad Gateway" only when there is not.
+Tests: `test_rejected_refresh_says_reconnect_instead_of_bad_gateway`,
+`test_unreachable_wrike_is_named_as_such`.
+
+**Lease clash crashed with TypeError.** `run_lock.acquire()` had the same
+text-timestamp bug fixed in `status()` on 2026-10-09: starting a scrape while
+another held the lease raised TypeError ("Task exception was never retrieved"
+in errors.log) instead of LeaseNotAcquired. Both now use `_as_datetime()`.
+Test: `test_acquire_reports_a_live_holder_instead_of_crashing`.
+
+Full suite, sequential: 1225 passed, 3 skipped. `tsc` clean.
+
+---
+
 ## 2026-10-12 — Deploy jobs no longer fail with "database is locked" after the restart
 
 `update.sh` failed at "Calculating explainable company-fit recommendations":

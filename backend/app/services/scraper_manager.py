@@ -74,6 +74,7 @@ class ScraperManager:
         self._pause = asyncio.Event()
         self._pause.set()  # set == running, cleared == paused
         self._lock = threading.Lock()
+        self._start_lock = asyncio.Lock()
 
         # idle | running | paused | stopping | finalizing
         #
@@ -96,6 +97,10 @@ class ScraperManager:
     async def start(
         self, sources: list[str] | None = None, verticals: list[str] | None = None
     ) -> None:
+        async with self._start_lock:
+            await self._start(sources, verticals)
+
+    async def _start(self, sources=None, verticals=None) -> None:
         if self._task and not self._task.done():
             raise RuntimeError("A scrape job is already running")
 
@@ -132,8 +137,8 @@ class ScraperManager:
                 "explicitly to override, or clear production_enabled in "
                 "services/source_manifest.py.")
         try:
-            self._lease = run_lock.acquire(
-                label=f"{len(scrapers)} source(s)"
+            self._lease = await asyncio.to_thread(
+                run_lock.acquire, label=f"{len(scrapers)} source(s)"
             )
         except run_lock.LeaseNotAcquired as exc:
             self._log(f"Scrape refused — {exc}")
@@ -254,7 +259,7 @@ class ScraperManager:
                 except Exception:
                     log.exception("post-scrape maintenance failed")
             if self._lease:
-                run_lock.release(self._lease)
+                await asyncio.to_thread(run_lock.release, self._lease)
                 self._lease = None
             self.state = "idle"
             self._log("Scrape job completed")
@@ -339,7 +344,7 @@ class ScraperManager:
     async def _run_source(self, scraper: BaseScraper) -> None:
         prog = self.progress[scraper.name]
         prog["status"] = "running"
-        run_id = self._open_run(scraper.display_name, scraper.name)
+        run_id = await asyncio.to_thread(self._open_run, scraper.display_name, scraper.name)
 
         # Per-source stop: lets one source finish early (stale pages) without
         # stopping the others. Mirrors the global stop event.
@@ -498,12 +503,12 @@ class ScraperManager:
                 empty_proof=probe.get("empty_proof", ""),
                 all_notices_closed=probe.get("all_notices_closed", False),
                 structure_signature=probe.get("structure_signature", ""),
-                last_good_signature=self._last_good_signature(scraper),
+                last_good_signature=await asyncio.to_thread(self._last_good_signature, scraper),
                 expected_container_present=probe.get("expected_container_present"),
                 cancelled=was_stopped,
                 exception=crash,
             )
-            self._close_run(run_id, prog, evidence)
+            await asyncio.to_thread(self._close_run, run_id, prog, evidence)
             # When closed listings are archived they are *included* in `saved`,
             # so reporting them as a separate addend made the totals look wrong
             # ("3536 found = 3024 saved + 3277 expired + 512 dupes").
@@ -558,182 +563,184 @@ class ScraperManager:
         enabled_categories = set(settings.enabled_categories)
         contract = contract_for(source_key or "",
                                 batch[0].source_website if batch else "")
-        with session_scope() as db:
-            # Serialize the check-and-insert with concurrent scrapes/imports.
-            db.execute(text('BEGIN IMMEDIATE'))
-            for raw in batch:
-                deadline = self.deadline_parser.parse(raw.deadline_raw, dayfirst=raw.dayfirst)
-                # 9999-12-31 is DevelopmentAid's "no closing date". Parsed
-                # literally it produced deadlines in the year 9999 and a
-                # countdown of 2.9 million days. Treat it as no deadline, which
-                # is what the source meant, and let the ongoing logic below
-                # handle it from there.
-                if is_sentinel(deadline):
-                    deadline = None
-                # Three states, not two. Conflating the last two is what put
-                # closed calls on the dashboard as permanent "Ongoing" rows.
-                #
-                #   dated    a date we could read  -> Active or Expired, decided
-                #                                    by the date and nothing else
-                #   rolling  the source SAYS there is no closing date  -> Active
-                #   unknown  no date, and no such statement            -> Active
-                #                                    for now, retired by
-                #                                    audit_deadlines() once the
-                #                                    source stops listing it
-                #
-                # "unknown" must not be treated as expired: that would hide every
-                # row from a funder page that simply does not print dates. And it
-                # must not be treated as rolling either: that is immortality, and
-                # it is the bug being fixed. It is a lease, renewed every time a
-                # scrape sees the row again (last_seen) and allowed to lapse
-                # after LOP_ONGOING_MAX_AGE_DAYS.
-                rolling = deadline is None and (
-                    self.deadline_parser.is_ongoing(raw.deadline_raw) or raw.assume_active
-                )
-                # Undated rows are tallied at INSERT, below — see the note
-                # there. Counting them at this point included rows the gates
-                # went on to drop, so the log reported "kept live" about rows
-                # that were never written.
-                # Record the state as evidence, not as a guess. "the source
-                # said rolling" and "we could not read a date" are different
-                # claims and get different confidence markers, so a later audit
-                # can tell which rows rest on the source's word and which rest
-                # on our parser giving up.
-                #
-                # classify_deadline lives in services/actionable.py alongside
-                # the rule that READS these values. Writing a second copy here
-                # is how the two drift until a row is stored in a state the
-                # rule does not expect.
-                d_state, d_confidence = classify_deadline(
-                    raw.deadline_raw, deadline, rolling)
-                is_expired = deadline is not None and deadline < today
-                if is_expired:
-                    expired += 1
-                    if len(expired_samples) < 3:
-                        expired_samples.append(
-                            f"{raw.title[:48]!r} (deadline: {deadline or raw.deadline_raw or 'none'})"
-                        )
-                    # Keep them unless configured otherwise. Dropping closed calls
-                    # threw away thousands of records per run and made "found" vastly
-                    # exceed "saved"; they're stored with status=Expired instead, so
-                    # the dashboard's Active view is unchanged but nothing is lost.
-                    if not settings.keep_expired:
-                        continue
-
-                # Prefer the source's structured notice type over a scraper's
-                # broad page-level hint.  A page can be called "grants" and
-                # still contain an RFP; the record type describes this row.
-                category_hint = (
-                    category_hint_for_record_type(raw.record_type)
-                    or raw.category_hint
-                )
-                rule_category = self.classifier.classify(
-                    raw.title, raw.summary, category_hint)
-                vertical_body = " ".join(filter(None, [raw.summary, raw.vertical, raw.eligibility]))
-                hierarchy = classify_hierarchy(
-                    raw.title,
-                    raw.summary,
-                    raw.eligibility,
-                    raw.organization,
-                    raw.location,
-                    raw.country,
-                    raw.region,
-                    raw.source_website,
-                    rule_category,
-                )
-                category = hierarchy.category
-                vertical_tags = list(hierarchy.verticals)
-                if "Social Business" in hierarchy.archetypes:
-                    vertical_tags.append(VERTICAL_SOCIAL_BUSINESS)
-                non_cms_brands = [brand for brand in hierarchy.brands if brand != "CMS"]
-                if self.vertical_filter and not (set(vertical_tags) & self.vertical_filter):
-                    self._count_off_vertical(raw.source_website)
-                    continue
-                clean_country, clean_region = normalize_geo(raw.country, raw.region)
-                # Sources that publish a funder field win; for the ones that
-                # don't (FundsForNGOs names it only in prose) recover it from
-                # the text rather than leaving the column blank.
-                organization = tidy_organization(raw.organization)
-                if not organization:
-                    organization = extract_organization(raw.summary, raw.title)
-                # Same pattern for the amount: use the source's figure when it
-                # gave one (stripped of page furniture), else read it out of the
-                # listing text, which is where most sources state it.
-                amount = clean_amount(raw.funding_amount)
-                if not amount:
-                    amount = extract_amount(raw.summary, raw.title)
-                # Public tender boards accept submissions, and some of what is
-                # submitted is advertising. Dropped here rather than filtered in
-                # the UI, so it never reaches the database, the digests or the
-                # counts.
-                if is_spam(raw.title, raw.summary):
-                    spam += 1
-                    log.debug("[%s] spam listing skipped: %s",
-                              raw.source_website, (raw.title or "")[:60])
+        for raw in batch:
+            deadline = self.deadline_parser.parse(raw.deadline_raw, dayfirst=raw.dayfirst)
+            # 9999-12-31 is DevelopmentAid's "no closing date". Parsed
+            # literally it produced deadlines in the year 9999 and a
+            # countdown of 2.9 million days. Treat it as no deadline, which
+            # is what the source meant, and let the ongoing logic below
+            # handle it from there.
+            if is_sentinel(deadline):
+                deadline = None
+            # Three states, not two. Conflating the last two is what put
+            # closed calls on the dashboard as permanent "Ongoing" rows.
+            #
+            #   dated    a date we could read  -> Active or Expired, decided
+            #                                    by the date and nothing else
+            #   rolling  the source SAYS there is no closing date  -> Active
+            #   unknown  no date, and no such statement            -> Active
+            #                                    for now, retired by
+            #                                    audit_deadlines() once the
+            #                                    source stops listing it
+            #
+            # "unknown" must not be treated as expired: that would hide every
+            # row from a funder page that simply does not print dates. And it
+            # must not be treated as rolling either: that is immortality, and
+            # it is the bug being fixed. It is a lease, renewed every time a
+            # scrape sees the row again (last_seen) and allowed to lapse
+            # after LOP_ONGOING_MAX_AGE_DAYS.
+            rolling = deadline is None and (
+                self.deadline_parser.is_ongoing(raw.deadline_raw) or raw.assume_active
+            )
+            # Undated rows are tallied at INSERT, below — see the note
+            # there. Counting them at this point included rows the gates
+            # went on to drop, so the log reported "kept live" about rows
+            # that were never written.
+            # Record the state as evidence, not as a guess. "the source
+            # said rolling" and "we could not read a date" are different
+            # claims and get different confidence markers, so a later audit
+            # can tell which rows rest on the source's word and which rest
+            # on our parser giving up.
+            #
+            # classify_deadline lives in services/actionable.py alongside
+            # the rule that READS these values. Writing a second copy here
+            # is how the two drift until a row is stored in a state the
+            # rule does not expect.
+            d_state, d_confidence = classify_deadline(
+                raw.deadline_raw, deadline, rolling)
+            is_expired = deadline is not None and deadline < today
+            if is_expired:
+                expired += 1
+                if len(expired_samples) < 3:
+                    expired_samples.append(
+                        f"{raw.title[:48]!r} (deadline: {deadline or raw.deadline_raw or 'none'})"
+                    )
+                # Keep them unless configured otherwise. Dropping closed calls
+                # threw away thousands of records per run and made "found" vastly
+                # exceed "saved"; they're stored with status=Expired instead, so
+                # the dashboard's Active view is unchanged but nothing is lost.
+                if not settings.keep_expired:
                     continue
 
-                # A link that opens the call itself is not a nice-to-have, it is
-                # the product. A row without one used to be stored anyway with an
-                # empty opportunity_url, and services/links.resolve_link then
-                # handed the reader a web search — so the dashboard was full of
-                # entries that opened a search page instead of an opportunity.
-                # There is nothing useful to keep in such a row: the title alone
-                # is not a lead.
-                if settings.require_usable_link and not is_usable_link(
-                        raw.opportunity_url, raw.website):
+            # Prefer the source's structured notice type over a scraper's
+            # broad page-level hint.  A page can be called "grants" and
+            # still contain an RFP; the record type describes this row.
+            category_hint = (
+                category_hint_for_record_type(raw.record_type)
+                or raw.category_hint
+            )
+            rule_category = self.classifier.classify(
+                raw.title, raw.summary, category_hint)
+            vertical_body = " ".join(filter(None, [raw.summary, raw.vertical, raw.eligibility]))
+            hierarchy = classify_hierarchy(
+                raw.title,
+                raw.summary,
+                raw.eligibility,
+                raw.organization,
+                raw.location,
+                raw.country,
+                raw.region,
+                raw.source_website,
+                rule_category,
+            )
+            category = hierarchy.category
+            vertical_tags = list(hierarchy.verticals)
+            if "Social Business" in hierarchy.archetypes:
+                vertical_tags.append(VERTICAL_SOCIAL_BUSINESS)
+            non_cms_brands = [brand for brand in hierarchy.brands if brand != "CMS"]
+            if self.vertical_filter and not (set(vertical_tags) & self.vertical_filter):
+                self._count_off_vertical(raw.source_website)
+                continue
+            clean_country, clean_region = normalize_geo(raw.country, raw.region)
+            # Sources that publish a funder field win; for the ones that
+            # don't (FundsForNGOs names it only in prose) recover it from
+            # the text rather than leaving the column blank.
+            organization = tidy_organization(raw.organization)
+            if not organization:
+                organization = extract_organization(raw.summary, raw.title)
+            # Same pattern for the amount: use the source's figure when it
+            # gave one (stripped of page furniture), else read it out of the
+            # listing text, which is where most sources state it.
+            amount = clean_amount(raw.funding_amount)
+            if not amount:
+                amount = extract_amount(raw.summary, raw.title)
+            # Public tender boards accept submissions, and some of what is
+            # submitted is advertising. Dropped here rather than filtered in
+            # the UI, so it never reaches the database, the digests or the
+            # counts.
+            if is_spam(raw.title, raw.summary):
+                spam += 1
+                log.debug("[%s] spam listing skipped: %s",
+                          raw.source_website, (raw.title or "")[:60])
+                continue
+
+            # A link that opens the call itself is not a nice-to-have, it is
+            # the product. A row without one used to be stored anyway with an
+            # empty opportunity_url, and services/links.resolve_link then
+            # handed the reader a web search — so the dashboard was full of
+            # entries that opened a search page instead of an opportunity.
+            # There is nothing useful to keep in such a row: the title alone
+            # is not a lead.
+            if settings.require_usable_link and not is_usable_link(
+                    raw.opportunity_url, raw.website):
+                rejected += 1
+                log.debug("[%s] no usable link, row dropped: %s",
+                          raw.source_website, (raw.title or "")[:60])
+                continue
+
+            # What does the SOURCE say this record is?
+            #
+            # This runs before the prose gate below because it is the check
+            # that gate structurally cannot make. World Bank's feed is
+            # mostly contract awards, and an award reads exactly like an
+            # open tender — "Award of Contract for Supervision Services" is
+            # a real notice title on both. No amount of title reading
+            # separates them; the record's own notice_type does, instantly.
+            #
+            # It is a no-op unless the scraper supplied record_type or
+            # source_status, and an unrecognised status is UNKNOWN rather
+            # than closed. A source that says nothing must not have silence
+            # read as a reason to discard its rows. See
+            # services/source_manifest.py.
+            keep_scope, scope_why = record_is_in_scope(
+                contract, raw.record_type, raw.source_status)
+            if not keep_scope:
+                out_of_scope += 1
+                rejected += 1
+                log.debug("[%s] out of scope (%s): %s", raw.source_website,
+                          scope_why, (raw.title or "")[:60])
+                continue
+
+            # Is this actually an opportunity? Most sources are scraped by
+            # harvesting every link on a page, so without this a funder's
+            # news post, programme page or "our grantees" card is stored as
+            # a fundable call. See services/opportunity_gate.py — curated
+            # boards skip the vocabulary test but not the rest.
+            if settings.strict_opportunity_gate:
+                keep, why = is_opportunity(
+                    raw.title, raw.summary, raw.opportunity_url,
+                    str(getattr(category, "value", category) or ""), curated)
+                if not keep:
                     rejected += 1
-                    log.debug("[%s] no usable link, row dropped: %s",
-                              raw.source_website, (raw.title or "")[:60])
+                    log.debug("[%s] rejected (%s): %s", raw.source_website,
+                              why, (raw.title or "")[:60])
                     continue
 
-                # What does the SOURCE say this record is?
-                #
-                # This runs before the prose gate below because it is the check
-                # that gate structurally cannot make. World Bank's feed is
-                # mostly contract awards, and an award reads exactly like an
-                # open tender — "Award of Contract for Supervision Services" is
-                # a real notice title on both. No amount of title reading
-                # separates them; the record's own notice_type does, instantly.
-                #
-                # It is a no-op unless the scraper supplied record_type or
-                # source_status, and an unrecognised status is UNKNOWN rather
-                # than closed. A source that says nothing must not have silence
-                # read as a reason to discard its rows. See
-                # services/source_manifest.py.
-                keep_scope, scope_why = record_is_in_scope(
-                    contract, raw.record_type, raw.source_status)
-                if not keep_scope:
-                    out_of_scope += 1
-                    rejected += 1
-                    log.debug("[%s] out of scope (%s): %s", raw.source_website,
-                              scope_why, (raw.title or "")[:60])
-                    continue
+            # The platform's working scope is intentionally narrow.  A
+            # curated board may contain adjacent record types, and a page
+            # hint may still fail to identify the row; neither should turn
+            # an Other/Award/Challenge into stored dashboard inventory.
+            if category.value not in enabled_categories:
+                rejected += 1
+                log.debug("[%s] rejected (category outside dashboard scope): %s",
+                          raw.source_website, (raw.title or "")[:60])
+                continue
 
-                # Is this actually an opportunity? Most sources are scraped by
-                # harvesting every link on a page, so without this a funder's
-                # news post, programme page or "our grantees" card is stored as
-                # a fundable call. See services/opportunity_gate.py — curated
-                # boards skip the vocabulary test but not the rest.
-                if settings.strict_opportunity_gate:
-                    keep, why = is_opportunity(
-                        raw.title, raw.summary, raw.opportunity_url,
-                        str(getattr(category, "value", category) or ""), curated)
-                    if not keep:
-                        rejected += 1
-                        log.debug("[%s] rejected (%s): %s", raw.source_website,
-                                  why, (raw.title or "")[:60])
-                        continue
-
-                # The platform's working scope is intentionally narrow.  A
-                # curated board may contain adjacent record types, and a page
-                # hint may still fail to identify the row; neither should turn
-                # an Other/Award/Challenge into stored dashboard inventory.
-                if category.value not in enabled_categories:
-                    rejected += 1
-                    log.debug("[%s] rejected (category outside dashboard scope): %s",
-                              raw.source_website, (raw.title or "")[:60])
-                    continue
-
+            # Classification and parsing run before taking SQLite's write lock.
+            # Keep identity checks and insertion atomic, but commit each row so
+            # other sources, the lease heartbeat and account writes can proceed.
+            with session_scope() as db:
+                db.execute(text('BEGIN IMMEDIATE'))
                 uid = make_unique_id(raw.title, organization, deadline, raw.opportunity_url, raw.source_website)
 
                 existing = db.execute(

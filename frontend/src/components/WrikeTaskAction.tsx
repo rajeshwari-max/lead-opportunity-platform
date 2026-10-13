@@ -99,7 +99,8 @@ export function WrikeTaskAction({ opportunityId, opportunityTitle, readOnly, onC
 
   return <section className="ud-wrike" aria-label="Wrike task">
     <h3>Wrike task</h3>
-    {error && <p role="alert" className="ud-wrike-error">{error}</p>}
+    {error && <p role="alert" className="ud-wrike-error">{error}
+      {/Reconnect Wrike/i.test(error) && <> <a href="/api/wrike/connect">Reconnect Wrike now</a></>}</p>}
     {link?.status === "created" && <>
       <p className="ud-sub">One shared Wrike task has been created for this opportunity.</p>
       {link.permalink && <a className="ud-primary-button" href={link.permalink} target="_blank" rel="noopener noreferrer">Open task in Wrike ↗</a>}

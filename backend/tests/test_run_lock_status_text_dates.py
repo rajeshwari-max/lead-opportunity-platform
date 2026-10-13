@@ -36,3 +36,40 @@ def test_status_parses_text_timestamps(monkeypatch):
     assert st["held"] is True
     assert st["stale"] is True
     assert 1150 <= st["heartbeat_age_s"] <= 1260
+
+
+def test_acquire_reports_a_live_holder_instead_of_crashing(tmp_path, monkeypatch):
+    """A second scrape while one is running must get LeaseNotAcquired.
+
+    It raised TypeError (text heartbeat minus datetime) — seen in the local
+    errors.log on 2026-10-12 as "Task exception was never retrieved".
+    """
+    from contextlib import contextmanager
+
+    import pytest
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'lease.db'}")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE TABLE scrape_lease (id INTEGER PRIMARY KEY, worker_id VARCHAR, "
+            "acquired_at DATETIME, heartbeat_at DATETIME, label VARCHAR NOT NULL DEFAULT '')")
+
+    @contextmanager
+    def scope():
+        s = Session(engine)
+        try:
+            yield s
+            s.commit()
+        finally:
+            s.close()
+
+    monkeypatch.setattr(run_lock, "session_scope", scope)
+    monkeypatch.setattr(run_lock, "worker_id", lambda: "ec2:111")
+    assert run_lock.acquire(label="first") == "ec2:111"
+
+    monkeypatch.setattr(run_lock, "worker_id", lambda: "ec2:222")
+    with pytest.raises(run_lock.LeaseNotAcquired) as caught:
+        run_lock.acquire(label="second")
+    assert "ec2:111" in str(caught.value)
