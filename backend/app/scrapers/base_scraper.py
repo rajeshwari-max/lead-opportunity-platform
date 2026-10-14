@@ -272,7 +272,7 @@ class BaseScraper(ABC):
             timeout=settings.request_timeout,
             follow_redirects=True,
         ) as client:
-            while request and page_number < settings.max_pages_safety_cap:
+            while request and (settings.full_source_scan or page_number < settings.max_pages_safety_cap):
                 if stop_event.is_set():
                     log.info("[%s] stop requested — aborting crawl", self.name)
                     return

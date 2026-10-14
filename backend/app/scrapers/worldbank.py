@@ -63,6 +63,7 @@ history. The API returns newest-first, so this walks a bounded recent window
 instead.
 """
 from __future__ import annotations
+from itertools import count
 
 import asyncio
 import json
@@ -454,7 +455,7 @@ class WorldBankScraper(BaseScraper):
                                 pause_event: asyncio.Event) -> None:
         seen: set[str] = set()
         page_size = 0
-        for page_number in range(1, self.max_pages + 1):
+        for page_number in (count(1) if settings.full_source_scan else range(1, self.max_pages + 1)):
             if not self._wait_until_resumed(stop_event, pause_event):
                 return
             request_url = endpoint if page_number == 1 else _paged_endpoint(

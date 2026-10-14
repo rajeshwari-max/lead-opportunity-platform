@@ -70,7 +70,9 @@ def test_page_url_for_replaces_pagenum_and_keeps_other_parameters():
     assert q == {"pageNum": ["4"], "sort": ["new"]}
 
 
-def test_the_backstop_ends_the_walk():
+def test_the_backstop_ends_the_walk(monkeypatch):
+    from app.scrapers.grantwatch import settings
+    monkeypatch.setattr(settings, "full_source_scan", False)
     assert GrantWatchScraper().next_page("", page_url_for(START, _MAX_PAGES), _MAX_PAGES) is None
 
 
@@ -142,3 +144,10 @@ def test_the_walk_is_not_cut_short_by_already_stored_rows():
     """stale_page_streak_override = 0: the deeper pages hold grants the pager
     never exposed, and re-reading them is what fills late deadlines."""
     assert GrantWatchScraper.stale_page_streak_override == 0
+
+
+def test_full_scan_continues_past_old_page_cap(monkeypatch):
+    from app.scrapers.grantwatch import settings
+    monkeypatch.setattr(settings, "full_source_scan", True)
+    request = GrantWatchScraper().next_page("", page_url_for(START, _MAX_PAGES), _MAX_PAGES)
+    assert page_of(request.url) == _MAX_PAGES + 1

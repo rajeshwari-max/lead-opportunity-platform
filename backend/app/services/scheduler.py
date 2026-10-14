@@ -42,13 +42,12 @@ _DIGEST_JOB_ID = "daily-digest"
 # coalesce=True    several missed fire times collapse into one run, so a
 #                  restart after downtime does not queue up a backlog.
 _JOB_GUARDS = {"max_instances": 1, "coalesce": True, "misfire_grace_time": 300}
-# A daily scrape is expensive but important. If the event loop is occupied at
-# the exact minute, APScheduler may start it later the same day; coalescing and
-# the database lease still guarantee that this produces at most one run.
+# A short dispatch grace allows normal timer jitter, never hours-late runs.
+# Restarts do not catch up; the next configured slot is the next automatic start.
 _SCRAPE_JOB_GUARDS = {
     "max_instances": 1,
     "coalesce": True,
-    "misfire_grace_time": 86400,
+    "misfire_grace_time": 60,
 }
 
 _STATE_FILE: Path = BASE_DIR / "data" / "schedule.json"
@@ -146,18 +145,7 @@ class ScrapeScheduler:
                 self.current = ScheduleRequest(mode="manual")
                 return
 
-            # An in-process scheduler cannot fire while the service is down.
-            # Recover one missed slot when it comes back, exactly as the first
-            # production scheduler did. _missed_run_today checks persisted run
-            # history, while manager.start() also takes the cross-process DB
-            # lease, so restarts cannot create duplicate or overlapping runs.
-            if self._missed_run_today():
-                log.warning(
-                    "Scheduler: missed today's %s run (server wasn't running "
-                    "at %02d:%02d) — catching up once now.",
-                    self.current.mode, self.current.hour, self.current.minute,
-                )
-                asyncio.create_task(self._scrape_all())
+            # Never launch a scrape on restart: only the configured clock slots.
 
     def _install_deadline_audit(self) -> None:
         """Re-check Active/Expired every night, not only at startup.
@@ -188,7 +176,7 @@ class ScrapeScheduler:
         self._scheduler.add_job(
             _run, CronTrigger(hour=0, minute=5, timezone="Asia/Kolkata"),
             id="deadline-audit", replace_existing=True,
-            **{**_JOB_GUARDS, "misfire_grace_time": 86400},
+            **{**_JOB_GUARDS, "misfire_grace_time": 60},
         )
         log.info("Scheduler: nightly integrity and deadline audit at 00:05 Asia/Kolkata")
 

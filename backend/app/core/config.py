@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     max_retries: int = 3
     retry_backoff: float = 2.0          # exponential backoff base (seconds)
     concurrency_per_source: int = 4     # concurrent page fetches per website
-    max_concurrent_sources: int = 6     # websites scraped at the same time. With ~80
+    full_source_scan: bool = True      # walk all available pages, no elapsed-time cutoff
+    max_concurrent_sources: int = 5     # websites scraped at the same time. With ~80
                                         # sources, running them all at once saturated
                                         # the event loop and froze the progress API.
     rate_limit_delay: float = 1.0       # polite delay between requests (seconds)

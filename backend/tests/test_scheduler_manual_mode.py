@@ -103,7 +103,7 @@ def test_restart_recovers_one_missed_scheduled_run(sched, monkeypatch):
 
     sched.start()
 
-    assert created == ["coro"], "a missed daily slot must recover once after restart"
+    assert created == [], "restart must wait for the next configured slot"
 
 
 def test_scheduled_slot_still_registers_its_job(sched, monkeypatch):
@@ -117,7 +117,7 @@ def test_scheduled_slot_still_registers_its_job(sched, monkeypatch):
     options = sched._scheduler.job_options["scheduled-scrape"]
     assert options["max_instances"] == 1
     assert options["coalesce"] is True
-    assert options["misfire_grace_time"] == 86400
+    assert options["misfire_grace_time"] == 60
 
 
 def test_job_defaults_are_stated_not_inherited(sched):
@@ -192,3 +192,15 @@ def test_invalid_cron_keeps_previous_job(sched):
 def test_run_outcome_is_honest(statuses, expected):
     from app.services.scheduler import scrape_outcome
     assert scrape_outcome({str(i): {"status": s} for i, s in enumerate(statuses)}) == expected
+
+
+def test_requested_two_slots_in_india_time(sched):
+    from app.schemas.opportunity import ScheduleRequest
+    sched.configure(ScheduleRequest(mode="cron", cron="0 7,13 * * *", timezone="Asia/Kolkata"))
+    trigger = sched._scheduler.jobs["scheduled-scrape"][1]
+    first = trigger.get_next_fire_time(None, datetime(2026, 10, 13, 0, tzinfo=timezone.utc))
+    second = trigger.get_next_fire_time(first, first + timedelta(seconds=1))
+    third = trigger.get_next_fire_time(second, second + timedelta(seconds=1))
+    assert first.astimezone(timezone.utc) == datetime(2026, 10, 13, 1, 30, tzinfo=timezone.utc)
+    assert second.astimezone(timezone.utc) == datetime(2026, 10, 13, 7, 30, tzinfo=timezone.utc)
+    assert third.astimezone(timezone.utc) == datetime(2026, 10, 14, 1, 30, tzinfo=timezone.utc)

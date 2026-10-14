@@ -10,6 +10,7 @@ HTTP and yields just the server-rendered first batch.
 Closing date may be a real date or "Ongoing" (kept active, no deadline).
 """
 from __future__ import annotations
+from itertools import count
 
 import logging
 import re
@@ -82,7 +83,7 @@ class BondScraper(BaseScraper):
                 )
                 clicks = 0
                 prev_count = page.evaluate(count_js)
-                for _ in range(150):
+                for _ in (count() if settings.full_source_scan else range(150)):
                     # JS click: immune to overlay/visibility quirks. False when
                     # the button is gone or hidden (= last page reached).
                     clicked = page.evaluate(

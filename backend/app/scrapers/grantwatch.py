@@ -78,7 +78,7 @@ class GrantWatchScraper(BaseScraper):
     stale_page_streak_override = 0
 
     def next_page(self, html: str, page_url: str, page_number: int) -> PageRequest | None:
-        if page_number >= _MAX_PAGES:
+        if not settings.full_source_scan and page_number >= _MAX_PAGES:
             log.warning("[grantwatch] stopped at the %s-page backstop — the "
                         "listing has never been this long; check whether "
                         "out-of-range pages stopped coming back empty", _MAX_PAGES)

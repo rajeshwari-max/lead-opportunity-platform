@@ -125,6 +125,7 @@ class ScraperManager:
         # for the very defect that disabled it must not be blocked by the flag,
         # and `sources` is only ever non-empty because a person typed it.
         if not sources:
+            scrapers = [s for s in scrapers if s.name != "developmentaid"]
             blocked = disabled_sources(s.name for s in scrapers)
             if blocked:
                 scrapers = [s for s in scrapers if s.name not in blocked]
@@ -195,25 +196,14 @@ class ScraperManager:
                 if self._stop.is_set():
                     self.progress[scraper.name]["status"] = "stopped"
                     return
-                # A source gets a bounded slot, not an open-ended one.
-                #
-                # The baseline found 106 runs stuck in "running" — a source
-                # that hangs holds its semaphore slot forever, and with
-                # max_concurrent_sources slots that is how an entire night's
-                # scrape stops after the first few sources wedge. The timeout
-                # is what turns "never finishes" into "finishes, badly, and
-                # says so".
-                #
-                # asyncio.wait_for cancels the awaiting coroutine at the next
-                # await point. Playwright work runs in a worker thread and
-                # `asyncio.to_thread` is NOT cancellable, so the thread may
-                # still be finishing its current page when this returns. That
-                # is why the stop flag is set as well: the crawl loop checks it
-                # between pages and exits on its own, and the timeout only
-                # stops US waiting.
+                # Full scans have no wall-clock cutoff. Request-level timeouts
+                # still detect failed fetches; bounded mode is retained for diagnostics.
                 timeout = max(60, settings.source_timeout_s)
                 try:
-                    await asyncio.wait_for(self._run_source(scraper), timeout)
+                    if settings.full_source_scan:
+                        await self._run_source(scraper)
+                    else:
+                        await asyncio.wait_for(self._run_source(scraper), timeout)
                 except asyncio.TimeoutError:
                     prog = self.progress.get(scraper.name, {})
                     prog["status"] = "failed"
@@ -226,17 +216,28 @@ class ScraperManager:
                         f"honest answer and is not the same as 'completed'."
                     )
 
+                except Exception:
+                    prog = self.progress[scraper.name]
+                    prog["status"] = "failed"
+                    prog["errors"] += 1
+                    log.exception("[%s] failed; continuing the remaining sources", scraper.name)
+
         heart = asyncio.create_task(self._heartbeat_loop())
         try:
-            # And a ceiling on the whole run. Per-source timeouts alone do not
-            # bound it: 85 sources times the per-source limit is days. This is
-            # the one that guarantees a nightly scrape has ended before the
-            # next one is due — the scheduler's max_instances=1 would otherwise
-            # skip every subsequent run while the first is still going.
+            # Only diagnostic bounded mode imposes a whole-run deadline.
             whole_run = max(300, settings.run_timeout_s)
             try:
-                await asyncio.wait_for(
-                    asyncio.gather(*(_guarded(s) for s in scrapers)), whole_run)
+                async def run_batches():
+                    size = max(1, settings.max_concurrent_sources)
+                    for offset in range(0, len(scrapers), size):
+                        batch = scrapers[offset:offset + size]
+                        self._log(f"Starting source batch {offset // size + 1}: "
+                                  + ", ".join(s.display_name for s in batch))
+                        await asyncio.gather(*(_guarded(s) for s in batch))
+                if settings.full_source_scan:
+                    await run_batches()
+                else:
+                    await asyncio.wait_for(run_batches(), whole_run)
             except asyncio.TimeoutError:
                 self._stop.set()          # let the crawl loops unwind
                 self._log(
@@ -394,7 +395,7 @@ class ScraperManager:
         # None = use the global default; 0 = never stop early (walk to the end
         # of pagination). `or` would have treated 0 as "unset", so test for None.
         override = scraper.stale_page_streak_override
-        stale_limit = settings.stale_page_streak if override is None else override
+        stale_limit = 0 if settings.full_source_scan else (settings.stale_page_streak if override is None else override)
         if stale_limit == 0:
             self._log(
                 f"[{scraper.display_name}] full-archive mode — walking every page "
@@ -440,7 +441,7 @@ class ScraperManager:
                         f"nothing new — stopping this source (only older content ahead)"
                     )
                     source_stop.set()
-            prog["status"] = "stopped" if self._stop.is_set() else "completed"
+            prog["status"] = "stopped" if self._stop.is_set() else ("failed" if prog["errors"] else "completed")
         except Exception as exc:                                # noqa: BLE001
             log.exception("[%s] source crashed", scraper.name)
             prog["status"] = "failed"
@@ -508,6 +509,9 @@ class ScraperManager:
                 cancelled=was_stopped,
                 exception=crash,
             )
+            outcome, _, _ = classify(evidence)
+            if prog["status"] == "completed" and not outcome.is_healthy:
+                prog["status"] = "failed"
             await asyncio.to_thread(self._close_run, run_id, prog, evidence)
             # When closed listings are archived they are *included* in `saved`,
             # so reporting them as a separate addend made the totals look wrong

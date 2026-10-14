@@ -27,6 +27,7 @@ at all**. Every link in it is navigation. The listings arrive by XHR after load,
 so there is nothing for a plain HTTP parser to read.
 """
 from __future__ import annotations
+from itertools import count
 
 import asyncio
 import hashlib
@@ -547,11 +548,11 @@ class AdbTendersScraper(BaseScraper):
                 # doing the filtering's job — see below.
                 budget = self.max_pages if filtered else self.unfiltered_max_pages
                 needed = -(-total // per_page) if total else 0
-                pages = min(budget, needed) if total else budget
+                pages = (needed or budget) if settings.full_source_scan else (min(budget, needed) if total else budget)
                 log.info("[adb] %s tender(s) to walk at %s per page -> %s page(s)%s",
                          f"{total:,}" if total else "?", per_page, pages,
                          "" if filtered else " (Status facet NOT applied)")
-                if filtered and needed > budget:
+                if not settings.full_source_scan and filtered and needed > budget:
                     # "All the active tenders should be scraped" is the whole
                     # requirement, and a budget that silently truncates the walk
                     # is how it stops being true without anyone noticing. The
@@ -590,12 +591,12 @@ class AdbTendersScraper(BaseScraper):
                     )
 
                 mode = PagingMode()
-                for n in range(1, pages + 1):
+                for n in (count(1) if settings.full_source_scan and not total else range(1, pages + 1)):
                     if stop_event.is_set() or done.is_set():
                         return
                     html = page.content()
                     queue.put(html)
-                    if n >= pages:
+                    if n >= pages and (total or not settings.full_source_scan):
                         log.info("[adb] reached page %s of %s — done", n, pages)
                         return
                     before = self._results_signature(html)

@@ -7,6 +7,7 @@ each run walks back only until everything is expired/known (~a few pages of
 100), never the full multi-year archive.
 """
 from __future__ import annotations
+from app.core.config import settings
 
 import html as htmllib
 import json
@@ -152,7 +153,7 @@ class FundsForNGOsScraper(BaseScraper):
         if len(posts) < PER_PAGE:
             return None
 
-        if current >= MAX_PAGES:
+        if not settings.full_source_scan and current >= MAX_PAGES:
             return None
         return PageRequest(re.sub(r"([?&])page=\d+", rf"\g<1>page={current + 1}",
                                   page_url))

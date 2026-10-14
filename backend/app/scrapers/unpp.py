@@ -58,6 +58,7 @@ half a listing scraped anonymously looks like success in the dashboard and is
 the reason a source can appear healthy for weeks while being wrong.
 """
 from __future__ import annotations
+from itertools import count
 
 import asyncio
 import json
@@ -1130,7 +1131,8 @@ class UNPartnerPortalScraper(BaseScraper):
         """Walk the API page by page, pushing each batch to the crawl loop."""
         total: int | None = None
         pushed = 0
-        for n in range(1, self.max_pages + 1):
+        seen_batches = set()
+        for n in (count(1) if settings.full_source_scan else range(1, self.max_pages + 1)):
             if stop_event.is_set() or done.is_set():
                 return
             url = _with_page(endpoint, n, self.page_size)
@@ -1156,6 +1158,10 @@ class UNPartnerPortalScraper(BaseScraper):
                 if total is not None:
                     log.info("[%s] %s open call(s) to walk at %s per page",
                              self.name, total, self.page_size)
+            signature = json.dumps(rows, sort_keys=True, default=str)
+            if signature in seen_batches:
+                raise RuntimeError("UN Partner Portal repeated a page; pagination incomplete")
+            seen_batches.add(signature)
             pushed += len(rows)
             queue.put({"kind": "api", "rows": rows, "url": url})
             if total is not None and pushed >= total:
