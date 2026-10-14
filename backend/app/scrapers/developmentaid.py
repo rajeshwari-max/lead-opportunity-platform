@@ -14,6 +14,10 @@ is membership-locked ("Unlock to view"). We therefore keep only cards the
 site marks Open, stored with assume_active (no deadline; shown as Ongoing in
 the dashboard, exact date on their site).
 
+Besides the two section searches, the brand-level searches in
+LOP_DEVAID_BRAND_SEARCH_URLS (settings.devaid_brand_search_urls) are walked in
+the same session, one after another, each paged in full the same way.
+
 Pagination is a plain URL query parameter (`?pageNr=N`) — confirmed directly
 from the site's own address bar while paging through results manually — so
 each page is a normal navigation, not a JS button click. That's both more
@@ -144,6 +148,52 @@ _SECTIONS: list[tuple[str, str]] = [
 ]
 
 _SECTION_URLS: dict[str, str] = {slug: url for url, slug in _SECTIONS}
+
+
+def _search_kind(url: str) -> str:
+    """'grants' or 'tenders' for a DevelopmentAid search URL, '' otherwise."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.netloc.lower() not in (
+            "www.developmentaid.org", "developmentaid.org"):
+        return ""
+    path = parsed.path.rstrip("/").lower()
+    if path.endswith("/grants/search"):
+        return "grants"
+    if path.endswith("/tenders/search"):
+        return "tenders"
+    return ""
+
+
+def _brand_searches(raw: str, already: list[str]) -> list[tuple[str, str]]:
+    """The extra brand-level searches as (url, section), in the order given.
+
+    Each one is walked exactly like a section search — same browser session,
+    same API paging and partitioning, same pagination-control fallback — so
+    every result page is reached, not just page 1. URLs already covered by a
+    section search, repeated URLs and anything that is not a DevelopmentAid
+    grants/tenders search are dropped with a warning.
+    """
+    out: list[tuple[str, str]] = []
+    seen = set(already)
+    for url in re.split(r"[\s|]+", raw or ""):
+        url = url.strip()
+        if not url:
+            continue
+        if url in seen:
+            log.info("[developmentaid] brand search already covered, skipped: %s", url)
+            continue
+        kind = _search_kind(url)
+        if not kind:
+            log.warning("[developmentaid] ignoring brand search that is not a "
+                        "DevelopmentAid grants/tenders search: %s", url)
+            continue
+        seen.add(url)
+        out.append((url, kind))
+    return out
+
+
+_BRAND_SEARCHES: list[tuple[str, str]] = _brand_searches(
+    settings.devaid_brand_search_urls, list(_SECTION_URLS.values()))
 
 _ENTITYTYPE_CATEGORY = {
     "grant": Category.GRANT,
@@ -326,7 +376,7 @@ class DevelopmentAidScraper(BaseScraper):
                 slug, page_nr, body = payload
                 page_number += 1
                 await progress("page_start", {"source": self.name, "page": page_number,
-                                              "url": _page_url(_SECTION_URLS[slug], page_nr)})
+                                              "url": _page_url(self._url_for(slug), page_nr)})
                 if kind == "items":
                     # Came straight from the JSON API — already structured, so
                     # there's no HTML to parse.
@@ -336,7 +386,7 @@ class DevelopmentAidScraper(BaseScraper):
                     # small enough to parse and discard immediately.
                     html = "<html><body>" + "".join(body) + "</body></html>"
                     try:
-                        items = self.parse_listing(html, _page_url(_SECTION_URLS[slug], page_nr))
+                        items = self.parse_listing(html, _page_url(self._url_for(slug), page_nr))
                     except Exception:
                         log.exception("[%s] parse error on %s page %s — skipping",
                                       self.name, slug, page_nr)
@@ -349,8 +399,14 @@ class DevelopmentAidScraper(BaseScraper):
             # Always release the browser thread, including on stop/exception.
             stop_flag.set()
 
+    def _url_for(self, slug: str) -> str:
+        """The search currently being walked for this section."""
+        return (getattr(self, "_active_url", {}).get(slug)
+                or _SECTION_URLS.get(slug) or _PLAIN_GRANTS)
+
     def _walk_sections(self, out_queue, stop_flag) -> None:
         """Browser-side walk. Pushes ('page', (slug, page_nr, cards)) per page."""
+        self._active_url: dict[str, str] = {}
         from playwright.sync_api import sync_playwright
 
         from app.scrapers.devaid_auth import open_persistent
@@ -440,7 +496,7 @@ class DevelopmentAidScraper(BaseScraper):
 
                 wanted = {s.strip().lower() for s in settings.devaid_sections.split(",")
                           if s.strip()} or {"grants", "tenders"}
-                sections = [(u, s) for u, s in _SECTIONS if s in wanted]
+                sections = [(u, s, s) for u, s in _SECTIONS if s in wanted]
                 if len(sections) < len(_SECTIONS):
                     skipped = [s for _, s in _SECTIONS if s not in wanted]
                     # Loud, because this is silent data loss by configuration:
@@ -450,7 +506,7 @@ class DevelopmentAidScraper(BaseScraper):
                         "[developmentaid] ONLY walking %s — %s will NOT be scraped. "
                         "This comes from LOP_DEVAID_SECTIONS in backend/.env; set it "
                         "to 'grants,tenders' (or remove the line) to cover both.",
-                        ", ".join(s for _, s in sections), ", ".join(skipped),
+                        ", ".join(s for _, s, _l in sections), ", ".join(skipped),
                     )
 
                 # Sections that never rendered a card because the site served a
@@ -459,9 +515,24 @@ class DevelopmentAidScraper(BaseScraper):
                 # the loop.
                 blocked: list[str] = []
 
-                for section_url, slug in sections:
+                # Brand-level searches run after the section searches, each
+                # walked and paged in full. `slug` stays "grants"/"tenders"
+                # because it selects the catalogue's API and record type.
+                brand = [(u, k) for u, k in _BRAND_SEARCHES if k in wanted]
+                sections += [(u, k, f"{k} brand search {i}/{len(brand)}")
+                             for i, (u, k) in enumerate(brand, 1)]
+
+                for section_url, slug, label in sections:
                     if stop_flag.is_set():
                         return
+                    log.info("[developmentaid] %s: %s", label, section_url)
+                    self._active_url[slug] = section_url
+                    # Re-capture the app's own search request for THIS URL.
+                    # The captured body carries the filters (sectors,
+                    # locations, applicant types…) that the API walk replays,
+                    # so keeping the previous search's body would page the
+                    # wrong search.
+                    captured.pop(slug, None)
                     # A transient failure here (DNS blip, timeout, etc.) must not
                     # take down the whole run — without this guard, one bad
                     # request on the *second* section discarded every card
@@ -546,7 +617,7 @@ class DevelopmentAidScraper(BaseScraper):
                         except Exception:
                             pass
                         if self._is_challenge_title(_title):
-                            blocked.append(slug)
+                            blocked.append(label)
                             log.error(
                                 "[developmentaid] %s: BLOCKED BY CLOUDFLARE (page title %r). "
                                 "This is a bot check, not a login problem — a session "
@@ -918,6 +989,20 @@ class DevelopmentAidScraper(BaseScraper):
 
         walk(payload, ())
         return out
+
+    @staticmethod
+    def _selected_ids(payload, path: tuple) -> set[str]:
+        """Ids already chosen at `path` in the search body ('' if none)."""
+        node = payload
+        try:
+            for step in path:
+                node = node[step]
+        except (KeyError, IndexError, TypeError):
+            return set()
+        if not isinstance(node, list):
+            return set()
+        return {str(v.get("id") if isinstance(v, dict) else v)
+                for v in node if v is not None and v != ""}
 
     @staticmethod
     def _set_path(payload, path: tuple, value: int) -> None:
@@ -1439,6 +1524,15 @@ class DevelopmentAidScraper(BaseScraper):
             if not path or not rows:
                 continue
             values = [r["id"] for r in rows if r.get("id") is not None]
+            # Split INSIDE the search's own filter, never across the whole
+            # taxonomy. Replacing sectors=[9,22,5] with each of ~100 sectors in
+            # turn, or locations=[India] with every country, would quietly turn
+            # a filtered (brand) search into an unfiltered one.
+            selected = self._selected_ids(payload, path)
+            if selected:
+                values = [v for v in values if str(v) in selected]
+                if len(values) <= 1:
+                    continue     # one chosen value: nothing to split
             labels = {r["id"]: (r.get("name") or r.get("title") or str(r["id"]))[:40]
                       for r in rows if r.get("id") is not None}
             if values:

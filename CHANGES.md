@@ -5,6 +5,44 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-14 — DevelopmentAid runs on the schedule; brand-level searches added
+
+- **DevelopmentAid is scheduled again.** It was removed from every scheduled
+  (all-source) scrape and only ran when started by hand. Now that the EC2
+  browser profile is signed in, it runs at 07:00 and 13:00 with the other
+  sources. If the session expires, the source is reported failed and the
+  "session expired" alert email goes out; the rest of the batch is unaffected.
+  (`services/scraper_manager.py`)
+- **Brand-level searches.** New setting `devaid_brand_search_urls`
+  (`LOP_DEVAID_BRAND_SEARCH_URLS`) holds the team's five saved searches,
+  verbatim. Each is walked after the grants and tenders section searches, in
+  the same browser session, and paged in full by the same machinery (the
+  site's search API with partitioning, falling back to its pagination
+  control). The fifth URL is identical to the existing grants search, so it is
+  walked once, not twice. The app's search request is re-captured for every
+  URL, so each one pages its own filters rather than the previous search's.
+- **Partitioning stays inside a search's filters.** When a search had more
+  results than one request could return, it was split by replacing a filter
+  (e.g. `sectors`) with each value from the site's *entire* list, one at a
+  time. That turned a filtered search into an unfiltered one: a split on
+  sectors walked ~100 sectors, a split on locations walked every country.
+  Splits now use only the values the search already selected, and an axis
+  with a single chosen value (India, `locations=5`) is not split at all.
+  (`scrapers/developmentaid.py`)
+- `scripts/devaid_urls.py` now also lists every brand search with its page-2
+  URL and confirms paging keeps every filter.
+
+Tests: `tests/test_devaid_brand_searches.py` (each supplied URL walked once,
+pagination keeps filters, parsing rejects non-DevelopmentAid URLs,
+partitioning stays inside the filter, scheduled run includes DevelopmentAid).
+Full suite: 1243 passed, 3 skipped.
+
+Verify on EC2: `python scripts/devaid_urls.py` ends with "VERDICT: the
+required filtered searches are what will be requested". After the next run,
+the log shows `grants brand search 1/4` … `4/4`.
+
+---
+
 ## 2026-10-13 — Scrape schedule in your own timezone; honest run status; scrapers stop locking each other out (Codex work, recorded here)
 
 Codex made these changes without a log entry; recorded on review.

@@ -124,8 +124,12 @@ class ScraperManager:
         # Naming a source explicitly still runs it. An operator testing a fix
         # for the very defect that disabled it must not be blocked by the flag,
         # and `sources` is only ever non-empty because a person typed it.
+        # DevelopmentAid used to be removed here, so it only ever ran when an
+        # admin started it by hand. It now runs with every scheduled scrape:
+        # the EC2 browser profile is signed in, and if that session expires the
+        # scraper says so (failed source + alert email) without affecting the
+        # other sources in the batch.
         if not sources:
-            scrapers = [s for s in scrapers if s.name != "developmentaid"]
             blocked = disabled_sources(s.name for s in scrapers)
             if blocked:
                 scrapers = [s for s in scrapers if s.name not in blocked]

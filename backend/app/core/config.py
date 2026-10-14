@@ -236,6 +236,25 @@ class Settings(BaseSettings):
         "&statuses=3"
         "&languages=92"
     )
+    # Extra DevelopmentAid searches for brand-level coverage, walked IN ADDITION
+    # to the two section searches above, each one paged the same way (the
+    # site's own search API, falling back to its pagination control). Copied
+    # verbatim from the site's address bar. Separate URLs with spaces, new
+    # lines or "|" (the URLs themselves contain commas). A URL identical to
+    # devaid_grants_url / devaid_tenders_url is skipped, not scraped twice.
+    # Override with LOP_DEVAID_BRAND_SEARCH_URLS; set it blank to turn them off.
+    devaid_brand_search_urls: str = " ".join((
+        "https://www.developmentaid.org/grants/search?applicantTypes=1&languages=92"
+        "&locations=5&sectors=9,22,5,3,104,7,11,80,30,48,27&statuses=3",
+        "https://www.developmentaid.org/grants/search?applicantTypes=1&languages=92"
+        "&locations=5&sectors=100,7,5,80,30,44,87,22,85&statuses=3",
+        "https://www.developmentaid.org/grants/search?applicantTypes=1&languages=92"
+        "&locations=5&sectors=11,7,5,8,9,30,22,48,27&statuses=3",
+        "https://www.developmentaid.org/grants/search?applicantTypes=1&locations=147"
+        "&sectors=100,3,5,9,8,29,30,85,87,43,22&statuses=3",
+        "https://www.developmentaid.org/grants/search?languages=92"
+        "&sectors=100,7,3,95,5,6,11,54,8,78,80,30,44,87,85,22,34,48,27&statuses=3",
+    ))
     # DevelopmentAid search filters, from the team's own saved searches.
     # Grants and tenders carry slightly different sector lists because the two
     # catalogues don't offer identical sectors.

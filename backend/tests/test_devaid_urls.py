@@ -31,5 +31,6 @@ def test_pagination_preserves_every_filter():
 def test_audit_passes_for_the_current_runtime():
     passed, rows = audit()
     assert passed
-    assert {row["section"] for row in rows} == {"grants", "tenders"}
+    assert {row["section"] for row in rows} == {
+        "grants", "tenders", "brand-1", "brand-2", "brand-3", "brand-4", "brand-5"}
 
