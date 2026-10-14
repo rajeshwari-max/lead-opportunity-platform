@@ -26,7 +26,8 @@ def test_integrity_schedule_runs_in_manual_mode_in_india_time(sched, monkeypatch
     sched.start()
     run, trigger = sched._scheduler.jobs['deadline-audit']
     assert str(trigger.timezone) == 'Asia/Kolkata'
-    assert 'hour=\'0\'' in str(trigger) and 'minute=\'5\'' in str(trigger)
+    # After the 00:00-08:00 scrape window, before the 09:00 digest.
+    assert 'hour=\'8\'' in str(trigger) and 'minute=\'15\'' in str(trigger)
     run()
     assert calls == ['identity', 'deadlines']
 

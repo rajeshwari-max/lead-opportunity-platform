@@ -8,11 +8,13 @@ def _sources(n):
     return [SimpleNamespace(name=str(i), display_name=str(i)) for i in range(n)]
 
 
-def test_bounded_scans_are_the_default():
-    # Full scans had no time limits and ran for days (9% after 4h15m).
-    field = type(mod.settings).model_fields["full_source_scan"]
-    assert field.default is False
-    assert type(mod.settings).model_fields["run_timeout_s"].default < 6 * 3600
+def test_full_scans_are_bounded_by_the_nightly_window():
+    # Every page is walked, so the run must be ended by the window instead.
+    fields = type(mod.settings).model_fields
+    assert fields["full_source_scan"].default is True
+    assert fields["scrape_hard_stop_at"].default == "08:00"
+    assert fields["scrape_health_check_at"].default == "06:00"
+    assert fields["run_timeout_s"].default < 6 * 3600
 
 
 def test_sources_run_five_at_a_time_rolling(monkeypatch):

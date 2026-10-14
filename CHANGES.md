@@ -5,6 +5,41 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-14 (later) — One nightly full scrape, 00:00–08:00 India time
+
+Decision: scrape every page of every source, once a night, inside a fixed
+window, instead of bounded scans twice a day. Supersedes the "bounded by
+default" part of the entry below.
+
+- **Schedule:** daily at 00:00 Asia/Kolkata (set by
+  `scripts/configure_full_scrape_schedule.py`, which also writes
+  `LOP_FULL_SOURCE_SCAN=true`; it backs up `.env` and `schedule.json` first).
+  No 07:00 / 13:00 runs.
+- **Full scans:** `full_source_scan` defaults to true again (every page, no
+  per-source time limit).
+- **06:00 health check** (`LOP_SCRAPE_HEALTH_CHECK_AT`): if the scrape is
+  still running, it checks when a page last finished. Nothing for
+  `LOP_SCRAPE_STALL_MINUTES` (30) → it is stuck and is stopped now; otherwise
+  it carries on. Either way an alert email gives the verdict, sources
+  completed / running / not reached, and rows saved so far. Silent if the
+  scrape already finished.
+- **08:00 hard stop** (`LOP_SCRAPE_HARD_STOP_AT`): anything still scraping is
+  stopped, with an alert email. Blank either time to turn that job off.
+- **Fair order:** an all-source run starts with the sources whose last
+  completed run is oldest (never-completed first), so sources cut off at
+  08:00 go first the next night instead of missing out every night.
+- **Deadline audit moved 00:05 → 08:15**, after the window and before the
+  09:00 digest, so it no longer competes with the scrape for the database.
+- Rolling five-at-a-time and DevelopmentAid's brand-searches-before-tenders
+  order (below) are kept.
+
+Tests: `tests/test_nightly_scrape_window.py` (jobs at 06:00 and 08:00 IST,
+blank turns a job off, health check continues / stops / stays silent, hard
+stop, stuck vs slow, least-recently-completed first). Full suite: 1257
+passed, 3 skipped.
+
+---
+
 ## 2026-10-14 — Scheduled scrapes end again (no more 40-hour runs)
 
 The 13:00 scheduled run was 9% done after 4h15m with an ETA of 43 hours, so

@@ -58,6 +58,8 @@ def test_scheduled_run_includes_developmentaid(monkeypatch):
                SimpleNamespace(name="adb", display_name="ADB")]
     monkeypatch.setattr(mod, "get_scrapers", lambda names=None: list(sources))
     monkeypatch.setattr(mod, "disabled_sources", lambda names: {})
+    monkeypatch.setattr(mod.ScraperManager, "_least_recent_first",
+                        staticmethod(lambda scrapers: list(scrapers)))
     labels = []
 
     def refuse(label):

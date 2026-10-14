@@ -92,6 +92,10 @@ class ScraperManager:
         self.logs: deque[str] = deque(maxlen=500)
         self.progress: dict[str, dict[str, Any]] = {}
         self.started_at: float | None = None
+        # time.monotonic() of the last page event, overall and per source.
+        # Read by the nightly health check to tell "slow" from "stuck".
+        self.last_activity: float | None = None
+        self.source_activity: dict[str, float] = {}
 
     # ------------------------------------------------------------- lifecycle
     async def start(
@@ -130,6 +134,10 @@ class ScraperManager:
         # scraper says so (failed source + alert email) without affecting the
         # other sources in the batch.
         if not sources:
+            # Longest-since-completed first. A nightly run that is stopped at
+            # the end of its window never reaches the sources at the end of the
+            # list; without this the same ones would miss out every night.
+            scrapers = await asyncio.to_thread(self._least_recent_first, scrapers)
             blocked = disabled_sources(s.name for s in scrapers)
             if blocked:
                 scrapers = [s for s in scrapers if s.name not in blocked]
@@ -157,6 +165,8 @@ class ScraperManager:
         self.state = "running"
         self.logs.clear()
         self.started_at = time.monotonic()
+        self.last_activity = self.started_at
+        self.source_activity = {}
         self.progress = {
             s.name: {"display_name": s.display_name, "pages": 0, "found": 0, "saved": 0,
                      "skipped_expired": 0, "duplicates": 0, "off_vertical": 0, "spam": 0,
@@ -371,6 +381,9 @@ class ScraperManager:
             # task. The scrape had already found and saved 601 records —
             # the run was marked "failed" purely because the final
             # progress message could not be formatted.
+            now = time.monotonic()
+            self.last_activity = now
+            self.source_activity[scraper.name] = now
             try:
                 await _on_progress(event, payload)
             except Exception:                                  # noqa: BLE001
@@ -984,6 +997,53 @@ class ScraperManager:
             if prog["display_name"] == source_website:
                 prog["off_vertical"] = prog.get("off_vertical", 0) + 1
                 return
+
+    @staticmethod
+    def _least_recent_first(scrapers: list) -> list:
+        """Order sources by their last completed run, never-completed first."""
+        try:
+            with session_scope() as s:
+                rows = s.execute(
+                    select(ScrapeRun.source_key, ScrapeRun.finished_at)
+                    .where(ScrapeRun.status == "completed",
+                           ScrapeRun.finished_at.is_not(None))
+                ).all()
+        except Exception:                                       # noqa: BLE001
+            log.exception("could not read run history — keeping registry order")
+            return list(scrapers)
+        last: dict[str, datetime] = {}
+        for key, finished in rows:
+            if key and (key not in last or finished > last[key]):
+                last[key] = finished
+        floor = datetime.min
+        # sorted() is stable, so sources with equal history keep registry order.
+        return sorted(scrapers, key=lambda sc: last.get(sc.name, floor))
+
+    def health_report(self, stall_s: float) -> dict:
+        """Snapshot for the nightly health check: progress and whether stuck."""
+        now = time.monotonic()
+        statuses: dict[str, int] = {}
+        for p in self.progress.values():
+            statuses[p.get("status", "?")] = statuses.get(p.get("status", "?"), 0) + 1
+        running = []
+        for name, p in self.progress.items():
+            if p.get("status") != "running":
+                continue
+            seen = self.source_activity.get(name, self.started_at or now)
+            running.append({"source": p.get("display_name", name),
+                            "pages": p.get("pages", 0), "saved": p.get("saved", 0),
+                            "idle_min": round((now - seen) / 60, 1)})
+        idle_s = now - (self.last_activity or self.started_at or now)
+        return {
+            "state": self.state,
+            "elapsed_min": round((now - (self.started_at or now)) / 60, 1),
+            "idle_min": round(idle_s / 60, 1),
+            "stalled": self.state == "running" and idle_s >= stall_s,
+            "statuses": statuses,
+            "total": len(self.progress),
+            "saved": sum(p.get("saved", 0) for p in self.progress.values()),
+            "running": running,
+        }
 
     def _log(self, message: str) -> None:
         stamp = datetime.now(timezone.utc).strftime("%H:%M:%S")

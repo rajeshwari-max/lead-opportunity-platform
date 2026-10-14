@@ -25,6 +25,8 @@ log = logging.getLogger("scraper")
 
 _JOB_ID = "scheduled-scrape"
 _DIGEST_JOB_ID = "daily-digest"
+_HEALTH_JOB_ID = "scrape-health-check"
+_HARD_STOP_JOB_ID = "scrape-hard-stop"
 
 # APScheduler's defaults already give max_instances=1 and coalesce=True, but
 # they are spelled out on every job below because "the default happens to be
@@ -77,6 +79,36 @@ async def _daily_digest_and_reminders() -> None:
             log.info("Daily reminders: %s deadline reminder(s) sent", n)
     except Exception:
         log.exception("Deadline reminders failed")
+
+
+def _hhmm(value: str) -> tuple[int, int] | None:
+    """'06:00' -> (6, 0); blank or malformed -> None (job off)."""
+    try:
+        h, m = (int(x) for x in (value or "").strip().split(":"))
+    except ValueError:
+        return None
+    return (h, m) if 0 <= h < 24 and 0 <= m < 60 else None
+
+
+def _alert(subject: str, verdict: str, report: dict) -> None:
+    """Email the scrape-window verdict to the alert address. Never raises."""
+    counts = ", ".join(f"{n} {s}" for s, n in sorted(report["statuses"].items()))
+    lines = [
+        verdict, "",
+        f"Running for {report['elapsed_min']:.0f} min; last page finished "
+        f"{report['idle_min']} min ago.",
+        f"Sources ({report['total']}): {counts}.",
+        f"New opportunities saved so far: {report['saved']}.",
+    ]
+    if report["running"]:
+        lines += ["", "In progress:"]
+        lines += [f"  - {r['source']}: page {r['pages']}, {r['saved']} saved, "
+                  f"idle {r['idle_min']} min" for r in report["running"]]
+    try:
+        from app.services import email_service
+        email_service.send_alert(subject=subject, body="\n".join(lines))
+    except Exception:                                           # noqa: BLE001
+        log.exception("scrape window alert could not be sent")
 
 
 def scrape_outcome(progress: dict) -> str:
@@ -136,6 +168,7 @@ class ScrapeScheduler:
         # often scraping happens.
         self.apply_email_settings()
         self._install_deadline_audit()
+        self._install_scrape_window()
         # Re-apply the persisted schedule so automatic runs resume after restart.
         if self.current.mode != "manual":
             try:
@@ -173,12 +206,72 @@ class ScrapeScheduler:
             except Exception:
                 log.exception("Nightly deadline audit failed")
 
+        # 08:15, after the nightly scrape window (00:00-08:00) and before the
+        # 09:00 digest. At 00:05 it ran a whole-database pass at the same time
+        # as the nightly scrape, competing for the database write lock.
         self._scheduler.add_job(
-            _run, CronTrigger(hour=0, minute=5, timezone="Asia/Kolkata"),
+            _run, CronTrigger(hour=8, minute=15, timezone="Asia/Kolkata"),
             id="deadline-audit", replace_existing=True,
             **{**_JOB_GUARDS, "misfire_grace_time": 60},
         )
-        log.info("Scheduler: nightly integrity and deadline audit at 00:05 Asia/Kolkata")
+        log.info("Scheduler: daily integrity and deadline audit at 08:15 Asia/Kolkata")
+
+    # ------------------------------------------------------------ scrape window
+    def _install_scrape_window(self) -> None:
+        """Health check (06:00) and hard stop (08:00) for the nightly scrape."""
+        tz = settings.scrape_window_timezone
+        for job_id, at, func in (
+            (_HEALTH_JOB_ID, settings.scrape_health_check_at, self._window_health_check),
+            (_HARD_STOP_JOB_ID, settings.scrape_hard_stop_at, self._window_hard_stop),
+        ):
+            try:
+                self._scheduler.remove_job(job_id)
+            except Exception:
+                pass
+            hm = _hhmm(at)
+            if hm is None:
+                log.info("Scheduler: %s off", job_id)
+                continue
+            self._scheduler.add_job(
+                func, CronTrigger(hour=hm[0], minute=hm[1], timezone=tz),
+                id=job_id, replace_existing=True, **_JOB_GUARDS,
+            )
+            log.info("Scheduler: %s at %02d:%02d %s", job_id, hm[0], hm[1], tz)
+
+    async def _window_health_check(self) -> None:
+        """Still scraping at the health-check time: carry on if it is making
+        progress, stop it now if it is stuck. An email says which."""
+        if manager.state not in ("running", "paused"):
+            log.info("Scrape health check: no scrape running (last outcome: %s)",
+                     self.last_status)
+            return
+        report = manager.health_report(stall_s=settings.scrape_stall_minutes * 60)
+        stop_at = settings.scrape_hard_stop_at or "the next manual stop"
+        if report["stalled"]:
+            verdict = (f"STUCK — no page has finished for {report['idle_min']} min. "
+                       "Stopped now.")
+            log.error("Scrape health check: %s", verdict)
+            await manager.stop()
+        else:
+            verdict = f"Healthy — still making progress. It continues until {stop_at}."
+            log.info("Scrape health check: %s", verdict)
+        await asyncio.to_thread(
+            _alert, f"Nightly scrape still running at {settings.scrape_health_check_at}: "
+            + verdict.split(" — ")[0], verdict, report)
+
+    async def _window_hard_stop(self) -> None:
+        """End of the scrape window: stop whatever is still scraping."""
+        if manager.state not in ("running", "paused"):
+            return
+        report = manager.health_report(stall_s=settings.scrape_stall_minutes * 60)
+        log.warning("Scrape window closed at %s — stopping the scrape",
+                    settings.scrape_hard_stop_at)
+        await manager.stop()
+        await asyncio.to_thread(
+            _alert, f"Nightly scrape stopped at {settings.scrape_hard_stop_at} (window closed)",
+            "The scrape was still running when the window closed, so it was "
+            "stopped. Sources that were not reached run first tomorrow night.",
+            report)
 
     def apply_email_settings(self) -> None:
         """(Re)install the daily digest job from the dashboard's settings.
@@ -280,7 +373,8 @@ class ScrapeScheduler:
 
         self._scheduler.add_job(self._scrape_all, trigger, id=_JOB_ID,
                                 replace_existing=True, **_SCRAPE_JOB_GUARDS)
-        log.info("Scheduler: %s scrape configured (%02d:%02d)", req.mode, req.hour, req.minute)
+        log.info("Scheduler: %s scrape configured (%s, timezone=%s)", req.mode,
+                 req.cron if req.mode == "cron" else f"{req.hour:02d}:{req.minute:02d}", req.timezone)
         if persist:
             self._save_state()
 

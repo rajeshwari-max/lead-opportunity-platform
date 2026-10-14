@@ -19,13 +19,22 @@ class Settings(BaseSettings):
     max_retries: int = 3
     retry_backoff: float = 2.0          # exponential backoff base (seconds)
     concurrency_per_source: int = 4     # concurrent page fetches per website
-    # Walk every page of every source with no time limits. OFF: with it on, a
-    # scheduled run on 2026-10-14 was 9% done after 4h15m (ETA 43 hours), so
-    # it never finished and blocked the next scheduled run. Off = each source
-    # stops after `stale_page_streak` pages with nothing new, a per-source
-    # limit (source_timeout_s) and a whole-run limit (run_timeout_s).
-    # Turn on only for a deliberate one-off backfill.
-    full_source_scan: bool = False
+    # Walk every page of every source (no page limits, no per-source time
+    # limit). Safe only because the scrape runs once a night inside a fixed
+    # window: it starts at 00:00, is health-checked at 06:00 and is stopped at
+    # 08:00 at the latest (scrape_health_check_at / scrape_hard_stop_at below).
+    # False = bounded scans: a source stops after `stale_page_streak` pages
+    # with nothing new or after source_timeout_s; the run after run_timeout_s.
+    full_source_scan: bool = True
+    # The nightly scrape window, in scrape_window_timezone (HH:MM, blank = off).
+    # 06:00: if the scrape is still running, check it is making progress. If no
+    # page has finished for scrape_stall_minutes it is stuck and is stopped
+    # then; otherwise it carries on. Either way an alert email says which.
+    # 08:00: anything still scraping is stopped, so nothing scrapes in the day.
+    scrape_window_timezone: str = "Asia/Kolkata"
+    scrape_health_check_at: str = "06:00"
+    scrape_hard_stop_at: str = "08:00"
+    scrape_stall_minutes: int = 30
     max_concurrent_sources: int = 5     # websites scraped at the same time. With ~80
                                         # sources, running them all at once saturated
                                         # the event loop and froze the progress API.

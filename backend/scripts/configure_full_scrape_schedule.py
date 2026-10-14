@@ -1,4 +1,8 @@
-"""Configure source scans at 07:00 and 13:00 India time, five at a time.
+"""Configure the nightly full scrape: 00:00 India time, five sources at a time.
+
+Every page of every source is walked. The run is health-checked at 06:00 and
+stopped at 08:00 at the latest (LOP_SCRAPE_HEALTH_CHECK_AT /
+LOP_SCRAPE_HARD_STOP_AT), so nothing scrapes during the day.
 
 Run from backend with the API stopped, then restart the API. Does not scrape,
 modify opportunity data, or send email.
@@ -13,7 +17,7 @@ def configure(root: Path):
     stamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')
     env = root / '.env'
     updates = {
-        'LOP_FULL_SOURCE_SCAN': 'false',
+        'LOP_FULL_SOURCE_SCAN': 'true',
         'LOP_MAX_CONCURRENT_SOURCES': '5',
         'LOP_SCHEDULER_CATCHUP_ON_RESTART': 'false',
     }
@@ -28,13 +32,13 @@ def configure(root: Path):
     state = json.loads(state_path.read_text(encoding='utf-8')) if state_path.exists() else {}
     if state_path.exists():
         shutil.copy2(state_path, state_path.with_name(f'schedule.before-full-scan-{stamp}.json'))
-    state['config'] = dict(mode='cron', cron='0 7,13 * * *', hour=7,
+    state['config'] = dict(mode='daily', cron=None, hour=0,
                            minute=0, timezone='Asia/Kolkata')
     temporary = state_path.with_suffix('.json.next')
     temporary.write_text(json.dumps(state, indent=2), encoding='utf-8')
     temporary.replace(state_path)
-    print('Configured: 07:00 and 13:00 Asia/Kolkata; five sources at a time; '
-          'bounded scans (each run ends within LOP_RUN_TIMEOUT_S).')
+    print('Configured: nightly full scrape at 00:00 Asia/Kolkata, five sources '
+          'at a time; health check 06:00; stopped at 08:00 at the latest.')
     print('Restart the API to load these settings.')
 
 
