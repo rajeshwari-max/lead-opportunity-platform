@@ -292,11 +292,11 @@ class ScrapeScheduler:
 
         self._scheduler.add_job(
             _daily_digest_and_reminders,
-            CronTrigger(hour=cfg.digest_hour, minute=cfg.digest_minute),
+            CronTrigger(hour=cfg.digest_hour, minute=cfg.digest_minute, timezone=cfg.digest_timezone),
             id=_DIGEST_JOB_ID, replace_existing=True, **_JOB_GUARDS,
         )
-        log.info("Scheduler: daily digest + reminders at %02d:%02d (reminders at %s days)",
-                 cfg.digest_hour, cfg.digest_minute,
+        log.info("Scheduler: daily digest + reminders at %02d:%02d %s (reminders at %s days)",
+                 cfg.digest_hour, cfg.digest_minute, cfg.digest_timezone,
                  ", ".join(str(d) for d in cfg.reminder_days))
 
     def next_digest_run(self) -> datetime | None:

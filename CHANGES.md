@@ -5,6 +5,29 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-14 (later) — Daily email timezone; schedule saves only on "Save" (Codex work, finished and recorded)
+
+Codex prepared these and left them uncommitted (see
+`docs/schedule-audit-2026-10-14.md`); reviewed, finished and committed.
+
+- **Daily email has an explicit timezone.** `EmailSettings.digest_timezone`
+  (validated IANA name) is used by the digest trigger and shown as a
+  dropdown next to the send time in Auto email. Existing settings default to
+  `UTC`, which is what the EC2 trigger used until now, so the send time does
+  not move until someone changes it. To send at 09:00 India time — after the
+  08:00 end of the nightly scrape — choose 09:00 and Asia/Kolkata.
+- **Schedule changes need "Save schedule".** Changing the mode dropdown or
+  leaving the cron box used to save immediately; now nothing changes until
+  Save is clicked. Defaults in the form are 00:00 / `0 0 * * *` to match the
+  nightly scrape, and the panel says a run is health-checked at 06:00 and
+  stopped at 08:00.
+
+Tests: `test_email_trigger_uses_explicit_timezone`,
+`test_invalid_email_timezone_rejected`. Full suite: 1257 passed, 3 skipped.
+`tsc` clean.
+
+---
+
 ## 2026-10-14 (later) — One nightly full scrape, 00:00–08:00 India time
 
 Decision: scrape every page of every source, once a night, inside a fixed

@@ -126,6 +126,11 @@ export function AutoEmailPanel({ readOnly = false }: { readOnly?: boolean }) {
                 }}
                 className="rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-primary"
               />
+              <select aria-label="Email timezone" value={cfg.digest_timezone || "UTC"}
+                disabled={readOnly || saving} onChange={e => patch({ digest_timezone: e.target.value })}
+                className="rounded-md border border-border bg-background px-2 py-1 text-xs">
+                {[...new Set([cfg.digest_timezone || "UTC", "Asia/Kolkata", "UTC"])].map(zone => <option key={zone}>{zone}</option>)}
+              </select>
               {nextRun && (
                 <span className="text-xs text-muted-foreground">
                   next: {nextRun.toLocaleString()}

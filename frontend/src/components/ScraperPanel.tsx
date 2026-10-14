@@ -34,10 +34,11 @@ export function ScraperPanel({ sources, progress }: Props) {
   const [siteQuery, setSiteQuery] = useState("");
   const [scrapeVerticals, setScrapeVerticals] = useState<string[]>([]);
   const [schedule, setSchedule] = useState<ScheduleStatus | null>(null);
-  const [scheduleTime, setScheduleTime] = useState("14:00");
+  const [scheduleTime, setScheduleTime] = useState("00:00");
   const [scheduleZone, setScheduleZone] = useState("Asia/Kolkata");
+  const [scheduleMode, setScheduleMode] = useState("manual");
   const [scheduleError, setScheduleError] = useState("");
-  const [cron, setCron] = useState("0 2 * * *");
+  const [cron, setCron] = useState("0 0 * * *");
   const active = progress != null && progress.state !== "idle";
   const allSelected = sources.length > 0 && selected.length === sources.length;
   const sourceStates = Object.values(progress?.sources ?? {});
@@ -57,6 +58,7 @@ export function ScraperPanel({ sources, progress }: Props) {
       .getSchedule()
       .then((s) => {
         setSchedule(s);
+        setScheduleMode(s.mode);
         setScheduleZone(s.timezone || "UTC");
         setScheduleTime(`${String(s.hour).padStart(2,"0")}:${String(s.minute).padStart(2,"0")}`);
         if (s.cron) setCron(s.cron);
@@ -244,7 +246,7 @@ export function ScraperPanel({ sources, progress }: Props) {
             <CalendarClock className="h-3.5 w-3.5" /> Schedule
           </p>
           <div className="flex gap-2">
-            <select value={schedule?.mode ?? "manual"} onChange={(e) => applySchedule(e.target.value)}
+            <select value={scheduleMode} onChange={(e) => setScheduleMode(e.target.value)}
                     className="h-8 flex-1 rounded-lg border border-border bg-card px-2 text-xs">
               <option value="manual">Manual only</option>
               <option value="daily">Daily</option>
@@ -253,9 +255,8 @@ export function ScraperPanel({ sources, progress }: Props) {
               <option value="yearly">Yearly</option>
               <option value="cron">Custom cron</option>
             </select>
-            {schedule?.mode === "cron" && (
+            {scheduleMode === "cron" && (
               <input value={cron} onChange={(e) => setCron(e.target.value)}
-                     onBlur={() => applySchedule("cron")}
                      className="h-8 w-28 rounded-lg border border-border bg-card px-2 font-mono text-xs" />
             )}
           </div>
@@ -265,9 +266,9 @@ export function ScraperPanel({ sources, progress }: Props) {
             <label>Timezone <select value={scheduleZone} onChange={e => setScheduleZone(e.target.value)}>
               {[...new Set([scheduleZone, "Asia/Kolkata", "UTC"])].map(zone => <option key={zone}>{zone}</option>)}
             </select></label>
-            <Button size="sm" onClick={() => applySchedule(schedule?.mode || "daily")}>Save schedule</Button>
+            <Button size="sm" onClick={() => applySchedule(scheduleMode)}>Save schedule</Button>
           </div>
-          <p className="text-xs text-muted-foreground">Custom cron uses the selected timezone. For multiple daily hours, use a cron expression.</p>
+          <p className="text-xs text-muted-foreground">Changes take effect only when you click Save schedule. Custom cron uses the selected timezone. A scrape still running at 06:00 India time is health-checked (stopped if stuck) and is stopped at 08:00.</p>
           {scheduleError && <p role="alert" className="text-xs text-red-500">{scheduleError}</p>}
           {schedule && schedule.mode !== "manual" && (
             <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg border border-border bg-muted/30 p-2.5 text-[11px]">

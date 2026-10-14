@@ -254,6 +254,7 @@ export interface SendResult {
 
 export interface EmailSettings {
   digest_enabled: boolean;
+  digest_timezone: string;
   digest_hour: number;
   digest_minute: number;
   /** Days-before-deadline at which reminders are sent, descending. */

@@ -14,7 +14,8 @@ import json
 import logging
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.core.config import BASE_DIR, settings
 
@@ -30,6 +31,17 @@ class EmailSettings(BaseModel):
     digest_enabled: bool = True
     digest_hour: int = Field(default=9, ge=0, le=23)
     digest_minute: int = Field(default=0, ge=0, le=59)
+
+    digest_timezone: str = "UTC"  # Preserve existing EC2 send times until changed.
+
+    @field_validator("digest_timezone")
+    @classmethod
+    def validate_timezone(cls, value):
+        try:
+            ZoneInfo(value)
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ValueError("Unknown email timezone") from exc
+        return value
 
     # Days-before-deadline at which a reminder goes out. Descending order is
     # enforced on save so the earliest warning is always sent first.

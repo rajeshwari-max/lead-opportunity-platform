@@ -205,3 +205,20 @@ def test_requested_two_slots_in_india_time(sched):
     assert first.astimezone(timezone.utc) == datetime(2026, 10, 13, 1, 30, tzinfo=timezone.utc)
     assert second.astimezone(timezone.utc) == datetime(2026, 10, 13, 7, 30, tzinfo=timezone.utc)
     assert third.astimezone(timezone.utc) == datetime(2026, 10, 14, 1, 30, tzinfo=timezone.utc)
+
+
+def test_email_trigger_uses_explicit_timezone(sched, monkeypatch):
+    from app.services import email_settings
+    monkeypatch.delattr(sched, "apply_email_settings")
+    monkeypatch.setattr(email_settings, "load", lambda: email_settings.EmailSettings(
+        digest_hour=9, digest_timezone="Asia/Kolkata"))
+    sched.apply_email_settings()
+    trigger = sched._scheduler.jobs["daily-digest"][1]
+    fire = trigger.get_next_fire_time(None, datetime(2026, 10, 14, 0, tzinfo=timezone.utc))
+    assert fire.astimezone(timezone.utc) == datetime(2026, 10, 14, 3, 30, tzinfo=timezone.utc)
+
+
+def test_invalid_email_timezone_rejected():
+    from app.services.email_settings import EmailSettings
+    with pytest.raises(ValueError):
+        EmailSettings(digest_timezone="invalid/zone")
