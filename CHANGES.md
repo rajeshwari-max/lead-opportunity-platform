@@ -5,6 +5,41 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-14 — Scheduled scrapes end again (no more 40-hour runs)
+
+The 13:00 scheduled run was 9% done after 4h15m with an ETA of 43 hours, so
+it would still hold the scrape lease at 07:00 and the next run would be
+skipped: the scraper looked like it ran continuously.
+
+Cause: commit 8917a10 ("full source scans") made `full_source_scan` the
+default and its setup script wrote `LOP_FULL_SOURCE_SCAN=true` to `.env`.
+That mode removes every stop: no per-source time limit, no whole-run limit,
+no "3 pages with nothing new → stop" rule, and some scrapers ignore their
+page caps. Every source walks its whole archive, most of it already stored.
+It also ran sources in fixed batches of five, so each batch waited for its
+slowest source while four slots sat idle.
+
+- `full_source_scan` defaults to **false** (bounded scans, as before
+  8917a10). Each source stops after 3 pages with nothing new, or after 45
+  minutes; the whole run stops after `run_timeout_s`.
+- `run_timeout_s` 6 h → **5.5 h**, so the 07:00 run has ended before 13:00.
+- Sources run **five at a time, rolling**: the next starts as soon as any one
+  finishes, instead of fixed batches.
+- `scripts/configure_full_scrape_schedule.py` now writes
+  `LOP_FULL_SOURCE_SCAN=false`.
+- DevelopmentAid walks its brand searches straight after grants and before
+  tenders (the slowest catalogue), so a run cut short by the time limit still
+  covers every brand search.
+
+**On EC2, `.env` must also be changed**, because it says `true` and `.env`
+overrides the code default: set `LOP_FULL_SOURCE_SCAN=false`.
+
+Tests: `test_full_scan_policy.py` (bounded is the default; rolling five at a
+time; bounded run has a whole-run deadline; full scan still has none).
+Full suite: 1248 passed, 3 skipped.
+
+---
+
 ## 2026-10-14 — DevelopmentAid runs on the schedule; brand-level searches added
 
 - **DevelopmentAid is scheduled again.** It was removed from every scheduled

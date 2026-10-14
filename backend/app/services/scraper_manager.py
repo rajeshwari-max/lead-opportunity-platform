@@ -228,20 +228,20 @@ class ScraperManager:
 
         heart = asyncio.create_task(self._heartbeat_loop())
         try:
-            # Only diagnostic bounded mode imposes a whole-run deadline.
+            # A ceiling on the whole run: per-source limits alone do not bound
+            # it (85 sources x the per-source limit is days), and a run still
+            # going at the next scheduled slot makes that slot be skipped.
             whole_run = max(300, settings.run_timeout_s)
             try:
-                async def run_batches():
-                    size = max(1, settings.max_concurrent_sources)
-                    for offset in range(0, len(scrapers), size):
-                        batch = scrapers[offset:offset + size]
-                        self._log(f"Starting source batch {offset // size + 1}: "
-                                  + ", ".join(s.display_name for s in batch))
-                        await asyncio.gather(*(_guarded(s) for s in batch))
+                # Rolling, not fixed batches: `gate` keeps at most
+                # max_concurrent_sources running, and the next source starts as
+                # soon as any one finishes. Fixed batches of five made every
+                # batch wait for its slowest source while four slots sat idle.
+                everything = asyncio.gather(*(_guarded(s) for s in scrapers))
                 if settings.full_source_scan:
-                    await run_batches()
+                    await everything
                 else:
-                    await asyncio.wait_for(run_batches(), whole_run)
+                    await asyncio.wait_for(everything, whole_run)
             except asyncio.TimeoutError:
                 self._stop.set()          # let the crawl loops unwind
                 self._log(

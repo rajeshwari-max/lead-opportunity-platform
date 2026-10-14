@@ -19,7 +19,13 @@ class Settings(BaseSettings):
     max_retries: int = 3
     retry_backoff: float = 2.0          # exponential backoff base (seconds)
     concurrency_per_source: int = 4     # concurrent page fetches per website
-    full_source_scan: bool = True      # walk all available pages, no elapsed-time cutoff
+    # Walk every page of every source with no time limits. OFF: with it on, a
+    # scheduled run on 2026-10-14 was 9% done after 4h15m (ETA 43 hours), so
+    # it never finished and blocked the next scheduled run. Off = each source
+    # stops after `stale_page_streak` pages with nothing new, a per-source
+    # limit (source_timeout_s) and a whole-run limit (run_timeout_s).
+    # Turn on only for a deliberate one-off backfill.
+    full_source_scan: bool = False
     max_concurrent_sources: int = 5     # websites scraped at the same time. With ~80
                                         # sources, running them all at once saturated
                                         # the event loop and froze the progress API.
@@ -353,10 +359,11 @@ class Settings(BaseSettings):
     # several sections, so this is deliberately above the largest legitimate
     # source rather than tuned to the average.
     source_timeout_s: int = 2700
-    # 6 hours for the whole run. Per-source limits alone do not bound it — 85
-    # sources times 45 minutes is days — and the scheduler skips a run while
-    # the previous one is still going.
-    run_timeout_s: int = 21600
+    # The whole run. Per-source limits alone do not bound it — 85 sources
+    # times 45 minutes is days — and the scheduler skips a run while the
+    # previous one is still going. 5.5 hours, so the 07:00 run has ended before 13:00. At 6 hours the 07:00
+    # run could still hold the lease at 13:00 and that run would be skipped.
+    run_timeout_s: int = 19800
 
     health_failure_streak: int = 3
     health_stale_days: int = 21

@@ -4,24 +4,75 @@ from types import SimpleNamespace
 from app.services import scraper_manager as mod
 
 
-def test_full_scan_runs_five_at_a_time_without_elapsed_cutoff(monkeypatch):
+def _sources(n):
+    return [SimpleNamespace(name=str(i), display_name=str(i)) for i in range(n)]
+
+
+def test_bounded_scans_are_the_default():
+    # Full scans had no time limits and ran for days (9% after 4h15m).
+    field = type(mod.settings).model_fields["full_source_scan"]
+    assert field.default is False
+    assert type(mod.settings).model_fields["run_timeout_s"].default < 6 * 3600
+
+
+def test_sources_run_five_at_a_time_rolling(monkeypatch):
+    monkeypatch.setattr(mod.settings, 'full_source_scan', False)
+    monkeypatch.setattr(mod.settings, 'max_concurrent_sources', 5)
+    monkeypatch.setattr(mod.settings, 'run_maintenance_after_scrape', False)
+    manager = mod.ScraperManager()
+    sources = _sources(12)
+    manager.progress = {s.name: {'status': 'queued', 'errors': 0} for s in sources}
+    started, finished, active, peak = [], [], set(), []
+
+    async def run(source):
+        started.append(source.name)
+        active.add(source.name)
+        peak.append(len(active))
+        # Source 0 is slow; the rest are quick.
+        await asyncio.sleep(0.3 if source.name == '0' else 0.01)
+        active.remove(source.name)
+        finished.append(source.name)
+
+    monkeypatch.setattr(manager, '_run_source', run)
+    asyncio.run(manager._run(sources))
+    assert len(finished) == 12
+    assert max(peak) == 5
+    # Rolling: later sources did not wait for the slow one to finish.
+    assert finished[-1] == '0'
+
+
+def test_bounded_run_has_a_whole_run_deadline(monkeypatch):
+    monkeypatch.setattr(mod.settings, 'full_source_scan', False)
+    monkeypatch.setattr(mod.settings, 'run_maintenance_after_scrape', False)
+    manager = mod.ScraperManager()
+    sources = _sources(3)
+    manager.progress = {s.name: {'status': 'queued', 'errors': 0} for s in sources}
+    deadlines = []
+    real_wait_for = asyncio.wait_for
+
+    async def recording_wait_for(aw, timeout):
+        deadlines.append(timeout)
+        return await real_wait_for(aw, timeout)
+
+    async def run(source):
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(manager, '_run_source', run)
+    monkeypatch.setattr(mod.asyncio, 'wait_for', recording_wait_for)
+    asyncio.run(manager._run(sources))
+    assert max(deadlines) == max(300, mod.settings.run_timeout_s)
+
+
+def test_full_scan_still_has_no_elapsed_cutoff(monkeypatch):
     monkeypatch.setattr(mod.settings, 'full_source_scan', True)
     monkeypatch.setattr(mod.settings, 'max_concurrent_sources', 5)
     monkeypatch.setattr(mod.settings, 'run_maintenance_after_scrape', False)
     manager = mod.ScraperManager()
-    sources = [SimpleNamespace(name=str(i), display_name=str(i)) for i in range(12)]
+    sources = _sources(7)
     manager.progress = {s.name: {'status': 'queued', 'errors': 0} for s in sources}
-    finished, active, peak = [], set(), []
 
     async def run(source):
-        # Every preceding batch must finish before the next batch starts.
-        batch_start = int(source.name) // 5 * 5
-        assert all(str(i) in finished for i in range(batch_start))
-        active.add(source.name)
-        peak.append(len(active))
-        await asyncio.sleep(0.01)
-        active.remove(source.name)
-        finished.append(source.name)
+        await asyncio.sleep(0)
 
     async def forbidden_timeout(*args, **kwargs):
         raise AssertionError('Full scan must not have a whole-source/run timeout')
@@ -29,8 +80,6 @@ def test_full_scan_runs_five_at_a_time_without_elapsed_cutoff(monkeypatch):
     monkeypatch.setattr(manager, '_run_source', run)
     monkeypatch.setattr(asyncio, 'wait_for', forbidden_timeout)
     asyncio.run(manager._run(sources))
-    assert len(finished) == 12
-    assert max(peak) == 5
 
 
 def test_duplicate_pages_do_not_end_full_scan(monkeypatch):

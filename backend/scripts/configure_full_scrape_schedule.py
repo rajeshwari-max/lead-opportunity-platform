@@ -1,4 +1,4 @@
-"""Configure complete source scans at 07:00 and 13:00 India time.
+"""Configure source scans at 07:00 and 13:00 India time, five at a time.
 
 Run from backend with the API stopped, then restart the API. Does not scrape,
 modify opportunity data, or send email.
@@ -13,7 +13,7 @@ def configure(root: Path):
     stamp = datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')
     env = root / '.env'
     updates = {
-        'LOP_FULL_SOURCE_SCAN': 'true',
+        'LOP_FULL_SOURCE_SCAN': 'false',
         'LOP_MAX_CONCURRENT_SOURCES': '5',
         'LOP_SCHEDULER_CATCHUP_ON_RESTART': 'false',
     }
@@ -33,8 +33,9 @@ def configure(root: Path):
     temporary = state_path.with_suffix('.json.next')
     temporary.write_text(json.dumps(state, indent=2), encoding='utf-8')
     temporary.replace(state_path)
-    print('Configured: 07:00 and 13:00 Asia/Kolkata; batches of five; full scans.')
-    print('DevelopmentAid stays manual. Restart the API to load these settings.')
+    print('Configured: 07:00 and 13:00 Asia/Kolkata; five sources at a time; '
+          'bounded scans (each run ends within LOP_RUN_TIMEOUT_S).')
+    print('Restart the API to load these settings.')
 
 
 if __name__ == '__main__':

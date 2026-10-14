@@ -16,7 +16,7 @@ the dashboard, exact date on their site).
 
 Besides the two section searches, the brand-level searches in
 LOP_DEVAID_BRAND_SEARCH_URLS (settings.devaid_brand_search_urls) are walked in
-the same session, one after another, each paged in full the same way.
+the same session (after grants, before tenders), each paged the same way.
 
 Pagination is a plain URL query parameter (`?pageNr=N`) — confirmed directly
 from the site's own address bar while paging through results manually — so
@@ -518,9 +518,15 @@ class DevelopmentAidScraper(BaseScraper):
                 # Brand-level searches run after the section searches, each
                 # walked and paged in full. `slug` stays "grants"/"tenders"
                 # because it selects the catalogue's API and record type.
+                # They go straight after the grants search and BEFORE tenders:
+                # tenders is the largest catalogue and the slowest, so a run cut
+                # short by the per-source time limit still covers every brand.
                 brand = [(u, k) for u, k in _BRAND_SEARCHES if k in wanted]
-                sections += [(u, k, f"{k} brand search {i}/{len(brand)}")
-                             for i, (u, k) in enumerate(brand, 1)]
+                brand_rows = [(u, k, f"{k} brand search {i}/{len(brand)}")
+                              for i, (u, k) in enumerate(brand, 1)]
+                tenders_at = next((i for i, row in enumerate(sections)
+                                   if row[1] == "tenders"), len(sections))
+                sections[tenders_at:tenders_at] = brand_rows
 
                 for section_url, slug, label in sections:
                     if stop_flag.is_set():
