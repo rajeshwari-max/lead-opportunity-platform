@@ -64,6 +64,7 @@ class CompanyProfileInput(StrictModel):
     certifications: list[str] = Field(default_factory=list, max_length=100)
     partnership_types: list[str] = Field(default_factory=list, max_length=100)
     funding_types_of_interest: list[str] = Field(default_factory=list, max_length=100)
+    excluded_organizations: list[str] = Field(default_factory=list, max_length=200)
     recommendation_weights: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_WEIGHTS))
     recommendation_thresholds: dict[str, float] = Field(default_factory=lambda: dict(DEFAULT_THRESHOLDS))
 
@@ -72,6 +73,7 @@ class CompanyProfileInput(StrictModel):
         "organization_types", "capabilities", "services", "project_types",
         "target_beneficiaries", "geographic_focus", "certifications",
         "partnership_types", "funding_types_of_interest",
+        "excluded_organizations",
     )
     @classmethod
     def bounded_strings(cls, values: list[str]) -> list[str]:

@@ -362,6 +362,7 @@ export interface CompanyIntelligenceProfile {
   certifications: string[];
   partnership_types: string[];
   funding_types_of_interest: string[];
+  excluded_organizations: string[];
   recommendation_weights: Record<string, number>;
   recommendation_thresholds: Record<string, number>;
   version: number;
@@ -460,6 +461,7 @@ export interface OpportunityIntelligence {
   recommendation_score: number;
   priority: "HIGH" | "MEDIUM" | "LOW";
   confidence: "HIGH" | "MEDIUM" | "LOW";
+  excluded_organization: string;
   eligibility_matches: EligibilityCriterion[];
   similar_leads: SimilarHistoricalLead[];
   reasons: string[];

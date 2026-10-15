@@ -23,7 +23,7 @@ from app.database.models import (
 )
 
 PROFILE_ID = 1
-MODEL_VERSION = "company-fit-rules-2026.10.12-confidence-evidence"
+MODEL_VERSION = "company-fit-rules-2026.10.15-exclusions-big-bets"
 TAXONOMY_VERSION = "lop-hierarchy-2026.10"
 FEATURE_VERSION = "company-fit-features-v3"
 THRESHOLD_VERSION = "company-fit-thresholds-v1"
@@ -46,7 +46,10 @@ LIST_FIELDS = (
     "organization_types", "capabilities", "services", "project_types",
     "target_beneficiaries", "geographic_focus", "certifications",
     "partnership_types", "funding_types_of_interest",
+    "excluded_organizations",
 )
+
+PROFILE_KNOWLEDGE_VERSION = 1
 
 BRANDS = (
     "CMS", "Swasti", "Vrutti", "Upfront", "Green Foundation",
@@ -72,6 +75,99 @@ DEFAULT_PROFILE_LISTS = {
     "funding_types_of_interest": [
         "Grant", "RFP", "Tender", "Proposal", "Fellowship", "Award", "Challenge",
     ],
+}
+
+# Company facts supplied in "Big Bets of the Catalysts".  These are merged
+# once into an existing profile, never used as legal-eligibility evidence, and
+# remain editable in the admin panel.  The language stays close to the source
+# so the explainable exact-phrase matcher can show what actually matched.
+CATALYST_PROFILE_KNOWLEDGE = {
+    # The document names India as the headquarters and does not enumerate the
+    # other countries in which Catalysts has worked, so only India is asserted.
+    "countries_of_operation": ["India"],
+    "industries": [
+        "Social impact and development", "Public health",
+        "Smallholder agriculture", "Sustainable finance",
+    ],
+    "sectors": [
+        "Health", "Livelihoods", "Climate change", "Resilience",
+        "Sustainable agriculture", "Comprehensive primary health care",
+        "Regenerative agriculture",
+    ],
+    "focus_areas": [
+        "Community resilience", "Agency building", "Access to essential services",
+        "Surveillance and predictive analytics", "Climate and health risks",
+        "Primary health care", "Small and marginal farmers",
+        "Farmer producer organisations", "Regenerative landscapes",
+        "Blended finance", "Community systems strengthening",
+    ],
+    "capabilities": [
+        "Resilience measurement", "Community systems strengthening",
+        "Surveillance and predictive analytics", "Government technical assistance",
+        "Virtual PMU", "Comprehensive primary health care",
+        "Farmer enterprise development", "Digital public infrastructure",
+        "Regenerative agriculture", "Blended finance facility design",
+        "Collaborative orchestration", "Action research and implementation",
+        "Social business model design",
+    ],
+    "services": [
+        "Consulting", "Programme implementation", "Action research",
+        "Collaborative orchestration", "Technical assistance",
+        "Monitoring and evaluation", "Capacity building",
+        "Digital platform development", "Financing facility design",
+    ],
+    "project_types": [
+        "Development solutions", "Social business", "Action research",
+        "Implementation", "Public health surveillance", "Primary health care",
+        "Farmer livelihoods", "Regenerative landscapes", "Digital public infrastructure",
+    ],
+    "target_beneficiaries": [
+        "Small and marginal farmers", "Fisherfolk", "Factory workers",
+        "Street vendors", "Sex workers", "Migrants", "Tribal populations",
+        "Urban poor", "Rural poor", "Gig workers", "Frontline workers",
+        "Forest dependent communities",
+    ],
+    "partnership_types": [
+        "Government", "Civil society organisation", "Social enterprise",
+        "Academic institution", "Funder", "Investor",
+    ],
+    "funding_types_of_interest": [
+        "Grant", "RFP", "Tender", "Proposal", "Equity", "Debt",
+        "Blended finance", "Returnable grant", "Guarantee",
+        "Outcome based financing", "Bond",
+    ],
+}
+
+# The owner clarified that "whitelisted" in the supplied screenshot means the
+# opposite of normal procurement terminology: Catalysts does NOT work with
+# these organisations.  Preserve that explicit business meaning here.
+DEFAULT_EXCLUDED_ORGANIZATIONS = [
+    "Pepsi", "Coke", "ITC", "Adani Foundation", "Vedanta Foundation",
+    "Coal based power plants - NTPC and others", "Apple", "Akshaya Patra",
+    "HPCL", "Oxfam", "Child in Need Institute - Relief Fund", "Lanco",
+    "Syngenta", "India HIV/AIDS Alliance", "FHI360 and FHI India",
+]
+
+# Controlled aliases only.  A broad fuzzy match would make a word such as
+# "apple" in an agriculture title suppress an unrelated opportunity.  These
+# aliases are compared against the scraped funding organisation field.
+_EXCLUDED_ORGANIZATION_ALIASES = {
+    "pepsi": ("pepsi", "pepsico", "pepsico foundation", "pepsi foundation"),
+    "coke": ("coke", "coca cola", "coca cola foundation"),
+    "coal based power plants ntpc and others": (
+        "ntpc", "national thermal power corporation",
+    ),
+    "akshaya patra": ("akshaya patra", "the akshaya patra foundation"),
+    "adani foundation": ("adani foundation", "adani"),
+    "vedanta foundation": ("vedanta foundation", "vedanta"),
+    "child in need institute relief fund": (
+        "child in need institute", "child in need institute relief fund", "cini",
+    ),
+    "fhi360 and fhi india": ("fhi360", "fhi 360", "fhi india"),
+    "india hiv aids alliance": (
+        "india hiv aids alliance", "india hiv/aids alliance",
+    ),
+    "apple": ("apple", "apple inc", "apple foundation"),
 }
 
 # Only facts explicitly supplied in the completed brand forms are recorded
@@ -126,6 +222,37 @@ def _clean_list(values: Iterable[str]) -> list[str]:
     return out
 
 
+def _merged_profile_lists(base: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Return the current company knowledge without mutating its source maps."""
+    merged = {field: list(values) for field, values in base.items()}
+    for field, values in CATALYST_PROFILE_KNOWLEDGE.items():
+        merged[field] = _clean_list([*merged.get(field, []), *values])
+    merged["excluded_organizations"] = _clean_list([
+        *merged.get("excluded_organizations", []),
+        *DEFAULT_EXCLUDED_ORGANIZATIONS,
+    ])
+    return merged
+
+
+def _apply_profile_knowledge(profile: CompanyProfile) -> bool:
+    """Merge newly supplied facts once; return whether the row changed.
+
+    The knowledge version is the guard that protects administrator edits.  A
+    later profile save may remove an item and it will stay removed until a new,
+    explicitly versioned knowledge package is introduced.
+    """
+    if (profile.knowledge_version or 0) >= PROFILE_KNOWLEDGE_VERSION:
+        return False
+    additions = _merged_profile_lists({})
+    for field, values in additions.items():
+        current = _loads(getattr(profile, field, "[]"), [])
+        setattr(profile, field, _dumps(_clean_list([*current, *values])))
+    profile.knowledge_version = PROFILE_KNOWLEDGE_VERSION
+    profile.version = (profile.version or 0) + 1
+    profile.updated_at = datetime.now(timezone.utc)
+    return True
+
+
 def _tokens(value: str) -> set[str]:
     return {
         token for token in re.findall(r"[a-z0-9][a-z0-9+.-]{1,}", (value or "").casefold())
@@ -137,11 +264,16 @@ def _csv(value: str | None) -> list[str]:
     return _clean_list((value or "").split(","))
 
 
-def _default_profile() -> CompanyProfile:
+def _default_profile(*, enriched: bool = True) -> CompanyProfile:
+    profile_lists = (
+        _merged_profile_lists(DEFAULT_PROFILE_LISTS)
+        if enriched else {field: list(values) for field, values in DEFAULT_PROFILE_LISTS.items()}
+    )
     return CompanyProfile(
         id=PROFILE_ID,
         company_name="The Catalysts",
-        **{field: _dumps(values) for field, values in DEFAULT_PROFILE_LISTS.items()},
+        **{field: _dumps(values) for field, values in profile_lists.items()},
+        knowledge_version=PROFILE_KNOWLEDGE_VERSION if enriched else 0,
         recommendation_weights=_dumps(DEFAULT_WEIGHTS),
         recommendation_thresholds=_dumps(DEFAULT_THRESHOLDS),
         version=1,
@@ -175,8 +307,10 @@ def get_or_create_profile(db: Session, *, create: bool = True) -> CompanyProfile
             for field, values in DEFAULT_PROFILE_LISTS.items():
                 setattr(profile, field, _dumps(values))
             db.commit()
+        if create and _apply_profile_knowledge(profile):
+            db.commit()
         return profile
-    profile = _default_profile()
+    profile = _default_profile(enriched=create)
     if not create:
         return profile
     db.add(profile)
@@ -225,6 +359,7 @@ def update_profile(db: Session, data: dict, actor: str) -> CompanyProfile:
         raise ValueError("Thresholds must satisfy 0 <= medium < high <= 100")
     profile.recommendation_weights = _dumps(weights)
     profile.recommendation_thresholds = _dumps(thresholds)
+    profile.knowledge_version = PROFILE_KNOWLEDGE_VERSION
     profile.version = (profile.version or 0) + 1
     profile.updated_by = actor
     profile.updated_at = datetime.now(timezone.utc)
@@ -245,6 +380,37 @@ def _contains_any(text: str, values: Iterable[str]) -> list[str]:
     return [value for value in values if re.search(
         rf"(?<!\w){re.escape(value)}(?!\w)", text, re.I
     )]
+
+
+def _organization_key(value: str) -> str:
+    key = re.sub(r"[^a-z0-9]+", " ", (value or "").casefold()).strip()
+    return re.sub(r"^the\s+", "", key)
+
+
+def excluded_organization_match(opportunity: Opportunity, profile: dict) -> str:
+    """Return the configured exclusion matched by the funding organisation.
+
+    Deliberately do not scan the whole title/summary.  "Apple" may describe a
+    farming programme and "Coke" may appear in environmental prose; neither is
+    evidence about the donor.  The scraper's organisation field is the source
+    evidence this policy decision requires.
+    """
+    organization = _organization_key(opportunity.organization or "")
+    if not organization:
+        return ""
+    for configured in profile.get("excluded_organizations", []):
+        key = _organization_key(configured)
+        aliases = _EXCLUDED_ORGANIZATION_ALIASES.get(key, (configured,))
+        for alias in aliases:
+            candidate = _organization_key(alias)
+            if not candidate:
+                continue
+            exact_only = candidate == "apple"
+            if organization == candidate or (
+                not exact_only and organization.startswith(candidate + " ")
+            ):
+                return configured
+    return ""
 
 
 def _stated_applicant_geography(eligibility: str, locations: Iterable[str]) -> list[str]:
@@ -565,7 +731,18 @@ def analyze_opportunity(db: Session, opportunity: Opportunity, *, persist: bool 
     index = index or HistoricalIndex.from_db(db)
     similar = index.similar(opportunity, 5)
     eligibility = eligibility_matches(opportunity, profile, similar)
+    excluded_organization = excluded_organization_match(opportunity, profile)
+    if excluded_organization:
+        eligibility.insert(0, _criterion(
+            "Partner or donor policy",
+            "The funding organisation must not be on the Catalysts exclusion list",
+            f"Excluded organisation: {excluded_organization}",
+            "MISMATCH",
+            f"The scraped funding organisation is {opportunity.organization}.",
+        ))
     eligibility_score, eligibility_level = _eligibility_score(eligibility)
+    if excluded_organization:
+        eligibility_score, eligibility_level = 0.0, "LOW"
     computed_eligibility_score = eligibility_score
     computed_eligibility_level = eligibility_level
     latest_feedback = db.scalar(select(HumanFeedback).where(
@@ -575,7 +752,7 @@ def analyze_opportunity(db: Session, opportunity: Opportunity, *, persist: bool 
         HumanFeedback.opportunity_id == opportunity.id,
         HumanFeedback.eligibility_override != "",
     ).order_by(HumanFeedback.created_at.desc()))
-    if eligibility_feedback:
+    if eligibility_feedback and not excluded_organization:
         eligibility_level = eligibility_feedback.eligibility_override
         eligibility_score = {
             "HIGH": 100.0, "MEDIUM": 60.0, "LOW": 0.0, "UNKNOWN": 0.0,
@@ -585,6 +762,8 @@ def analyze_opportunity(db: Session, opportunity: Opportunity, *, persist: bool 
     # values are needed here.
     strategic_fit, geographic_fit, profile_reasons, _matched, _configured = _profile_fit(
         opportunity, profile)
+    if excluded_organization:
+        strategic_fit = 0.0
     historical_similarity = similar[0]["similarity"] if similar else 0.0
     decided = [row for row in similar if row["won_lost"] in {"won", "lost"}]
     success_score = round(100 * sum(row["won_lost"] == "won" for row in decided) / len(decided), 1) if decided else 0.0
@@ -605,6 +784,14 @@ def analyze_opportunity(db: Session, opportunity: Opportunity, *, persist: bool 
         for m in eligibility if m["status"] in {"MISMATCH", "UNKNOWN"}
     ]
     reasons = list(profile_reasons)
+    if excluded_organization:
+        score = 0.0
+        priority = "LOW"
+        reasons.insert(
+            0,
+            f"Do not pursue: {opportunity.organization} matches the excluded "
+            f"organisation {excluded_organization}",
+        )
     if decided:
         wins = sum(row["won_lost"] == "won" for row in decided)
         reasons.append(f"{wins} of {len(decided)} closest decided historical leads were won")
@@ -636,6 +823,10 @@ def analyze_opportunity(db: Session, opportunity: Opportunity, *, persist: bool 
         confidence = "MEDIUM"
     else:
         confidence = "LOW"
+    if excluded_organization:
+        # This is a direct policy rule matched against the source organisation,
+        # not a probabilistic inference from topic keywords.
+        confidence = "HIGH"
     result = {
         "opportunity_id": opportunity.id,
         "classification": {
@@ -669,6 +860,7 @@ def analyze_opportunity(db: Session, opportunity: Opportunity, *, persist: bool 
         "recommendation_score": score,
         "priority": priority,
         "confidence": confidence,
+        "excluded_organization": excluded_organization,
         "eligibility_matches": eligibility,
         "similar_leads": similar,
         "reasons": reasons,

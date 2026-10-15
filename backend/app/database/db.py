@@ -399,6 +399,24 @@ def _run_migrations(conn) -> None:
                     (fixed, member_id),
                 )
 
+    # ----------------------------------------- company knowledge exclusions
+    # create_all() creates these columns on a new install but cannot ALTER the
+    # live EC2 SQLite database.  Both additions are non-destructive: existing
+    # profile facts and recommendation snapshots remain untouched until the
+    # normal company-intelligence recalculation runs later in update.sh.
+    if "company_profiles" in _tables(conn):
+        profile_cols = columns("company_profiles")
+        if "excluded_organizations" not in profile_cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE company_profiles ADD COLUMN "
+                "excluded_organizations TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "knowledge_version" not in profile_cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE company_profiles ADD COLUMN "
+                "knowledge_version INTEGER NOT NULL DEFAULT 0"
+            )
+
     # ---------------------------------------------------- scrape-run evidence
     # A run used to be able to say only "completed", and 792 of the 916 runs in
     # the 2026-08-29 baseline said exactly that — including all 127 attempts by

@@ -450,6 +450,15 @@ class CompanyProfile(Base):
     certifications: Mapped[str] = mapped_column(Text, default="[]")
     partnership_types: Mapped[str] = mapped_column(Text, default="[]")
     funding_types_of_interest: Mapped[str] = mapped_column(Text, default="[]")
+    # Organisations with which Catalysts has an explicit do-not-pursue policy.
+    # This belongs to the company profile rather than Opportunity: the source
+    # record remains intact, while recommendation scoring can explain why a
+    # technically relevant call should not be pursued.
+    excluded_organizations: Mapped[str] = mapped_column(Text, default="[]")
+    # One-time, additive enrichment version.  It lets a deployment merge newly
+    # supplied company knowledge into an existing administrator-edited profile
+    # once without re-adding values an administrator later removes.
+    knowledge_version: Mapped[int] = mapped_column(default=0)
     recommendation_weights: Mapped[str] = mapped_column(Text, default="{}")
     recommendation_thresholds: Mapped[str] = mapped_column(Text, default="{}")
     version: Mapped[int] = mapped_column(default=1)

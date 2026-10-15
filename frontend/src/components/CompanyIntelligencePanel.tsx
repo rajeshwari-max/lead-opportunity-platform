@@ -9,7 +9,7 @@ type ListField =
   | "countries_of_operation" | "industries" | "sectors" | "focus_areas"
   | "organization_types" | "capabilities" | "services" | "project_types"
   | "target_beneficiaries" | "geographic_focus" | "certifications"
-  | "partnership_types" | "funding_types_of_interest";
+  | "partnership_types" | "funding_types_of_interest" | "excluded_organizations";
 
 const listFields: { key: ListField; label: string; help: string }[] = [
   { key: "countries_of_operation", label: "Countries of operation", help: "Where the company is legally or operationally present" },
@@ -25,6 +25,7 @@ const listFields: { key: ListField; label: string; help: string }[] = [
   { key: "certifications", label: "Certifications", help: "Registration, accreditation and compliance credentials" },
   { key: "partnership_types", label: "Partnership types", help: "Prime, consortium, sub-grantee and similar roles" },
   { key: "funding_types_of_interest", label: "Funding types of interest", help: "Grant, RFP, tender and other preferred instruments" },
+  { key: "excluded_organizations", label: "Do not pursue organisations", help: "Funders or partners Catalysts does not work with; matching opportunities receive a zero recommendation score" },
 ];
 
 const weightLabels: Record<string, string> = {

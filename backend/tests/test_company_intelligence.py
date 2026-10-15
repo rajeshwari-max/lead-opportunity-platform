@@ -151,6 +151,7 @@ def _profile_payload(**overrides) -> dict:
         "certifications": ["ISO 9001"],
         "partnership_types": [],
         "funding_types_of_interest": ["Grant"],
+        "excluded_organizations": [],
         "recommendation_weights": dict(DEFAULT_WEIGHTS),
         "recommendation_thresholds": dict(DEFAULT_THRESHOLDS),
     }
@@ -300,6 +301,59 @@ def test_broad_topics_and_funding_interest_cannot_establish_full_company_fit(int
     assert result["company_fit_score"] == 50.0
     assert result["confidence"] == "LOW"
     assert any("Funding preference match" in reason for reason in result["reasons"])
+
+
+def test_big_bets_knowledge_is_seeded_without_overwriting_admin_edits(intelligence):
+    session = intelligence["session"]
+    profile = profile_dict(get_or_create_profile(session))
+
+    assert "India" in profile["countries_of_operation"]
+    assert "Community resilience" in profile["focus_areas"]
+    assert "Surveillance and predictive analytics" in profile["capabilities"]
+    assert "Small and marginal farmers" in profile["target_beneficiaries"]
+    assert "FHI360 and FHI India" in profile["excluded_organizations"]
+
+    # Once seeded, an administrator may deliberately remove an item. Reading
+    # the profile again must not silently restore it.
+    profile["excluded_organizations"] = ["Oxfam"]
+    update_profile(session, profile, "admin@catalysts.org")
+    reread = profile_dict(get_or_create_profile(session))
+    assert reread["excluded_organizations"] == ["Oxfam"]
+
+
+def test_excluded_organization_is_a_high_confidence_hard_stop(intelligence):
+    session = intelligence["session"]
+    update_profile(
+        session,
+        _profile_payload(excluded_organizations=["Coke"]),
+        "admin@catalysts.org",
+    )
+    opportunity = _opportunity(
+        session,
+        suffix="excluded-donor",
+        organization="The Coca-Cola Foundation",
+    )
+
+    result = analyze_opportunity(session, opportunity, persist=False)
+
+    assert result["excluded_organization"] == "Coke"
+    assert result["recommendation_score"] == 0.0
+    assert result["priority"] == "LOW"
+    assert result["confidence"] == "HIGH"
+    assert any("Do not pursue" in reason for reason in result["reasons"])
+    assert any("Partner or donor policy: Mismatch" in risk for risk in result["risks"])
+
+    # A topic mention is not a donor match; only the scraped organisation is
+    # eligible for this policy rule.
+    opportunity.organization = "Rural Futures Foundation"
+    opportunity.title = "Apple orchard livelihoods grant"
+    result = analyze_opportunity(session, opportunity, persist=False)
+    assert result["excluded_organization"] == ""
+    assert result["recommendation_score"] > 0
+
+    opportunity.organization = "Apple Growers Association"
+    result = analyze_opportunity(session, opportunity, persist=False)
+    assert result["excluded_organization"] == ""
 
 
 def test_brand_routing_is_not_evidence_for_confidence(intelligence):
