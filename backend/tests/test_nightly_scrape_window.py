@@ -172,3 +172,52 @@ def test_sources_not_completed_recently_go_first(monkeypatch):
     ordered = [s.name for s in mod.ScraperManager._least_recent_first(srcs)]
     # Never completed first (registry order kept), then oldest completion.
     assert ordered == ["unpp", "worldbank", "bond", "adb"]
+
+
+def _manager_for(names, monkeypatch):
+    from app.services import scraper_manager as mod
+    monkeypatch.setattr(mod.settings, "full_source_scan", True)
+    monkeypatch.setattr(mod.settings, "max_concurrent_sources", 1)
+    monkeypatch.setattr(mod.settings, "run_maintenance_after_scrape", False)
+    monkeypatch.setattr(mod.settings, "source_stall_minutes", 1)
+    m = mod.ScraperManager()
+    m._watch_interval_s = 0.01
+    m.progress = {n: {"status": "queued", "errors": 0, "display_name": n} for n in names}
+    return mod, m
+
+
+def test_a_stuck_source_is_ended_and_the_next_one_starts(monkeypatch):
+    mod, m = _manager_for(["hangs", "next"], monkeypatch)
+    ran = []
+
+    async def run_source(source):
+        m.progress[source.name]["status"] = "running"
+        ran.append(source.name)
+        if source.name == "hangs":
+            # Pretend the last page finished two minutes ago, then hang.
+            m.source_activity[source.name] = time.monotonic() - 120
+            await asyncio.Event().wait()
+        m.progress[source.name]["status"] = "completed"
+
+    monkeypatch.setattr(m, "_run_source", run_source)
+    sources = [SimpleNamespace(name=n, display_name=n) for n in ("hangs", "next")]
+    asyncio.run(asyncio.wait_for(m._run(sources), 5))
+    assert ran == ["hangs", "next"]
+    assert m.progress["hangs"]["status"] == "failed"
+    assert m.progress["hangs"]["stalled"] is True
+    assert m.progress["next"]["status"] == "completed"
+
+
+def test_a_slow_but_progressing_source_is_left_alone(monkeypatch):
+    mod, m = _manager_for(["slow"], monkeypatch)
+
+    async def run_source(source):
+        for _ in range(10):
+            m.source_activity[source.name] = time.monotonic()   # a page finished
+            await asyncio.sleep(0.02)
+        m.progress[source.name]["status"] = "completed"
+
+    monkeypatch.setattr(m, "_run_source", run_source)
+    asyncio.run(m._run([SimpleNamespace(name="slow", display_name="slow")]))
+    assert m.progress["slow"]["status"] == "completed"
+    assert "stalled" not in m.progress["slow"]

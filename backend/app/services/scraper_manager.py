@@ -96,6 +96,7 @@ class ScraperManager:
         # Read by the nightly health check to tell "slow" from "stuck".
         self.last_activity: float | None = None
         self.source_activity: dict[str, float] = {}
+        self._watch_interval_s: float = 30.0     # how often sources are checked
 
     # ------------------------------------------------------------- lifecycle
     async def start(
@@ -210,14 +211,15 @@ class ScraperManager:
                 if self._stop.is_set():
                     self.progress[scraper.name]["status"] = "stopped"
                     return
-                # Full scans have no wall-clock cutoff. Request-level timeouts
-                # still detect failed fetches; bounded mode is retained for diagnostics.
+                # Full scans have no wall-clock cutoff, but every source is
+                # watched: one that stops producing pages is ended (see
+                # _run_watched). Bounded mode adds the per-source time limit.
                 timeout = max(60, settings.source_timeout_s)
                 try:
                     if settings.full_source_scan:
-                        await self._run_source(scraper)
+                        await self._run_watched(scraper)
                     else:
-                        await asyncio.wait_for(self._run_source(scraper), timeout)
+                        await asyncio.wait_for(self._run_watched(scraper), timeout)
                 except asyncio.TimeoutError:
                     prog = self.progress.get(scraper.name, {})
                     prog["status"] = "failed"
@@ -283,6 +285,48 @@ class ScraperManager:
                     await self.on_complete()
                 except Exception:
                     log.exception("post-scrape hook failed")
+
+    async def _run_watched(self, scraper: BaseScraper) -> None:
+        """Run one source, ending it if it stops making progress.
+
+        A source that hangs (a request or browser call that never returns)
+        holds its slot for ever. On 2026-10-14 the scrape sat at 9% for 18
+        hours: every slot was held by a source that had stopped producing
+        pages, so no other source could start. Here a source with no page
+        event for source_stall_minutes is marked failed and cancelled, and its
+        slot goes to the next source. 0 turns the watchdog off.
+        """
+        name = scraper.name
+        stall_s = max(0, settings.source_stall_minutes) * 60
+        self.source_activity[name] = time.monotonic()
+        task = asyncio.create_task(self._run_source(scraper))
+        try:
+            while True:
+                done, _ = await asyncio.wait({task}, timeout=self._watch_interval_s)
+                if done:
+                    task.result()        # re-raise a crash for the caller
+                    return
+                idle = time.monotonic() - self.source_activity.get(name, 0)
+                if not stall_s or idle < stall_s:
+                    continue
+                prog = self.progress.get(name, {})
+                prog["status"] = "failed"
+                prog["stalled"] = True
+                prog["errors"] = prog.get("errors", 0) + 1
+                self._log(
+                    f"[{scraper.display_name}] no page finished for "
+                    f"{idle / 60:.0f} min — treating it as stuck and ending it so "
+                    f"the next source can start. Recorded as failed (stalled)."
+                )
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):     # noqa: BLE001
+                    pass
+                return
+        finally:
+            if not task.done():
+                task.cancel()
 
     async def _heartbeat_loop(self) -> None:
         """Keep the lease alive, and stop if we ever lose it.

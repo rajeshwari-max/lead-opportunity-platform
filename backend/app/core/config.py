@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     scrape_health_check_at: str = "06:00"
     scrape_hard_stop_at: str = "08:00"
     scrape_stall_minutes: int = 30
+    # A single source with no page finished for this long is stuck: it is
+    # ended and recorded as failed, and its slot goes to the next source.
+    # Applies to every run, full or bounded. 0 = never.
+    source_stall_minutes: int = 30
     max_concurrent_sources: int = 5     # websites scraped at the same time. With ~80
                                         # sources, running them all at once saturated
                                         # the event loop and froze the progress API.

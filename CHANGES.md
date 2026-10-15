@@ -5,6 +5,27 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-15 — A stuck source no longer freezes the whole scrape
+
+The 13:00 run of 14 October was still at 9% 22 hours later. Not slow —
+stuck: full-scan mode had no per-source limit, so sources that stopped
+returning pages (a request or browser call that never came back) held their
+slots for ever and, with fixed batches of five, no other source could start.
+
+- **Per-source watchdog** (`LOP_SOURCE_STALL_MINUTES`, default 30): a source
+  with no page finished for 30 minutes is ended, recorded as failed
+  (`stalled`), and its slot goes to the next source. Checked every 30 s, in
+  every run, full or bounded. A source that is slow but still finishing
+  pages is left alone.
+- With the 06:00 whole-run health check and the 08:00 hard stop, a nightly
+  run can no longer sit frozen.
+
+Tests: `test_a_stuck_source_is_ended_and_the_next_one_starts`,
+`test_a_slow_but_progressing_source_is_left_alone`. Full suite: 1259 passed,
+3 skipped.
+
+---
+
 ## 2026-10-14 (later) — Daily email timezone; schedule saves only on "Save" (Codex work, finished and recorded)
 
 Codex prepared these and left them uncommitted (see
