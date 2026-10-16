@@ -137,6 +137,24 @@ def test_brand_filter_reaches_a_brand_match_without_a_cms_vertical():
         assert [item.unique_id for item in result.items] == ["vrutti-only"]
 
 
+def test_default_active_view_reaches_a_brand_match_without_a_cms_vertical():
+    """A classified non-CMS lead is not 'unclassified' merely because it has
+    no Devsol vertical. It must contribute to Active and New Today."""
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(Opportunity(
+            unique_id="setu-only", title="Education systems grant",
+            source_website="Test", category=Category.GRANT,
+            status=Status.ACTIVE, deadline=date(2099, 1, 1),
+            deadline_state="dated", opportunity_url="https://example.org/setu",
+            verticals="", archetypes="", brands="Setu",
+        ))
+        db.flush()
+        result = FilterService(db).query(OpportunityFilters())
+        assert [item.unique_id for item in result.items] == ["setu-only"]
+
+
 def test_cms_brand_filter_reaches_archetype_without_devsol_vertical():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)

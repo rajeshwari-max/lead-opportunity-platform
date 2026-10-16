@@ -171,6 +171,7 @@ class ScraperManager:
         self.source_activity = {}
         self.progress = {
             s.name: {"display_name": s.display_name, "pages": 0, "found": 0, "saved": 0,
+                     "new_live": 0,
                      "skipped_expired": 0, "duplicates": 0, "off_vertical": 0, "spam": 0,
                      "errors": 0, "status": "queued"}
             for s in scrapers
@@ -466,9 +467,18 @@ class ScraperManager:
         try:
             async for batch in scraper.crawl(source_stop, self._pause, on_progress):
                 prog["found"] += len(batch)
-                saved, expired, dupes, spam, rejected = await asyncio.to_thread(
+                ingest_counts = await asyncio.to_thread(
                     self._ingest, batch, scraper.curated, scraper.name)
+                # Keep compatibility with source-policy tests and any local
+                # extension that stubs the historical five-count contract.
+                # The real ingest path returns the sixth, explicit live count.
+                if len(ingest_counts) == 6:
+                    saved, new_live, expired, dupes, spam, rejected = ingest_counts
+                else:
+                    saved, expired, dupes, spam, rejected = ingest_counts
+                    new_live = saved
                 prog["saved"] += saved
+                prog["new_live"] = prog.get("new_live", 0) + new_live
                 prog["skipped_expired"] += expired
                 prog["duplicates"] += dupes
                 prog["spam"] += spam
@@ -492,7 +502,10 @@ class ScraperManager:
                     verb = "archived" if settings.keep_expired else "skipped"
                     self._log(f"[{scraper.display_name}] {verb} {expired} closed listing(s)")
                 if saved:
-                    self._log(f"[{scraper.display_name}] saved {saved} record(s)")
+                    self._log(
+                        f"[{scraper.display_name}] stored {saved} new record(s); "
+                        f"{new_live} are live in the opportunity dashboard"
+                    )
 
                 # Listings are newest-first: N pages in a row with nothing new
                 # means everything deeper is older (expired or already saved).
@@ -584,15 +597,15 @@ class ScraperManager:
                 f" + {prog['skipped_expired']} expired skipped"
             )
             self._log(
-                f"[{scraper.display_name}] {prog['status']} — {prog['found']} found = "
-                f"{prog['saved']} new saved{closed_note} + "
-                f"{prog['duplicates']} already in database"
+                f"[{scraper.display_name}] {prog['status']} — {prog['found']} found; "
+                f"{prog['saved']} new stored, {prog.get('new_live', 0)} new live"
+                f"{closed_note}; {prog['duplicates']} already in database"
             )
 
     # -------------------------------------------------------------- pipeline
     def _ingest(self, batch: list[RawOpportunity],
                 curated: bool = False,
-                source_key: str = "") -> tuple[int, int, int, int, int]:
+                source_key: str = "") -> tuple[int, int, int, int, int, int]:
         """One page of scraped rows -> rows in the database.
 
         normalise deadline -> mark expired -> classify (category, verticals,
@@ -600,7 +613,7 @@ class ScraperManager:
         geography/organisation/amount -> reject spam -> fingerprint -> dedupe
         -> insert.
 
-        Returns (saved, expired, duplicates, spam, rejected) so the caller can
+        Returns (stored, new_live, expired, duplicates, spam, rejected) so the caller can
         say *why* a page produced no new rows. "found 30, saved 0" is unreadable
         without those numbers — repeats, closed calls and junk are different
         situations and only some of them are a problem.
@@ -614,7 +627,7 @@ class ScraperManager:
         which is what lets a record be judged on the source's OWN fields
         (record_type, source_status) before any of its prose is read.
         """
-        saved = expired = dupes = spam = rejected = 0
+        saved = new_live = expired = dupes = spam = rejected = 0
         undated = rolling_rows = unassessed = 0
         # Rows that were already stored WITHOUT a deadline and gained one on
         # this pass. Counted and logged because it is otherwise invisible: the
@@ -1006,6 +1019,18 @@ class ScraperManager:
                     source_website=raw.source_website,
                 ))
                 saved += 1
+                # This is the number operators expect to reconcile with the
+                # New Today dashboard card. ``saved`` also includes archived
+                # closed calls and rows held for deadline/classification review;
+                # those are useful database records but are not live leads.
+                if (
+                    not is_expired
+                    and deadline is not None
+                    and deadline >= today
+                    and d_state is not DeadlineState.UNKNOWN
+                    and (vertical_tags or non_cms_brands or hierarchy.archetypes)
+                ):
+                    new_live += 1
                 # Counted HERE, not where the state is computed. A row rejected
                 # by the scope check or the opportunity gate never reaches the
                 # database, and reporting it as "stored as unassessed" sends
@@ -1059,7 +1084,7 @@ class ScraperManager:
                 f"  ↳ {out_of_scope} row(s) rejected by the source's own type "
                 f"or status fields, before any title was read"
             )
-        return saved, expired, dupes, spam, rejected
+        return saved, new_live, expired, dupes, spam, rejected
 
     # ------------------------------------------------------------- reporting
     def snapshot(self) -> dict[str, Any]:

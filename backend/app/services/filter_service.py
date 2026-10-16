@@ -21,6 +21,8 @@ from app.schemas.opportunity import (
 )
 from app.services.actionable import (
     actionable_clause,
+    application_day_utc_bounds,
+    application_today,
     expired_clause,
     strict_actionable_clause,
 )
@@ -132,7 +134,11 @@ class FilterService:
             # Matches the "New Today" stat card. Clicking it used to only change
             # the sort order, so the table looked identical and the card seemed
             # broken; it now narrows to exactly what the card counted.
-            stmt = stmt.where(func.date(Opportunity.date_scraped) == date.today())
+            day_start, day_end = application_day_utc_bounds()
+            stmt = stmt.where(
+                Opportunity.date_scraped >= day_start,
+                Opportunity.date_scraped < day_end,
+            )
         if getattr(f, "work_type", ""):
             stmt = stmt.where(Opportunity.work_type == f.work_type)
         if getattr(f, "study_type", ""):
@@ -171,9 +177,11 @@ class FilterService:
             # a Devsol vertical as well would hide correctly matched Vrutti,
             # Swasti, Green Foundation or Upfront opportunities merely because
             # they sit outside the CMS taxonomy.
-            stmt = stmt.where(
-                Opportunity.verticals.is_not(None), Opportunity.verticals != ""
-            )
+            stmt = stmt.where(or_(
+                Opportunity.verticals.is_not(None) & (Opportunity.verticals != ""),
+                Opportunity.archetypes.is_not(None) & (Opportunity.archetypes != ""),
+                Opportunity.brands.is_not(None) & (Opportunity.brands != ""),
+            ))
         if f.categories:
             stmt = stmt.where(Opportunity.category.in_([Category(c) for c in f.categories]))
         ownership_clauses = []
@@ -421,12 +429,16 @@ class FilterService:
             ).scalar_one()
 
         total = self.db.execute(select(func.count()).select_from(active)).scalar_one()
+        day_start, day_end = application_day_utc_bounds()
         todays = self.db.execute(
             select(func.count()).select_from(active).where(
-                func.date(active.c.date_scraped) == date.today().isoformat()
+                active.c.date_scraped >= day_start,
+                active.c.date_scraped < day_end,
             )
         ).scalar_one()
-        upcoming_ids = select(active.c.id).where(active.c.deadline >= date.today())
+        upcoming_ids = select(active.c.id).where(
+            active.c.deadline >= application_today()
+        )
         upcoming = self.db.execute(
             select(Opportunity)
             .where(Opportunity.id.in_(upcoming_ids))

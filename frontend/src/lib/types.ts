@@ -88,7 +88,10 @@ export interface SourceProgress {
   display_name: string;
   pages: number;
   found: number;
+  /** New database rows, including archived/review-held records. */
   saved: number;
+  /** New rows that qualify for the ordinary active opportunity dashboard. */
+  new_live: number;
   skipped_expired: number;
   duplicates: number;
   /** Rejected as advertising/junk before reaching the database. */

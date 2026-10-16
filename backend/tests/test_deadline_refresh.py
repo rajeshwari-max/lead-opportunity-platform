@@ -96,10 +96,11 @@ def test_it_is_still_counted_as_a_duplicate_not_as_a_new_row(db_mod):
     overstate what the scrape discovered."""
     url = "https://procurement-notices.undp.org/view_notice.cfm?notice_id=3"
     ingest(db_mod, [raw("Request for Proposals: Gender Adviser", url)])
-    saved, expired, dupes, spam, rejected = ingest(
+    saved, new_live, expired, dupes, spam, rejected = ingest(
         db_mod, [raw("Request for Proposals: Gender Adviser", url,
                      deadline_raw="15-Apr-27")])
     assert saved == 0
+    assert new_live == 0
     assert dupes == 1
 
 

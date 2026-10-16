@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -10,6 +10,7 @@ from app.services.actionable import (
     DeadlineState,
     IST_OFFSET_MINUTES,
     actionable_clause,
+    application_day_utc_bounds,
     strict_actionable_clause,
 )
 from app.services.filter_service import FilterService
@@ -42,6 +43,32 @@ def ids(db, clause):
 
 def test_default_application_timezone_is_india():
     assert IST_OFFSET_MINUTES == 330
+
+
+def test_application_day_uses_utc_bounds_for_the_full_india_day():
+    start, end = application_day_utc_bounds(date(2026, 10, 16))
+    assert start == datetime(2026, 10, 15, 18, 30)
+    assert end == datetime(2026, 10, 16, 18, 30)
+
+
+def test_new_today_counts_early_india_morning_stored_on_previous_utc_date(
+        db, monkeypatch):
+    start = datetime(2026, 10, 15, 18, 30)
+    end = datetime(2026, 10, 16, 18, 30)
+    monkeypatch.setattr(
+        "app.services.filter_service.application_day_utc_bounds",
+        lambda: (start, end),
+    )
+    inside = add(db, "inside-india-day", date(2099, 1, 1))
+    inside.date_scraped = datetime(2026, 10, 15, 19, 0)  # 00:30 IST on 16 Oct
+    outside = add(db, "previous-india-day", date(2099, 1, 1))
+    outside.date_scraped = datetime(2026, 10, 15, 18, 29, 59)
+    db.flush()
+
+    service = FilterService(db)
+    assert service.stats(OpportunityFilters()).todays_new == 1
+    result = service.query(OpportunityFilters(new_today=True))
+    assert [row.unique_id for row in result.items] == ["inside-india-day"]
 
 
 def test_strict_rule_keeps_today_and_future_only(db):

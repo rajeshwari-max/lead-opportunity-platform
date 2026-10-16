@@ -37,7 +37,7 @@ that is merely wrong.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from enum import Enum
 
 from sqlalchemy import and_, or_
@@ -85,6 +85,27 @@ def application_today(tz_offset_minutes: int | None = None) -> date:
     """
     offset = IST_OFFSET_MINUTES if tz_offset_minutes is None else tz_offset_minutes
     return (datetime.now(timezone.utc) + timedelta(minutes=offset)).date()
+
+
+def application_day_utc_bounds(
+    today: date | None = None,
+    tz_offset_minutes: int | None = None,
+) -> tuple[datetime, datetime]:
+    """UTC database bounds for one applicant-local calendar day.
+
+    ``date_scraped`` is stored in UTC while the dashboard's day is India time.
+    Comparing ``date(date_scraped)`` with the server's calendar date loses every
+    opportunity scraped between midnight and 05:30 IST.  Returning half-open
+    UTC bounds also keeps SQLite able to use the timestamp index.
+    """
+    offset_minutes = (
+        IST_OFFSET_MINUTES if tz_offset_minutes is None else tz_offset_minutes
+    )
+    local_tz = timezone(timedelta(minutes=offset_minutes))
+    local_day = today or datetime.now(timezone.utc).astimezone(local_tz).date()
+    local_start = datetime.combine(local_day, datetime_time.min, tzinfo=local_tz)
+    start = local_start.astimezone(timezone.utc).replace(tzinfo=None)
+    return start, start + timedelta(days=1)
 
 
 # --------------------------------------------------------------- the predicate

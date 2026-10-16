@@ -205,7 +205,7 @@ export function ScraperPanel({ sources, progress }: Props) {
               <div key={name} className="flex items-center justify-between rounded-md bg-muted/50 px-2 py-1.5">
                 <span className="font-medium">{s.display_name}</span>
                 <span className="text-muted-foreground">
-                  p{s.pages} · found {s.found} · saved {s.saved}
+                  p{s.pages} · found {s.found} · stored {s.saved} · new live {s.new_live ?? 0}
                   {/* A run reporting "found 30, saved 0" is unreadable without
                       the reasons. Each of these is a different problem: repeats
                       mean the source has nothing new, off-vertical means the
