@@ -23,6 +23,7 @@ ARCHIVE_PASSED=${ARCHIVE_PASSED:-1}
 WORLD_BANK_PAGES=${WORLD_BANK_PAGES:-3}
 RUN_INTELLIGENCE_BACKFILL=${RUN_INTELLIGENCE_BACKFILL:-1}
 INTELLIGENCE_BACKFILL_LIMIT=${INTELLIGENCE_BACKFILL_LIMIT:-10000}
+RUN_DEVAID_DOCUMENT_ENRICHMENT=${RUN_DEVAID_DOCUMENT_ENRICHMENT:-1}
 
 # The jobs below that run after the restart (historical import, intelligence
 # backfill, deadline audit) share the SQLite file with the API's startup
@@ -304,9 +305,25 @@ fi
 say "Checking the DevelopmentAid session"
 if "$PYTHON" scripts/devaid_session.py status; then
   echo "    DevelopmentAid session is ready"
+  enrichment_marker="$REPO/backend/data/.devaid-document-enrichment-v1"
+  if [ "$RUN_DEVAID_DOCUMENT_ENRICHMENT" = "1" ] && [ ! -f "$enrichment_marker" ]; then
+    say "Enriching DevelopmentAid summaries and official documents (one time)"
+    if "$PYTHON" scripts/rescrape_source.py developmentaid; then
+      touch "$enrichment_marker"
+      echo "    DevelopmentAid document enrichment completed"
+    else
+      echo "    WARNING: DevelopmentAid enrichment did not complete."
+      echo "    It was not marked complete and will be retried on the next deploy."
+    fi
+  elif [ -f "$enrichment_marker" ]; then
+    echo "    one-time DevelopmentAid document enrichment already completed"
+  else
+    echo "    DevelopmentAid document enrichment skipped because RUN_DEVAID_DOCUMENT_ENRICHMENT=$RUN_DEVAID_DOCUMENT_ENRICHMENT"
+  fi
 else
   echo "    WARNING: DevelopmentAid is not signed in on EC2."
   echo "    Connect it on localhost and push the session before running that scraper."
+  echo "    The one-time document enrichment remains pending and will retry next deploy."
 fi
 
 curl -sI "http://localhost" | head -1

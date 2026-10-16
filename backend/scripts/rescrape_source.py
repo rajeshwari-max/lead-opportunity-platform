@@ -124,6 +124,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\ncould not start: {exc}", file=sys.stderr)
         return 1
 
+    unsuccessful = [
+        f"{key} ({progress.get('status', 'unknown')})"
+        for key, progress in manager.progress.items()
+        if progress.get("status") != "completed"
+    ]
+    if unsuccessful:
+        print(
+            "\nscrape did not complete successfully: " + ", ".join(unsuccessful),
+            file=sys.stderr,
+        )
+        return 1
+
     after = _counts(display)
     print(f"\n  after  : {after[0]} row(s), {after[1]} dated, "
           f"{after[2]} shown on the dashboard")
