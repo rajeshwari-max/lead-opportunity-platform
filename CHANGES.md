@@ -5,6 +5,52 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-16 — Codex work, recorded on review (7de5941, 9f64a58, a5ab90a, a211968 + leftovers)
+
+Codex committed these without log entries; recorded here. The three files it
+left uncommitted are committed with this entry.
+
+- **"Saved" vs what the dashboard shows** (a211968). The scraper's *saved*
+  count includes every new database row: closed calls kept as archive, rows
+  with no deadline held for review, and rows no vertical/brand/archetype
+  matched. The dashboard's default view shows only live leads (open,
+  dated or rolling, classified). The panel now shows both: `stored N · new
+  live M`, and the log says "stored N new record(s); M are live in the
+  opportunity dashboard". DevelopmentAid's 39 "saved" on 15 Oct were stored
+  rows; only the live part appears in the table.
+- **New Today counted the wrong day** (a211968). It compared the UTC scrape
+  timestamp with the server's date, so everything scraped between 00:00 and
+  05:30 India time — i.e. the whole nightly scrape — was missing from New
+  Today. It now uses the India-time day. The "classified" filter also accepts
+  brand- or archetype-only matches (Vrutti, Swasti, Green Foundation, Upfront).
+- **Company exclusions** (7de5941). Organisations Catalysts does not work
+  with ("whitelisted" in the owner's sense) suppress a recommendation when
+  the funder field matches a controlled alias. Big Bets company facts merged
+  into the company profile (not used as legal-eligibility evidence).
+- **Opportunity documents** (9f64a58). Every discovered source document is
+  listed; where none is published, a clearly labelled platform summary PDF is
+  generated (`reportlab`, new requirement). DevelopmentAid collects
+  summaries, eligibility and attachment links inside its signed-in session.
+- **Duplicate cleanup on deploy** (9f64a58). `update.sh` step 7 runs
+  `scripts/dedupe_dashboard.py --apply`, which **deletes** duplicate rows
+  (never ones with user/workspace records; never across different deadline,
+  source or funder) after a full database backup to
+  `backend/data/backups/pre-dedup-<time>.db` plus a `.removed.json` list.
+  Note: this deletes rows, and each deploy writes a full-size backup.
+- **One-time DevelopmentAid enrichment on deploy** (a5ab90a). If signed in,
+  `update.sh` re-scrapes DevelopmentAid once to fill summaries and
+  documents; it is marked done only if the scrape completes, otherwise it
+  retries on the next deploy. It runs in the deploy terminal and can take a
+  long time. Skip with `RUN_DEVAID_DOCUMENT_ENRICHMENT=0 bash deploy/update.sh`.
+- Leftovers committed now: `scripts/audit_dashboard.py` runs from any folder
+  (adds the backend to the import path); `nginx-leads.conf` uses
+  `server_name leads.catalysts.org` (source copy only; `update.sh` does not
+  install it); `.env.example` documents the production URLs for that host.
+
+Full suite: 1265 passed, 3 skipped. `tsc` clean.
+
+---
+
 ## 2026-10-15 — A stuck source no longer freezes the whole scrape
 
 The 13:00 run of 14 October was still at 9% 22 hours later. Not slow —

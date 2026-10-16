@@ -2,10 +2,17 @@
 import json
 import re
 import sqlite3
+import sys
 from collections import defaultdict
 from collections import Counter
 from urllib.parse import urlsplit
 from pathlib import Path
+
+# Running ``python scripts/audit_dashboard.py`` makes ``scripts`` Python's
+# import root, not the backend directory.  Match the other operational scripts
+# so the documented EC2 command can import ``app`` from any working directory.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from sqlalchemy.engine import make_url
 from sqlalchemy.dialects import sqlite
 from app.core.config import settings
