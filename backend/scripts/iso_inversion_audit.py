@@ -22,9 +22,18 @@ Nothing is guessed: the raw text is the source's own words, kept precisely so a
 parsing correction can be applied without re-scraping.
 
     python scripts/iso_inversion_audit.py
-    python scripts/iso_inversion_audit.py --apply      # rewrite the deadlines
+    python scripts/iso_inversion_audit.py --apply --backup data/backups/x.db
 
-Read-only unless --apply is given.
+Read-only unless --apply is given; --apply requires a backup path and never
+deletes rows. Status moves with the corrected date (passed -> Expired, still
+open -> Active), so a row with a wrong future date stops showing as Active.
+
+Each row is re-read with the date convention it was stored with
+(`deadline_convention`: dayfirst / monthfirst). Rows with no recorded
+convention are corrected only when the text is unambiguous — both readings
+agree, e.g. ISO dates or a day above 12. Re-reading a US source's "09/01/2026"
+day-first would "correct" a right date into a wrong one. Sentinel and
+implausibly distant results (see deadline_audit.is_sentinel) are never written.
 """
 from __future__ import annotations
 
@@ -50,12 +59,33 @@ from sqlalchemy import select, update                          # noqa: E402
 from app.database.db import session_scope                      # noqa: E402
 from app.database.models import Opportunity, Status            # noqa: E402
 from app.services.actionable import application_today          # noqa: E402
+from app.services.deadline_audit import is_sentinel            # noqa: E402
 from app.services.deadline_parser import DeadlineParser        # noqa: E402
 
 parser = DeadlineParser()
 
 
-def audit(apply: bool, examples: int) -> int:
+def corrected_deadline(raw: str, convention: str | None):
+    """The date the source's own text means, or None when it cannot be told.
+
+    Uses the row's recorded convention; with none recorded, only a reading
+    that is the same day-first and month-first is trusted.
+    """
+    if not raw or not raw.strip():
+        return None
+    if convention == "monthfirst":
+        value = parser.parse(raw, dayfirst=False)
+    elif convention == "dayfirst":
+        value = parser.parse(raw, dayfirst=True)
+    else:
+        a, b = parser.parse(raw, dayfirst=True), parser.parse(raw, dayfirst=False)
+        value = a if a == b else None
+    if value is None or is_sentinel(value):
+        return None
+    return value
+
+
+def audit(apply: bool, examples: int, backup: str = "") -> int:
     today = application_today()
     with session_scope() as db:
         rows = db.execute(
@@ -69,7 +99,10 @@ def audit(apply: bool, examples: int) -> int:
         wrong = []
         by_source: Counter = Counter()
         for r in rows:
-            correct = parser.parse(r.deadline_raw or "")
+            if (r.unique_id or "").startswith("merged:"):
+                continue
+            correct = corrected_deadline(r.deadline_raw or "",
+                                         getattr(r, "deadline_convention", None))
             if correct is not None and correct != r.deadline:
                 wrong.append((r, correct))
                 by_source[r.source_website or "(unknown)"] += 1
@@ -121,6 +154,8 @@ def audit(apply: bool, examples: int) -> int:
             print("Re-run with --apply once the examples above look right.")
             return 0
 
+        from scripts.active_deadline_audit import backup_database
+        print(f"Backup: {backup_database(Path(backup))[0]}")
         for r, correct in wrong:
             db.execute(
                 update(Opportunity)
@@ -143,9 +178,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--apply", action="store_true",
                     help="write the corrected deadlines (default: dry run)")
+    ap.add_argument("--backup", default="",
+                    help="required with --apply: path for a database backup")
     ap.add_argument("--examples", type=int, default=10)
     a = ap.parse_args()
-    return audit(a.apply, max(0, a.examples))
+    if a.apply and not a.backup:
+        ap.error("--apply requires --backup PATH; no production write without recovery")
+    return audit(a.apply, max(0, a.examples), a.backup)
 
 
 if __name__ == "__main__":

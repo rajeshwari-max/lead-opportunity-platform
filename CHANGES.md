@@ -5,6 +5,35 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-16 — Wrong deadlines corrected on deploy; passed ones archived
+
+Leads whose deadline had passed still showed as Active, with a wrong date.
+Passed *correct* dates were already handled (deploy step 8 and the 08:15
+audit mark them Expired). These are rows whose stored date is itself wrong —
+read by an older parser, e.g. ISO `2026-09-01` stored as 9 January 2027 — so
+the row looks open with a future date.
+
+- **Deploy step 8a** (`REPARSE_DEADLINES=1`, default on) re-reads every
+  stored deadline from the source's own text (`deadline_raw`) and fixes the
+  ones that disagree, moving the status with the date. Step 8 then archives
+  anything whose corrected deadline has passed. Nothing is deleted; a
+  database backup is taken first (only when something will change), and a
+  failure only prints a warning.
+- `scripts/iso_inversion_audit.py` fixed before it was safe to automate: it
+  re-read every row day-first, which would have turned a US source's correct
+  `09/01/2026` (1 Sep) into 9 Jan. It now uses each row's recorded
+  convention; rows with none are corrected only when the text is unambiguous.
+  Sentinel/implausible dates are never written, merged rows are skipped, and
+  `--apply` requires `--backup`.
+- Not covered: rows scraped before raw deadline text was kept (nothing to
+  re-read), and rows whose source text itself is wrong. Those need a
+  re-scrape or a per-source fix — send an example.
+
+Tests: `tests/test_deadline_reparse.py` (6). Full suite: 1272 passed, 3
+skipped.
+
+---
+
 ## 2026-10-16 — Codex work, recorded on review (7de5941, 9f64a58, a5ab90a, a211968 + leftovers)
 
 Codex committed these without log entries; recorded here. The three files it

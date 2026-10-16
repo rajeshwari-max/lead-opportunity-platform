@@ -24,6 +24,7 @@ WORLD_BANK_PAGES=${WORLD_BANK_PAGES:-3}
 RUN_INTELLIGENCE_BACKFILL=${RUN_INTELLIGENCE_BACKFILL:-1}
 INTELLIGENCE_BACKFILL_LIMIT=${INTELLIGENCE_BACKFILL_LIMIT:-10000}
 RUN_DEVAID_DOCUMENT_ENRICHMENT=${RUN_DEVAID_DOCUMENT_ENRICHMENT:-1}
+REPARSE_DEADLINES=${REPARSE_DEADLINES:-1}
 
 # The jobs below that run after the restart (historical import, intelligence
 # backfill, deadline audit) share the SQLite file with the API's startup
@@ -214,6 +215,21 @@ dedup_backup="$DEDUP_BACKUP_DIR/pre-dedup-$dedup_stamp.db"
 cd "$REPO/backend"
 "$PYTHON" scripts/dedupe_dashboard.py --samples 10
 "$PYTHON" scripts/dedupe_dashboard.py --apply --backup "$dedup_backup" --samples 10
+
+# ------------------------------------------- 8a. correct misread deadlines
+# A stored deadline can disagree with the source's own text (deadline_raw)
+# when it was parsed by an older, buggy parser — e.g. ISO 2026-09-01 stored
+# as 9 January. Such a row shows the wrong date, and can stay Active after
+# its real deadline. Re-read with the row's own day/month convention; the
+# status moves with the date. Runs before 8, which then archives anything
+# whose corrected deadline has passed. Never deletes.
+if [ "$REPARSE_DEADLINES" = "1" ]; then
+  say "Correcting deadlines that disagree with the source's own text"
+  cd "$REPO/backend"
+  reparse_backup="$REPO/backend/data/backups/pre-deadline-reparse-$(date +%Y%m%d-%H%M%S).db"
+  "$PYTHON" scripts/iso_inversion_audit.py --apply --backup "$reparse_backup" --examples 5 \
+    || echo "    WARNING: deadline correction failed; nothing was changed by it. Continuing."
+fi
 
 # -------------------------------------------------- 8. deadline maintenance
 # Startup has completed its migrations, so the new audit can now safely read
