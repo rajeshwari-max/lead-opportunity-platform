@@ -348,6 +348,32 @@ def test_developmentaid_combines_a_separate_currency_code_with_the_budget():
     assert item.funding_amount == "EUR 250,000"
 
 
+def test_developmentaid_keeps_authenticated_summary_and_all_documents():
+    from app.scrapers.developmentaid import DevelopmentAidScraper
+
+    item = DevelopmentAidScraper()._raw_from_item({
+        "id": 118347,
+        "title": "Request for proposals for community health services",
+        "status": "Open",
+        "details": {
+            "description": "<p>Deliver community health services in rural districts.</p>",
+            "eligibilityCriteria": "Registered non-profit organisations",
+            "attachments": [
+                {"fileName": "Terms of Reference", "downloadUrl": "/files/tor.pdf"},
+                {"fileName": "Budget template", "downloadUrl": "https://cdn.example/budget.xlsx"},
+            ],
+        },
+    }, "tenders")
+    assert item is not None
+    assert item.summary == "Deliver community health services in rural districts."
+    assert item.eligibility == "Registered non-profit organisations"
+    assert [row["label"] for row in item.source_documents] == [
+        "Terms of Reference", "Budget template"
+    ]
+    assert item.source_documents[0]["url"] == \
+        "https://www.developmentaid.org/files/tor.pdf"
+
+
 # --------------------------------------------------------- UN Partner Portal
 
 def _unpp_items():

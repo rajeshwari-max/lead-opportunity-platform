@@ -34,7 +34,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 from bs4 import BeautifulSoup
 
@@ -794,10 +794,19 @@ class DevelopmentAidScraper(BaseScraper):
                         fresh = page_urls - seen_urls
                         seen_urls |= page_urls
 
-                        # Hand this page straight over to be parsed and saved.
+                        # Parse here while the authenticated context is still
+                        # available, then enrich missing descriptions/files in
+                        # a second tab before handing the structured rows to the
+                        # consumer. This also covers the UI fallback when the
+                        # JSON search API cannot be replayed.
+                        page_items = self.parse_listing(
+                            "<html><body>" + "".join(cards) + "</body></html>",
+                            page.url,
+                        )
+                        self._enrich_from_signed_in_details(page, page_items)
                         # Blocks once the queue is full, which both caps memory
                         # and lets a paused consumer throttle the walk.
-                        out_queue.put(("page", (slug, page_nr, cards)))
+                        out_queue.put(("items", (slug, page_nr, page_items)))
                         cards_sent += len(cards)
                         pages_reached = page_nr
 
@@ -1080,6 +1089,216 @@ class DevelopmentAidScraper(BaseScraper):
                     return joined
         return ""
 
+    @staticmethod
+    def _pick_deep(item: dict, *names: str) -> str:
+        """Read a descriptive value from an API record without confusing IDs.
+
+        DevelopmentAid has changed between flat and nested response shapes.
+        Search every level, but require an exact semantic key: a fuzzy
+        ``contains('description')`` match also catches description IDs and HTML
+        metadata that are not the opportunity brief.
+        """
+        wanted = {name.casefold().replace("_", "").replace("-", "") for name in names}
+        found: list[str] = []
+
+        def walk(node) -> None:
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    normal = str(key).casefold().replace("_", "").replace("-", "")
+                    if normal in wanted and isinstance(value, str) and value.strip():
+                        text = BeautifulSoup(value, "lxml").get_text(" ", strip=True)
+                        if text:
+                            found.append(re.sub(r"\s+", " ", text))
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+
+        walk(item)
+        return max(found, key=len, default="")
+
+    @staticmethod
+    def _source_documents(item: dict) -> list[dict[str, str]]:
+        """Collect every official file URL already returned to the signed-in SPA.
+
+        This intentionally works on the authenticated JSON response, not a
+        second logged-out HTTP request. It supports both a string URL and the
+        common ``{fileName, downloadUrl}`` attachment object shapes.
+        """
+        file_ext = re.compile(r"\.(pdf|docx?|xlsx?|zip)(?:$|[?#])", re.I)
+        semantic = re.compile(r"document|attachment|download|file|terms.?of.?reference|\btor\b", re.I)
+        out: list[dict[str, str]] = []
+        seen: set[str] = set()
+
+        def add(value: str, label: str = "", context: str = "") -> None:
+            raw = (value or "").strip()
+            if not raw or raw.startswith(("data:", "javascript:", "mailto:")):
+                return
+            if not (raw.startswith(("http://", "https://", "/")) and
+                    (file_ext.search(raw) or semantic.search(context))):
+                return
+            url = urljoin("https://www.developmentaid.org", raw).split("#")[0]
+            if url in seen:
+                return
+            seen.add(url)
+            clean_label = re.sub(r"\s+", " ", BeautifulSoup(label or "", "lxml").get_text(" ", strip=True))
+            kind = (file_ext.search(url).group(1).lower() if file_ext.search(url) else "document")
+            out.append({
+                "url": url,
+                "label": (clean_label or ("Terms of Reference" if re.search(r"\btor\b|terms", context, re.I)
+                                            else "Official source document"))[:160],
+                "kind": kind,
+            })
+
+        def walk(node, path: tuple[str, ...] = ()) -> None:
+            if isinstance(node, dict):
+                label = next((str(node[k]) for k in node
+                              if str(k).casefold() in {"name", "title", "filename", "label"}
+                              and isinstance(node[k], str)), "")
+                for key, value in node.items():
+                    next_path = path + (str(key),)
+                    context = " ".join(next_path)
+                    if isinstance(value, str):
+                        add(value, label, context)
+                    else:
+                        walk(value, next_path)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value, path)
+
+        walk(item)
+        # Put ToR/RFP specifications first, then forms and supporting files.
+        out.sort(key=lambda row: (0 if re.search(r"\btor\b|terms of reference|rfp|specification",
+                                                row["label"] + " " + row["url"], re.I) else 1,
+                                  row["label"].casefold()))
+        return out
+
+    @staticmethod
+    def _section_after_heading(soup, *names: str) -> str:
+        """Text belonging to a labelled section on a rendered detail page."""
+        wanted = tuple(name.casefold() for name in names)
+        for heading in soup.find_all(re.compile(r"^h[1-6]$")):
+            text = heading.get_text(" ", strip=True).casefold()
+            if not any(name in text for name in wanted):
+                continue
+            parts: list[str] = []
+            for sibling in heading.next_siblings:
+                tag_name = getattr(sibling, "name", "") or ""
+                if re.match(r"^h[1-6]$", tag_name):
+                    break
+                value = sibling.get_text(" ", strip=True) \
+                    if hasattr(sibling, "get_text") else ""
+                if value:
+                    parts.append(value)
+                if sum(map(len, parts)) >= 12000:
+                    break
+            if parts:
+                return re.sub(r"\s+", " ", " ".join(parts)).strip()
+        return ""
+
+    def _enrich_from_signed_in_details(self, search_page,
+                                        items: list[RawOpportunity]) -> None:
+        """Read missing summary/files in a second tab of the signed-in browser.
+
+        Search responses sometimes omit fields which become visible only after
+        a member opens the opportunity. The public post-run PDF checker cannot
+        read those pages, so this enrichment deliberately stays in the same
+        authenticated Playwright context.
+        """
+        limit = max(0, int(settings.devaid_detail_enrichment_limit))
+        used = getattr(self, "_detail_enrichment_count", 0)
+        seen = getattr(self, "_detail_enriched_urls", set())
+        if used >= limit:
+            return
+
+        complete_urls: set[str] = set()
+        urls = [item.opportunity_url for item in items if item.opportunity_url]
+        try:
+            from sqlalchemy import select
+            from app.database.db import session_scope
+            from app.database.models import Opportunity
+
+            with session_scope() as db:
+                rows = db.execute(
+                    select(Opportunity.opportunity_url, Opportunity.pdf_checked_at,
+                           Opportunity.documents_json)
+                    .where(Opportunity.opportunity_url.in_(urls))
+                ).all() if urls else []
+            complete_urls = {row[0] for row in rows if row[1] and row[2] is not None}
+        except Exception:
+            log.debug("[developmentaid] could not pre-check detail state",
+                      exc_info=True)
+
+        detail = None
+        try:
+            for item in items:
+                url = item.opportunity_url
+                if (not url or url in seen or url in complete_urls or
+                        (item.summary and item.source_documents)):
+                    continue
+                if used >= limit:
+                    log.info(
+                        "[developmentaid] detail enrichment reached %s pages; "
+                        "later runs will resume the remaining rows", limit)
+                    break
+                seen.add(url)
+                used += 1
+                if detail is None:
+                    detail = search_page.context.new_page()
+                try:
+                    response = detail.goto(
+                        url, timeout=60_000, wait_until="domcontentloaded")
+                    if response is not None and response.status in (401, 403, 429, 503):
+                        continue
+                    detail.wait_for_timeout(1_200)
+                    soup = BeautifulSoup(detail.content(), "lxml")
+                    if not item.summary:
+                        item.summary = self._section_after_heading(
+                            soup, "description", "summary", "objective",
+                            "scope of work")[:20000]
+                        if not item.summary:
+                            meta = soup.select_one(
+                                'meta[name="description"], meta[property="og:description"]')
+                            item.summary = ((meta.get("content") or "").strip()
+                                            if meta else "")[:20000]
+                    if not item.eligibility:
+                        item.eligibility = self._section_after_heading(
+                            soup, "eligibility", "eligible applicant",
+                            "requirements")[:12000]
+                    if not item.source_documents:
+                        attachments = []
+                        for link in soup.find_all("a", href=True):
+                            href = (link.get("href") or "").strip()
+                            context = " ".join(filter(None, [
+                                link.get_text(" ", strip=True), link.get("title", ""),
+                                link.get("aria-label", ""), href,
+                            ]))
+                            if not re.search(
+                                r"\.pdf(?:$|[?#])|\.(?:docx?|xlsx?|zip)(?:$|[?#])|"
+                                r"terms.?of.?reference|\btor\b|download|attachment",
+                                context, re.I):
+                                continue
+                            attachments.append({
+                                "fileName": (link.get_text(" ", strip=True)
+                                             or link.get("title")
+                                             or "Official source document"),
+                                "downloadUrl": urljoin(detail.url, href),
+                            })
+                        item.source_documents = self._source_documents(
+                            {"attachments": attachments})
+                    item.documents_checked = True
+                except Exception as exc:
+                    log.info("[developmentaid] detail enrichment skipped %s (%s)",
+                             url, type(exc).__name__)
+        finally:
+            self._detail_enrichment_count = used
+            self._detail_enriched_urls = seen
+            if detail is not None:
+                try:
+                    detail.close()
+                except Exception:
+                    pass
+
     def _raw_from_item(self, item: dict, slug: str) -> RawOpportunity | None:
         title = self._pick(item, "title", "name", "subject")
         if not title or len(title) < 8:
@@ -1111,6 +1330,13 @@ class DevelopmentAidScraper(BaseScraper):
         # present; clean_amount deliberately refuses to guess one when absent.
         amount_currency = self._pick(
             item, "budgetcurrency", "currencycode", "currency")
+        summary = self._pick_deep(
+            item, "summary", "shortDescription", "description", "objective",
+            "objectives", "scope", "projectDescription", "content")
+        eligibility = self._pick_deep(
+            item, "eligibility", "eligibleApplicants", "applicantEligibility",
+            "eligibilityCriteria", "requirements")
+        documents = self._source_documents(item)
         return RawOpportunity(
             title=title[:500],
             # Name-bearing keys first (abbreviatedDonorNames, donors) so a bare
@@ -1129,6 +1355,10 @@ class DevelopmentAidScraper(BaseScraper):
             opportunity_url=url,
             website=self.website,
             source_website=self.display_name,
+            summary=summary[:20000],
+            eligibility=eligibility[:12000],
+            source_documents=documents,
+            documents_checked=bool(documents),
             category_hint=_ENTITYTYPE_CATEGORY.get("grant" if slug == "grants" else "tender"),
             assume_active=bool(status in ("", "open") and not deadline),
         )
@@ -2125,6 +2355,7 @@ class DevelopmentAidScraper(BaseScraper):
                          len(raw_items), ids)
 
             items = [it for it in (self._raw_from_item(r, slug) for r in raw_items) if it]
+            self._enrich_from_signed_in_details(page, items)
             fresh = {i.opportunity_url for i in items} - seen
             seen |= {i.opportunity_url for i in items}
             if items:
@@ -2405,6 +2636,27 @@ class DevelopmentAidScraper(BaseScraper):
             # — real figures on roughly a quarter of listings, "N/A" on the rest.
             # clean_amount drops the N/A ones.
             budget = clean_amount(fields.get("budget", ""))
+            # Some UI builds include a short synopsis and/or attachment links
+            # directly in the rendered card. Preserve them when present; the
+            # JSON API path above remains the richer and preferred source.
+            summary_el = card.select_one(
+                ".search-card__description, .search-card__summary, [class*='description']"
+            )
+            card_summary = (summary_el.get_text(" ", strip=True) if summary_el else "")
+            card_documents: list[dict[str, str]] = []
+            for link in card.find_all("a", href=True):
+                href = (link.get("href") or "").strip()
+                if not re.search(r"\.(pdf|docx?|xlsx?|zip)(?:$|[?#])", href, re.I):
+                    continue
+                file_url = urljoin(url, href).split("#")[0]
+                if any(row["url"] == file_url for row in card_documents):
+                    continue
+                card_documents.append({
+                    "url": file_url,
+                    "label": (link.get_text(" ", strip=True) or link.get("title")
+                              or "Official source document")[:160],
+                    "kind": re.search(r"\.(pdf|docx?|xlsx?|zip)", href, re.I).group(1).lower(),
+                })
 
             items.append(
                 RawOpportunity(
@@ -2418,6 +2670,9 @@ class DevelopmentAidScraper(BaseScraper):
                     opportunity_url=url,
                     website=self.website,
                     source_website=self.display_name,
+                    summary=card_summary[:20000],
+                    source_documents=card_documents,
+                    documents_checked=bool(card_documents),
                     category_hint=category_hint,
                     # only assume-active when the deadline is still locked
                     assume_active=bool(status == "open" and not deadline_raw),

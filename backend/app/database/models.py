@@ -99,6 +99,9 @@ class Opportunity(Base):
     pdf_url: Mapped[str | None] = mapped_column(String(1024))
     pdf_status: Mapped[str | None] = mapped_column(String(16))
     pdf_checked_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
+    # JSON array of all official source files. Additive rather than replacing
+    # pdf_url because emails and old clients still use the primary PDF field.
+    documents_json: Mapped[str | None] = mapped_column(Text)
     # Research vs Implementation — decides which team an RFP is routed to.
     # Empty means genuinely unclear from the text; see services/work_type.py.
     work_type: Mapped[str] = mapped_column(String(32), default="", index=True)

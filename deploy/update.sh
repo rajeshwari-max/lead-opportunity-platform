@@ -201,7 +201,20 @@ else
   die "historical intelligence file is missing or empty: $history_file"
 fi
 
-# -------------------------------------------------- 7. deadline maintenance
+# ---------------------------------------------- 7. duplicate maintenance
+# Run after startup migrations so every column used by the guarded cleanup is
+# present. Unlike the old title-only cleanup, this never merges calls with a
+# different deadline, source or funder, and it protects user/workspace records.
+say "Checking and removing safe dashboard duplicates"
+DEDUP_BACKUP_DIR="$REPO/backend/data/backups"
+mkdir -p "$DEDUP_BACKUP_DIR"
+dedup_stamp=$(date +%Y%m%d-%H%M%S)
+dedup_backup="$DEDUP_BACKUP_DIR/pre-dedup-$dedup_stamp.db"
+cd "$REPO/backend"
+"$PYTHON" scripts/dedupe_dashboard.py --samples 10
+"$PYTHON" scripts/dedupe_dashboard.py --apply --backup "$dedup_backup" --samples 10
+
+# -------------------------------------------------- 8. deadline maintenance
 # Startup has completed its migrations, so the new audit can now safely read
 # the live schema.  It first writes a dry-run report.  Only genuinely passed,
 # dated Active rows are changed to Expired; undated and rolling rows remain in
@@ -240,7 +253,7 @@ fi
 workers=$(pgrep -fc gunicorn || true)
 [ "$workers" -le 2 ] || echo "    WARNING: $workers gunicorn processes — expected 2 (master + one worker)"
 
-# --------------------------------------------------------------- 8. verify
+# --------------------------------------------------------------- 9. verify
 say "Verifying"
 echo "    $cfg"
 

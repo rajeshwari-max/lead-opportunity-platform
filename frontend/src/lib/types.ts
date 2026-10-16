@@ -24,6 +24,10 @@ export interface Opportunity {
   pdf_url?: string | null;
   pdf_status?: string | null;
   pdf_checked_at?: string | null;
+  /** Every source-issued file exposed by the authenticated scraper. */
+  source_documents?: Array<{ url: string; label?: string; kind?: string }>;
+  /** Signed platform-generated brief; used only when no official file exists. */
+  brief_pdf_url?: string;
   /** Always-clickable destination, computed by the backend.
    *  "direct"  = the opportunity's own page
    *  "listing" = the funder's index/section page — the call is on it somewhere,

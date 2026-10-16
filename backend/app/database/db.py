@@ -337,6 +337,7 @@ def _run_migrations(conn) -> None:
             ("pdf_url",        "VARCHAR(1024)"),
             ("pdf_status",     "VARCHAR(16)"),
             ("pdf_checked_at", "DATETIME"),
+            ("documents_json", "TEXT"),
         ):
             if name not in columns("opportunities"):
                 conn.exec_driver_sql(

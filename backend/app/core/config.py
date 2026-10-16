@@ -338,6 +338,11 @@ class Settings(BaseSettings):
     devaid_max_slices: int = 600            # search partitions per section
     devaid_max_duration_s: int = 1800       # 30 minutes per section
     devaid_max_records: int = 20000         # rows handed off per section
+    # Signed-in detail pages carry descriptions and official attachments that
+    # are not always present in search results. Bound their per-run enrichment
+    # so an explicitly enabled historical archive cannot open tens of thousands
+    # of pages; later runs resume because complete URLs are skipped.
+    devaid_detail_enrichment_limit: int = 500
 
     # Walk the historical archive as well as currently-open listings.
     #

@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
+import json
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator, Field
 
@@ -53,6 +54,16 @@ class RawOpportunity(BaseModel):
     # never closed, so a vocabulary nobody has configured cannot silently
     # delete records.
     source_status: str = ""
+    # Official files exposed by the source while this scraper is authenticated.
+    # Each item is {"url": ..., "label": ..., "kind": ...}.  Keeping the
+    # complete list matters for calls that publish a ToR, application form and
+    # budget template separately.  `pdf_url` remains the backwards-compatible
+    # primary document selected by the ingestion pipeline.
+    source_documents: list[dict[str, str]] = Field(default_factory=list)
+    # True only when an authenticated detail page was actually inspected. An
+    # empty list plus this flag means "checked and no file published", not
+    # "the listing response did not include attachment fields".
+    documents_checked: bool = False
 
 
 class OpportunityOut(BaseModel):
@@ -85,6 +96,9 @@ class OpportunityOut(BaseModel):
     pdf_url: str | None = None
     pdf_status: str | None = None
     pdf_checked_at: datetime | None = None
+    documents_json: str | None = Field(default=None, exclude=True)
+    source_documents: list[dict[str, str]] = Field(default_factory=list)
+    brief_pdf_url: str = ""
     approved: bool = False
     approved_at: datetime | None = None
     approved_by: str = ""
@@ -107,6 +121,26 @@ class OpportunityOut(BaseModel):
     # percentage of threshold. Computed on read, never stored, never used for
     # routing - see services/miscellaneous.py.
     miscellaneous: dict | None = None
+
+    @model_validator(mode="after")
+    def _documents(self) -> "OpportunityOut":
+        try:
+            value: Any = json.loads(self.documents_json or "[]")
+        except (TypeError, ValueError):
+            value = []
+        self.source_documents = [
+            {str(k): str(v) for k, v in row.items() if v is not None}
+            for row in value if isinstance(row, dict) and row.get("url")
+        ]
+        # Old rows have only pdf_url. Present it through the new multi-document
+        # contract too, so deployment does not make existing PDFs disappear.
+        if not self.source_documents and self.pdf_status == "found" and self.pdf_url:
+            self.source_documents = [{
+                "url": self.pdf_url, "label": "Official source document", "kind": "pdf"
+            }]
+        from app.services.opportunity_pdf import brief_url
+        self.brief_pdf_url = brief_url(self.id)
+        return self
 
     @model_validator(mode="after")
     def _miscellaneous(self) -> "OpportunityOut":

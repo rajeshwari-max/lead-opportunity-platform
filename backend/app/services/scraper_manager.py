@@ -4,6 +4,7 @@ live logs, progress %, ETA, and the normalize→filter→classify→dedupe→sav
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 import time
@@ -629,6 +630,19 @@ class ScraperManager:
         contract = contract_for(source_key or "",
                                 batch[0].source_website if batch else "")
         for raw in batch:
+            source_documents = [
+                {str(k): str(v) for k, v in row.items() if v is not None}
+                for row in raw.source_documents
+                if isinstance(row, dict) and str(row.get("url", "")).startswith(("http://", "https://"))
+            ]
+            documents_json = json.dumps(source_documents, ensure_ascii=False) \
+                if (source_documents or raw.documents_checked) else None
+            primary_pdf = next(
+                (row["url"] for row in source_documents
+                 if row.get("kind", "").casefold() == "pdf"
+                 or ".pdf" in row.get("url", "").casefold()),
+                None,
+            )
             deadline = self.deadline_parser.parse(raw.deadline_raw, dayfirst=raw.dayfirst)
             # 9999-12-31 is DevelopmentAid's "no closing date". Parsed
             # literally it produced deadlines in the year 9999 and a
@@ -809,7 +823,8 @@ class ScraperManager:
                 uid = make_unique_id(raw.title, organization, deadline, raw.opportunity_url, raw.source_website)
 
                 existing = db.execute(
-                    select(Opportunity.id, Opportunity.deadline)
+                    select(Opportunity.id, Opportunity.deadline, Opportunity.summary,
+                           Opportunity.eligibility, Opportunity.documents_json)
                     .where(Opportunity.unique_id == uid)
                 ).one_or_none()
                 exists = existing[0] if existing else None
@@ -831,6 +846,28 @@ class ScraperManager:
                         # once the source stops returning it. Before this, a
                         # duplicate was simply dropped and no row ever aged.
                         fields = {"last_seen": datetime.now(timezone.utc)}
+
+                        # A signed-in source can expose the descriptive text
+                        # and attachments only after an account/session upgrade.
+                        # Re-scraping must enrich the existing row instead of
+                        # throwing those newly visible fields away as a duplicate.
+                        if not existing[2] and raw.summary:
+                            fields["summary"] = raw.summary
+                        if not existing[3] and raw.eligibility:
+                            fields["eligibility"] = raw.eligibility
+                        if documents_json is not None and existing[4] is None:
+                            fields["documents_json"] = documents_json
+                            if primary_pdf:
+                                fields.update(
+                                    pdf_url=primary_pdf[:1024],
+                                    pdf_status="found",
+                                    pdf_checked_at=datetime.now(timezone.utc),
+                                )
+                            elif raw.documents_checked:
+                                fields.update(
+                                    pdf_status="none",
+                                    pdf_checked_at=datetime.now(timezone.utc),
+                                )
 
                         # A newly-readable deadline is the same kind of fact,
                         # and without this it was thrown away.
@@ -959,6 +996,12 @@ class ScraperManager:
                     location=raw.location,
                     eligibility=raw.eligibility,
                     funding_amount=amount,
+                    documents_json=documents_json,
+                    pdf_url=(primary_pdf[:1024] if primary_pdf else None),
+                    pdf_status=("found" if primary_pdf else
+                                "none" if raw.documents_checked else None),
+                    pdf_checked_at=(datetime.now(timezone.utc)
+                                    if (primary_pdf or raw.documents_checked) else None),
                     status=Status.EXPIRED if is_expired else Status.ACTIVE,
                     source_website=raw.source_website,
                 ))

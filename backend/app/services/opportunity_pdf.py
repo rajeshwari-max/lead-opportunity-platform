@@ -1,8 +1,4 @@
-"""Discover source PDFs after scrapes and in resumable backfill batches.
-
-Dashboard and email links expose only source PDFs. Missing, unchecked, blocked
-or login-only documents are unavailable; generated summaries are never a fallback.
-"""
+"""Discover source files and provide a readable generated brief fallback."""
 from __future__ import annotations
 
 import asyncio
@@ -272,9 +268,9 @@ def brief_url(opportunity_id: int) -> str:
 
 
 def lead_link(o) -> tuple[str, str]:
-    """Only source documents; never substitute a generated brief."""
+    """Prefer an official PDF; otherwise link the generated opportunity brief."""
     if getattr(o, "pdf_status", None) == FOUND and getattr(o, "pdf_url", None):
         return o.pdf_url, "source_pdf"
-    return "", "unavailable"
+    return brief_url(o.id), "summary_pdf"
 
 

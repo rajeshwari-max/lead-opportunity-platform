@@ -452,7 +452,7 @@ def _digest_rows(
         title = (f'<a href="{_text(pdf_href or href)}" style="color:#4f46e5;font-weight:600;'
                  f'text-decoration:none;">{_text(o.title)}</a>')
         pdf_note = ("PDF from the source" if pdf_kind == "source_pdf"
-                    else "Official document unavailable")
+                    else "Platform summary PDF (official document not found)")
         if kind == "search":
             original = f"no direct link published — search {_text(o.source_website)}"
         elif link_kind(o.opportunity_url) == "listing":

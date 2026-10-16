@@ -124,7 +124,7 @@ def test_lead_link_prefers_the_source_pdf():
     assert P.lead_link(_opp(pdf_status="found", pdf_url="https://x.org/a.pdf")) == \
         ("https://x.org/a.pdf", "source_pdf")
     href, kind = P.lead_link(_opp(pdf_status="none", pdf_url=None))
-    assert (href, kind) == ("", "unavailable")
+    assert kind == "summary_pdf" and "/api/brief/7.pdf?sig=" in href
 
 
 # ------------------------------------------------------------------ endpoint
@@ -164,8 +164,9 @@ def test_endpoint_needs_the_signature(brief_client):
     assert brief_client.get("/api/brief/77.pdf?sig=wrong").status_code == 404
     assert brief_client.get("/api/brief/77.pdf").status_code == 404
     ok = brief_client.get(f"/api/brief/77.pdf?sig={P.brief_signature(77)}")
-    assert ok.status_code == 404
-    assert ok.json()["detail"] == "Official document unavailable"
+    assert ok.status_code == 200
+    assert ok.headers["content-type"].startswith("application/pdf")
+    assert ok.content.startswith(b"%PDF")
 
 
 def test_endpoint_redirects_once_the_source_pdf_is_known(brief_client):
@@ -212,8 +213,8 @@ def test_email_without_a_source_pdf_reports_unavailable(monkeypatch):
 
     monkeypatch.setattr(E, "_intelligence_for", lambda opps: {})
     html = E._digest_html(_member(), [_opp(pdf_status="none", archetypes="")])
-    assert "/api/brief/" not in html
-    assert "Official document unavailable" in html
+    assert "/api/brief/" in html
+    assert "Platform summary PDF (official document not found)" in html
     assert "<b>Archetype:</b> Not classified" in html
     assert "Company intelligence:" not in html
 
