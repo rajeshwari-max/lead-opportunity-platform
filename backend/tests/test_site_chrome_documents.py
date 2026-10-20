@@ -125,3 +125,25 @@ def test_detail_json_is_kept_only_for_the_opportunity_being_read():
     s._capture_detail_json(resp("https://www.developmentaid.org/grants/view/123456", {"c": 3}))
     s._capture_detail_json(resp("https://www.developmentaid.org/api/x/123456", "x", "text/html"))
     assert s._detail_json == [{"a": 1}]
+
+
+def test_fetch_documents_script_selects_and_saves(db_mod, monkeypatch):
+    import importlib
+
+    import scripts.devaid_fetch_documents as fetch
+    importlib.reload(fetch)                     # bind to this test's database
+    _ingest([_raw([], checked=False)])          # never read: documents_json NULL
+    leads = fetch.select_leads(include_closed=True, retry_empty=False, limit=0)
+    assert len(leads) == 1 and leads[0]["docs"] is None
+
+    item = _raw([CERT, TOR])
+    item.summary = "Strengthen community health systems."
+    assert fetch.save(leads[0], item) == "documents"
+    docs, pdf = _row(db_mod)
+    assert json.loads(docs) == [TOR] and pdf == TOR["url"]
+    # Done: not selected again.
+    assert fetch.select_leads(True, False, 0) == []
+
+    assert fetch.needs_documents("[]", retry_empty=False) is False
+    assert fetch.needs_documents("[]", retry_empty=True) is True
+    assert fetch.needs_documents(json.dumps([CERT]), retry_empty=False) is True

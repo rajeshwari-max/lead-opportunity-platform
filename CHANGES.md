@@ -30,6 +30,12 @@ certificate — was stored as the document. Rows read that way were then marked
 - Deploy step 8b: `scripts/clean_site_chrome_documents.py` removes the footer
   file from rows already stored (backup first, rows kept, PDF link reset).
 - The one-time DevelopmentAid enrichment on deploy runs again (marker v2).
+- New `scripts/devaid_fetch_documents.py`: opens every stored DevelopmentAid
+  lead that has no documents yet (or only the footer file) in the signed-in
+  browser and saves its summary, eligibility and documents. Open leads by
+  default (`--all` for closed ones), `--limit`, `--dry-run`; takes the run
+  lease, stops by itself at 21:45 India time, resumes on re-run, 3 s between
+  pages.
 
 "sign-in required" under a DevelopmentAid title is unchanged and correct: the
 link opens only for someone signed in to DevelopmentAid.
