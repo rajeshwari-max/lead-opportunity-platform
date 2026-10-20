@@ -168,7 +168,11 @@ def main() -> int:
                     scraper._enrich_from_signed_in_details(page, [item])
                     result = save(lead, item)
                     counts[result] += 1
-                    print(f"[{n}/{len(leads)}] {result:9} {(lead['title'] or '')[:70]}",
+                    why = ""
+                    if result == "skipped":
+                        why = "  <- " + getattr(scraper, "_detail_skip_reasons", {}).get(
+                            lead["url"], "not opened (already complete or limit reached)")
+                    print(f"[{n}/{len(leads)}] {result:9} {(lead['title'] or '')[:60]}{why}",
                           flush=True)
                     if n % 10 == 0 and not run_lock.heartbeat(lease):
                         print("Lost the run lease — stopping.")

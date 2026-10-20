@@ -5,6 +5,26 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-20 (evening) — DevelopmentAid detail pages: wait out the security check instead of skipping
+
+First run of `devaid_fetch_documents.py --limit 10` on EC2: signed in, and
+all 10 leads "could not read". The detail reader skipped any page that
+answered HTTP 403/503 — which is how Cloudflare's interstitial arrives, and it
+clears by itself in a signed-in browser (the search pages get the same and
+wait it out). So no detail page, in the nightly scrape or in the script, was
+ever read: the real reason no DevelopmentAid lead had documents.
+
+- 403/503 or a challenge title now waits for the check to clear (up to 45 s,
+  same as the search walk); only a check that never clears is skipped.
+- Every skipped page records why (security check, 401 not signed in, 429
+  rate limited, or the error), and `devaid_fetch_documents.py` prints it on
+  the lead's line.
+
+Tests: `test_a_403_security_check_that_clears_is_read_not_skipped`,
+`test_a_check_that_never_clears_is_reported`. Full suite: 1286 passed.
+
+---
+
 ## 2026-10-20 (later) — DevelopmentAid documents: read the page after it renders; footer file no longer "official"
 
 DevelopmentAid rows showed "No official ToR or source file was found", and

@@ -1239,6 +1239,9 @@ class DevelopmentAidScraper(BaseScraper):
         authenticated Playwright context.
         """
         limit = max(0, int(settings.devaid_detail_enrichment_limit))
+        # url -> why it could not be read; shown by devaid_fetch_documents.py.
+        if not hasattr(self, "_detail_skip_reasons"):
+            self._detail_skip_reasons = {}
         used = getattr(self, "_detail_enrichment_count", 0)
         seen = getattr(self, "_detail_enriched_urls", set())
         if used >= limit:
@@ -1292,7 +1295,21 @@ class DevelopmentAidScraper(BaseScraper):
                 try:
                     response = detail.goto(
                         url, timeout=60_000, wait_until="domcontentloaded")
-                    if response is not None and response.status in (401, 403, 429, 503):
+                    status = response.status if response is not None else None
+                    # 403/503 here is normally Cloudflare's interstitial, which
+                    # clears by itself in a few seconds in a signed-in browser
+                    # — the search pages get the same and pass. Skipping on it
+                    # is why every detail page was "skipped" and no lead got a
+                    # document. Wait it out like the search walk does.
+                    if status in (403, 503) or self._is_challenge_title(detail.title()):
+                        if not self._wait_out_challenge(detail, "detail", 45_000):
+                            self._detail_skip_reasons[url] = (
+                                f"HTTP {status}: security check did not clear")
+                            continue
+                    elif status in (401, 429):
+                        self._detail_skip_reasons[url] = (
+                            "HTTP 401: not signed in" if status == 401
+                            else "HTTP 429: rate limited by DevelopmentAid")
                         continue
                     # This is an Angular app: at "domcontentloaded" only the
                     # shell and the site footer exist. Reading then is why rows
@@ -1357,8 +1374,10 @@ class DevelopmentAidScraper(BaseScraper):
                             if not is_site_chrome_document(d)]
                     item.documents_checked = True
                 except Exception as exc:
+                    self._detail_skip_reasons[url] = (
+                        f"{type(exc).__name__}: {str(exc).splitlines()[0][:150] if str(exc) else ''}")
                     log.info("[developmentaid] detail enrichment skipped %s (%s)",
-                             url, type(exc).__name__)
+                             url, self._detail_skip_reasons[url])
         finally:
             self._detail_enrichment_count = used
             self._detail_enriched_urls = seen

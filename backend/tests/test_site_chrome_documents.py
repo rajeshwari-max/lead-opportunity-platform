@@ -147,3 +147,66 @@ def test_fetch_documents_script_selects_and_saves(db_mod, monkeypatch):
     assert fetch.needs_documents("[]", retry_empty=False) is False
     assert fetch.needs_documents("[]", retry_empty=True) is True
     assert fetch.needs_documents(json.dumps([CERT]), retry_empty=False) is True
+
+
+class _FakeDetail:
+    """Just enough of a Playwright page for the enrichment loop."""
+
+    def __init__(self, status, titles, html):
+        self.status, self.titles, self.html, self.url = status, list(titles), html, ""
+
+    def on(self, *a):
+        pass
+
+    def goto(self, url, **kw):
+        from types import SimpleNamespace
+        self.url = url
+        return SimpleNamespace(status=self.status)
+
+    def title(self):
+        return self.titles.pop(0) if len(self.titles) > 1 else self.titles[0]
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def wait_for_function(self, *a, **kw):
+        pass
+
+    def content(self):
+        return self.html
+
+    def close(self):
+        pass
+
+
+def _enrich_with(detail):
+    from types import SimpleNamespace
+
+    from app.scrapers.developmentaid import DevelopmentAidScraper
+    s = DevelopmentAidScraper()
+    page = SimpleNamespace(context=SimpleNamespace(new_page=lambda: detail))
+    item = _raw([], checked=False)
+    s._enrich_from_signed_in_details(page, [item])
+    return s, item
+
+
+HTML = ('<html><body><h1>Call for proposals: community health resilience in Odisha</h1>'
+        '<h2>Description</h2><p>Strengthen community health systems.</p>'
+        '<a href="/files/tor.pdf">Terms of Reference</a>'
+        '<footer><a href="/files/iso-9001.pdf">Certified to ISO 9001:2015</a></footer>'
+        '</body></html>')
+
+
+def test_a_403_security_check_that_clears_is_read_not_skipped(monkeypatch):
+    monkeypatch.setattr("app.scrapers.developmentaid.settings.devaid_detail_enrichment_limit", 10)
+    _, item = _enrich_with(_FakeDetail(403, ["Just a moment...", "Call for proposals"], HTML))
+    assert item.documents_checked
+    assert [d["label"] for d in item.source_documents] == ["Terms of Reference"]
+    assert item.summary.startswith("Strengthen community health")
+
+
+def test_a_check_that_never_clears_is_reported(monkeypatch):
+    monkeypatch.setattr("app.scrapers.developmentaid.settings.devaid_detail_enrichment_limit", 10)
+    s, item = _enrich_with(_FakeDetail(403, ["Just a moment..."], HTML))
+    assert not item.documents_checked
+    assert "security check did not clear" in s._detail_skip_reasons[item.opportunity_url]
