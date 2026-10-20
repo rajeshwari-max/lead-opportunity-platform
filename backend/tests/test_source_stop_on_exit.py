@@ -123,10 +123,12 @@ def test_all_three_jobs_carry_the_guards():
     from app.services import scheduler as s
 
     src = _i.getsource(s)
-    # digest, deadline audit, and the scrape-window jobs (one add_job in a loop
-    # installs both the 06:00 health check and the 08:00 hard stop)
-    assert src.count("**_JOB_GUARDS") == 3, (
-        "the digest, deadline audit and scrape-window jobs need the standard guards")
+    # digest, deadline audit, the scrape-window jobs (one add_job in a loop
+    # installs the 22:00 start, 06:00 health check and 08:00 hard stop) and
+    # the monthly source-health report
+    assert src.count("**_JOB_GUARDS") == 4, (
+        "the digest, deadline audit, scrape-window and monthly report jobs "
+        "need the standard guards")
     assert src.count("**_SCRAPE_JOB_GUARDS") == 1, (
         "the scrape needs its longer recovery window plus the same concurrency guards")
 

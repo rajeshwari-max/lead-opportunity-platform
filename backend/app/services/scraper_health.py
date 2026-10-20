@@ -84,7 +84,7 @@ class SourceHealth:
     total_rows: int
     last_saved_at: datetime | None
     days_since_saved: int | None
-    state: str            # ok | never_produced | stale | failing | unknown
+    state: str            # ok | confirmed_empty | never_produced | stale | failing | unknown
     note: str
 
     def as_dict(self) -> dict:
@@ -221,6 +221,10 @@ def source_health(
             state = "disabled"
             note = (contract.known_defect or contract.owner_note
                     or "held out of production").splitlines()[0]
+        elif last is not None and last.outcome == Outcome.CONFIRMED_EMPTY.value:
+            state = "confirmed_empty"
+            note = ("The source explicitly reported no active opportunities. "
+                    "This is healthy and it remains on the nightly schedule.")
         elif total == 0:
             state = "never_produced"
             note = (f"{len(runs)} run(s) recorded and no row ever saved. Before "
@@ -267,7 +271,8 @@ def source_health(
 
     # Worst first — the list exists to be acted on, and a health page that
     # opens on the sources that are fine is a health page nobody scrolls.
-    order = {"failing": 0, "never_produced": 1, "stale": 2, "unknown": 3, "ok": 4}
+    order = {"failing": 0, "never_produced": 1, "stale": 2,
+             "unknown": 3, "confirmed_empty": 4, "ok": 5}
     out.sort(key=lambda s: (order.get(s.state, 9), -s.unhealthy_streak,
                             -(s.days_since_saved or 0)))
     return out

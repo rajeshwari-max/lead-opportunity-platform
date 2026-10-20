@@ -70,12 +70,22 @@ def alerts(monkeypatch):
     return sent
 
 
-def test_window_jobs_run_at_six_and_eight_india_time(sched):
+def test_window_jobs_run_at_ten_six_and_eight_india_time(sched):
     sched.start()
-    for job_id, hour in (("scrape-health-check", "6"), ("scrape-hard-stop", "8")):
+    for job_id, hour in (("scrape-night-start", "22"),
+                         ("scrape-health-check", "6"),
+                         ("scrape-hard-stop", "8")):
         _, trigger = sched._scheduler.jobs[job_id]
         assert str(trigger.timezone) == "Asia/Kolkata"
         assert f"hour='{hour}'" in str(trigger) and "minute='0'" in str(trigger)
+
+
+def test_monthly_health_report_is_admin_job_on_first_day(sched):
+    sched.start()
+    _, trigger = sched._scheduler.jobs["monthly-source-health-report"]
+    assert str(trigger.timezone) == "Asia/Kolkata"
+    assert "day='1'" in str(trigger)
+    assert "hour='9'" in str(trigger) and "minute='30'" in str(trigger)
 
 
 def test_blank_time_turns_a_window_job_off(sched, monkeypatch):
@@ -221,3 +231,48 @@ def test_a_slow_but_progressing_source_is_left_alone(monkeypatch):
     asyncio.run(m._run([SimpleNamespace(name="slow", display_name="slow")]))
     assert m.progress["slow"]["status"] == "completed"
     assert "stalled" not in m.progress["slow"]
+
+
+def test_second_automatic_start_leaves_the_running_status_alone(sched, monkeypatch):
+    # The fixed 22:00 start and an old dashboard schedule (e.g. 00:00) can both
+    # fire; the second must not record "skipped" over the run in progress.
+    from app.services import scheduler as mod
+    sched.last_status, sched.last_run = "running", None
+
+    class _Busy:
+        state = "running"
+
+        async def start(self):
+            raise AssertionError("must not try to start a second scrape")
+
+    monkeypatch.setattr(mod, "manager", _Busy())
+    asyncio.run(sched._scrape_all())
+    assert sched.last_status == "running" and sched.last_run is None
+
+
+def test_a_source_ended_by_the_watchdog_stays_failed(monkeypatch):
+    # Rows read before the hang make the evidence look healthy; the final
+    # outcome step must not repaint a stalled source as completed.
+    mod, m = _manager_for(["hangs"], monkeypatch)
+    m.progress["hangs"].update(pages=0, found=0, saved=0, skipped_expired=0,
+                               duplicates=0, spam=0)
+    monkeypatch.setattr(m, "_open_run", lambda *a: 1)
+    monkeypatch.setattr(m, "_close_run", lambda *a: None)
+    monkeypatch.setattr(m, "_last_good_signature", lambda *a: "")
+    monkeypatch.setattr(m, "_ingest", lambda *a: (1, 1, 0, 0, 0, 0))
+
+    class Source:
+        name = display_name = "hangs"
+        stale_page_streak_override = 0
+        curated = True
+        requires_js = False
+
+        async def crawl(self, stop, pause, progress):
+            await progress("page_done", {"page": 1, "found": 1})
+            yield [object()]
+            m.source_activity["hangs"] = time.monotonic() - 120
+            await asyncio.Event().wait()
+
+    asyncio.run(asyncio.wait_for(m._run([Source()]), 5))
+    assert m.progress["hangs"]["stalled"] is True
+    assert m.progress["hangs"]["status"] == "failed"

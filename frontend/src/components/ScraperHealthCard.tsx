@@ -20,6 +20,8 @@ const STATE_STYLE: Record<string, { label: string; cls: string }> = {
   never_produced: { label: "Never produced", cls: "bg-orange-100 text-orange-900" },
   stale: { label: "Stale", cls: "bg-amber-100 text-amber-900" },
   unknown: { label: "No data yet", cls: "bg-slate-100 text-slate-700" },
+  confirmed_empty: { label: "No active opportunities", cls: "bg-sky-100 text-sky-900" },
+  disabled: { label: "Disabled", cls: "bg-slate-100 text-slate-700" },
   ok: { label: "OK", cls: "bg-emerald-100 text-emerald-800" },
 };
 
@@ -45,7 +47,8 @@ export function ScraperHealthCard({ isAdmin = true }: { isAdmin?: boolean }) {
 
   if (!isAdmin || !data) return null;
 
-  const needing = data.sources.filter((s) => s.state !== "ok");
+  const needing = data.sources.filter((s) =>
+    ["failing", "never_produced", "stale", "unknown"].includes(s.state));
   const shown: SourceHealth[] = showAll ? data.sources : needing.slice(0, 8);
 
   return (

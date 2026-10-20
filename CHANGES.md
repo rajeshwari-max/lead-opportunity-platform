@@ -5,6 +5,48 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-20 — Nightly scrape starts at 22:00; honest zero-result status; monthly source-health email (Codex work, finished)
+
+Codex prepared these today and left them uncommitted; reviewed, finished and
+committed.
+
+- **Fixed overnight window: 22:00 → 06:00 check → 08:00 stop** (India time).
+  The 22:00 start is now a fixed job (`LOP_SCRAPE_WINDOW_START_AT`), like the
+  06:00 health check and 08:00 hard stop. The dashboard schedule is only for
+  extra runs; `configure_full_scrape_schedule.py` now sets it to manual. The
+  panel shows the next automatic run even when the schedule is manual.
+- **Finished:** if the old dashboard schedule (daily 00:00) is still saved, it
+  fires while the 22:00 run is going. It used to record "skipped" over the
+  running status; it now leaves the running scrape's status alone.
+- **Why a source returned 0 rows is now recorded, not guessed.** Every
+  scraper records transport evidence (attempts, pages fetched, HTTP status,
+  response size, a page text sample, whether the configured listing container
+  still exists). Each source finishes as one of: results / nothing new /
+  **no active opportunities** (the site says so — healthy, stays scheduled) /
+  **no usable page fetched** (URL, network, login or bot check) / **page
+  fetched but parser read nothing** / **website structure changed**. More
+  "no open calls" wordings are recognised. A recovered page error is now a
+  warning, not a failed source (UNDP and Bond were painted red despite
+  hundreds of rows).
+- **Finished:** a source ended by the 30-minute watchdog stays *failed* even
+  if it saved rows before hanging; the new outcome step had repainted it
+  *completed*.
+- **Monthly source-health email to admins only** (1st of the month, 09:30
+  India time; `LOP_SOURCE_HEALTH_REPORT_*`). Recipients are the dashboard's
+  admin accounts, each sent separately; team members never receive it.
+- Health card: "No active opportunities" and "Disabled" states; only failing,
+  never-produced, stale and unknown sources are listed as needing attention.
+- Source URLs updated: Triple Funds, TY Danjuma Foundation, Doen Foundation,
+  The Agency Fund (not re-checked live from here — run
+  `scripts/check_all_sources.py` after deploy).
+
+Tests: `test_source_health_report.py`, window/monthly-job tests,
+`test_second_automatic_start_leaves_the_running_status_alone`,
+`test_a_source_ended_by_the_watchdog_stays_failed`. Full suite: 1278 passed,
+3 skipped. `tsc` clean.
+
+---
+
 ## 2026-10-16 — Wrong deadlines corrected on deploy; passed ones archived
 
 Leads whose deadline had passed still showed as Active, with a wrong date.

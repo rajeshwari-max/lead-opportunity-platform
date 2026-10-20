@@ -214,17 +214,23 @@ export function ScraperPanel({ sources, progress }: Props) {
                   {s.duplicates > 0 && <> · already had {s.duplicates}</>}
                   {s.spam > 0 && <> · junk {s.spam}</>}
                   {s.off_vertical > 0 && <> · off-vertical {s.off_vertical}</>}
-                  {s.found === 0 && s.pages > 0 && s.status === "completed" && (
-                    <span className="ml-1 font-medium text-amber-500">
-                      nothing parsed — check the site or its login
-                    </span>
+                  {s.outcome === "confirmed_empty" && (
+                    <span className="ml-1 font-medium text-sky-600">no active opportunities</span>
                   )}
-                  {s.pages === 0 && s.status === "completed" && (
-                    <span className="ml-1 font-medium text-red-500">
-                      no page fetched at all
-                    </span>
+                  {s.outcome === "parse_zero" && (
+                    <span className="ml-1 font-medium text-amber-600">page fetched; parser returned nothing</span>
                   )}
+                  {s.outcome === "structure_changed" && (
+                    <span className="ml-1 font-medium text-red-600">website structure changed</span>
+                  )}
+                  {["no_fetch", "blocked", "auth_required", "session_expired"].includes(s.outcome ?? "") && (
+                    <span className="ml-1 font-medium text-red-600">no usable page fetched</span>
+                  )}
+                  {s.warnings ? <> · {s.warnings} page warning{s.warnings === 1 ? "" : "s"}</> : null}
                   <span className={`ml-2 font-medium ${statusColor[s.status] ?? ""}`}>{s.status}</span>
+                  {s.outcome_message && (
+                    <span className="ml-1" title={s.next_action}>{s.outcome_message}</span>
+                  )}
                 </span>
               </div>
             ))}
@@ -268,9 +274,9 @@ export function ScraperPanel({ sources, progress }: Props) {
             </select></label>
             <Button size="sm" onClick={() => applySchedule(scheduleMode)}>Save schedule</Button>
           </div>
-          <p className="text-xs text-muted-foreground">Changes take effect only when you click Save schedule. Custom cron uses the selected timezone. A scrape still running at 06:00 India time is health-checked (stopped if stuck) and is stopped at 08:00.</p>
+          <p className="text-xs text-muted-foreground">Changes take effect only when you click Save schedule. Custom cron uses the selected timezone. The full nightly scrape starts automatically at 22:00 India time, is health-checked at 06:00 (stopped if stuck) and is stopped at 08:00 at the latest; a schedule here is only needed for extra runs.</p>
           {scheduleError && <p role="alert" className="text-xs text-red-500">{scheduleError}</p>}
-          {schedule && schedule.mode !== "manual" && (
+          {schedule && (schedule.mode !== "manual" || schedule.next_run) && (
             <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg border border-border bg-muted/30 p-2.5 text-[11px]">
               <span className="text-muted-foreground">Next Run</span>
               <span className="text-right font-medium">{fmtWhen(schedule.next_run)}</span>

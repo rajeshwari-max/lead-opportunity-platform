@@ -1,8 +1,10 @@
-"""Configure the nightly full scrape: 00:00 India time, five sources at a time.
+"""Configure the nightly full scrape: 22:00 India time, five sources at a time.
 
-Every page of every source is walked. The run is health-checked at 06:00 and
-stopped at 08:00 at the latest (LOP_SCRAPE_HEALTH_CHECK_AT /
-LOP_SCRAPE_HARD_STOP_AT), so nothing scrapes during the day.
+The 22:00 start, 06:00 health check and 08:00 hard stop are fixed jobs
+(LOP_SCRAPE_WINDOW_START_AT / LOP_SCRAPE_HEALTH_CHECK_AT /
+LOP_SCRAPE_HARD_STOP_AT). Every page of every source is walked, and nothing
+scrapes during the day. The dashboard schedule is set to "manual" so it does
+not add a second automatic start; an admin can still set one for extra runs.
 
 Run from backend with the API stopped, then restart the API. Does not scrape,
 modify opportunity data, or send email.
@@ -32,12 +34,12 @@ def configure(root: Path):
     state = json.loads(state_path.read_text(encoding='utf-8')) if state_path.exists() else {}
     if state_path.exists():
         shutil.copy2(state_path, state_path.with_name(f'schedule.before-full-scan-{stamp}.json'))
-    state['config'] = dict(mode='daily', cron=None, hour=0,
+    state['config'] = dict(mode='manual', cron=None, hour=22,
                            minute=0, timezone='Asia/Kolkata')
     temporary = state_path.with_suffix('.json.next')
     temporary.write_text(json.dumps(state, indent=2), encoding='utf-8')
     temporary.replace(state_path)
-    print('Configured: nightly full scrape at 00:00 Asia/Kolkata, five sources '
+    print('Configured: nightly full scrape at 22:00 Asia/Kolkata, five sources '
           'at a time; health check 06:00; stopped at 08:00 at the latest.')
     print('Restart the API to load these settings.')
 

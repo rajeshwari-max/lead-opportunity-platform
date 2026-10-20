@@ -137,6 +137,17 @@ class BaseScraper(ABC):
     def __init__(self) -> None:
         self._semaphore = asyncio.Semaphore(settings.concurrency_per_source)
         self._last_request = 0.0
+        # Transport/content evidence consumed by ScraperManager. Keeping it on
+        # every scraper fixes the old ambiguity where "0 results" could mean
+        # no response, a changed parser, or a genuine empty listing.
+        self.last_probe: dict = {
+            "attempts": 0,
+            "pages_fetched": 0,
+            "response_bytes": 0,
+            "body_sample": "",
+            "final_url": "",
+            "fetch_mode": "browser" if self.requires_js else "http",
+        }
 
     # ------------------------------------------------------------------ hooks
     @abstractmethod
@@ -292,6 +303,23 @@ class BaseScraper(ABC):
                     await progress("page_error", {"source": self.name, "page": page_number})
                     request = None
                     continue
+                self.last_probe["pages_fetched"] = (
+                    int(self.last_probe.get("pages_fetched", 0)) + 1
+                )
+                self.last_probe["final_url"] = str(request.url)
+                raw = html.encode("utf-8", errors="ignore")
+                self.last_probe["response_bytes"] = (
+                    int(self.last_probe.get("response_bytes", 0)) + len(raw)
+                )
+                if not self.last_probe.get("body_sample"):
+                    soup = BeautifulSoup(html, "lxml")
+                    self.last_probe["page_title"] = (
+                        soup.title.get_text(" ", strip=True)[:200]
+                        if soup.title else ""
+                    )
+                    self.last_probe["body_sample"] = re.sub(
+                        r"\s+", " ", soup.get_text(" ", strip=True)
+                    )[:8000]
                 perf.info("%s page=%s fetched in %.2fs", self.name, page_number, time.monotonic() - started)
 
                 if page_number == 1:  # keep a copy of page 1 for parser debugging
@@ -365,6 +393,8 @@ class BaseScraper(ABC):
             # browser launches per page on a small EC2 box. A render that fails
             # twice in a row is a real failure and still ends the walk.
             for attempt in (1, 2):
+                self.last_probe["attempts"] = int(self.last_probe.get("attempts", 0)) + 1
+                self.last_probe["fetch_mode"] = "browser"
                 html = await self._fetch_rendered(req)
                 if html is not None:
                     if attempt > 1:
@@ -385,6 +415,8 @@ class BaseScraper(ABC):
             )
         async with self._semaphore:
             for attempt in range(1, settings.max_retries + 1):
+                self.last_probe["attempts"] = int(self.last_probe.get("attempts", 0)) + 1
+                self.last_probe["fetch_mode"] = "http"
                 # polite spacing between requests to the same site
                 elapsed = time.monotonic() - self._last_request
                 if elapsed < settings.rate_limit_delay:
@@ -398,6 +430,11 @@ class BaseScraper(ABC):
                             resp = await client.post(req.url, data=req.data)
                     else:
                         resp = await client.get(req.url)
+                    status = resp.status_code
+                    if self.last_probe.get("first_http_status") is None:
+                        self.last_probe["first_http_status"] = status
+                    self.last_probe["last_http_status"] = status
+                    self.last_probe["final_url"] = str(resp.url)
                     resp.raise_for_status()
                     text = resp.text
                     head = text[:3000].lower()
@@ -416,6 +453,10 @@ class BaseScraper(ABC):
                     # Rate-limited (HTTP 429): back off much harder — the site is
                     # telling us to slow down, not that the page is broken.
                     status = getattr(getattr(exc, "response", None), "status_code", None)
+                    if status is not None:
+                        if self.last_probe.get("first_http_status") is None:
+                            self.last_probe["first_http_status"] = status
+                        self.last_probe["last_http_status"] = status
                     if status == 429:
                         wait = max(wait, 20.0 * attempt)
                     log.warning(

@@ -128,6 +128,10 @@ _EMPTY_PHRASES = re.compile(
     r"no\s+(current|open|active|available|matching)\s+"
     r"(opportunit\w+|tenders?|notices?|calls?|grants?|results?|vacanc\w+)|"
     r"there\s+are\s+(currently\s+)?no\s+\w+|"
+    r"no\s+(calls?|rfps?|applications?)\s+(are\s+)?currently\s+open|"
+    r"(the\s+)?open\s+call\s+window\s+is\s+(now\s+)?closed|"
+    r"not\s+currently\s+accepting\s+(applications?|proposals?)|"
+    r"applications?\s+(are\s+)?(accepted\s+)?by\s+invitation\s+only|"
     r"no\s+results?\s+(were\s+)?found|"
     r"0\s+(opportunit\w+|tenders?|notices?|results?)\s+found"
     r")\b",

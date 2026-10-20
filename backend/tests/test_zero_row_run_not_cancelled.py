@@ -62,3 +62,35 @@ def test_zero_rows_without_a_stop_is_not_cancelled(monkeypatch):
 def test_a_real_stop_is_still_cancelled(monkeypatch):
     ev = _run(monkeypatch, _Scraper(pages=0), user_stop=True)
     assert ev.cancelled is True
+
+
+class _ResultsDespiteWarning(_Scraper):
+    last_probe = {"pages_fetched": 1, "attempts": 2, "response_bytes": 1200}
+
+    async def crawl(self, stop, pause, on_progress):
+        await on_progress("page_error", {"page": 1})
+        await on_progress("page_done", {"page": 2, "found": 1})
+        yield [object()]
+
+
+def test_recovered_page_error_does_not_make_successful_source_failed(monkeypatch):
+    scraper = _ResultsDespiteWarning(pages=1)
+    manager = ScraperManager()
+    captured = {}
+    monkeypatch.setattr(ScraperManager, "_open_run", staticmethod(lambda *a, **k: 1))
+    monkeypatch.setattr(ScraperManager, "_close_run",
+                        staticmethod(lambda run_id, prog, ev=None:
+                                     captured.update(prog=dict(prog), ev=ev)))
+    monkeypatch.setattr(ScraperManager, "_last_good_signature", staticmethod(lambda s: ""))
+    monkeypatch.setattr(manager, "_ingest", lambda *a, **k: (1, 1, 0, 0, 0, 0))
+    manager.progress = {scraper.name: {
+        "display_name": scraper.display_name, "pages": 0, "found": 0,
+        "saved": 0, "new_live": 0, "skipped_expired": 0,
+        "duplicates": 0, "off_vertical": 0, "spam": 0,
+        "errors": 0, "status": "queued"}}
+
+    asyncio.run(manager._run_source(scraper))
+
+    assert captured["prog"]["status"] == "completed"
+    assert captured["prog"]["warnings"] == 1
+    assert captured["ev"].pages_fetched == 2

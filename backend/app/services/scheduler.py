@@ -25,8 +25,10 @@ log = logging.getLogger("scraper")
 
 _JOB_ID = "scheduled-scrape"
 _DIGEST_JOB_ID = "daily-digest"
+_NIGHT_START_JOB_ID = "scrape-night-start"
 _HEALTH_JOB_ID = "scrape-health-check"
 _HARD_STOP_JOB_ID = "scrape-hard-stop"
+_MONTHLY_HEALTH_JOB_ID = "monthly-source-health-report"
 
 # APScheduler's defaults already give max_instances=1 and coalesce=True, but
 # they are spelled out on every job below because "the default happens to be
@@ -169,6 +171,7 @@ class ScrapeScheduler:
         self.apply_email_settings()
         self._install_deadline_audit()
         self._install_scrape_window()
+        self._install_monthly_source_health_report()
         # Re-apply the persisted schedule so automatic runs resume after restart.
         if self.current.mode != "manual":
             try:
@@ -206,7 +209,7 @@ class ScrapeScheduler:
             except Exception:
                 log.exception("Nightly deadline audit failed")
 
-        # 08:15, after the nightly scrape window (00:00-08:00) and before the
+        # 08:15, after the nightly scrape window (22:00-08:00) and before the
         # 09:00 digest. At 00:05 it ran a whole-database pass at the same time
         # as the nightly scrape, competing for the database write lock.
         self._scheduler.add_job(
@@ -218,9 +221,10 @@ class ScrapeScheduler:
 
     # ------------------------------------------------------------ scrape window
     def _install_scrape_window(self) -> None:
-        """Health check (06:00) and hard stop (08:00) for the nightly scrape."""
+        """Start (22:00), health check (06:00), hard stop (08:00)."""
         tz = settings.scrape_window_timezone
         for job_id, at, func in (
+            (_NIGHT_START_JOB_ID, settings.scrape_window_start_at, self._window_start),
             (_HEALTH_JOB_ID, settings.scrape_health_check_at, self._window_health_check),
             (_HARD_STOP_JOB_ID, settings.scrape_hard_stop_at, self._window_hard_stop),
         ):
@@ -237,6 +241,40 @@ class ScrapeScheduler:
                 id=job_id, replace_existing=True, **_JOB_GUARDS,
             )
             log.info("Scheduler: %s at %02d:%02d %s", job_id, hm[0], hm[1], tz)
+
+    async def _window_start(self) -> None:
+        """Open the fixed overnight window.
+
+        Every automatic start still passes through ScraperManager's database
+        lease, so a manual run or another worker cannot create a second batch
+        of Chrome processes.
+        """
+        await self._scrape_all()
+
+    def _install_monthly_source_health_report(self) -> None:
+        try:
+            self._scheduler.remove_job(_MONTHLY_HEALTH_JOB_ID)
+        except Exception:
+            pass
+        hm = _hhmm(settings.source_health_report_at)
+        if not settings.source_health_report_enabled or hm is None:
+            log.info("Scheduler: monthly source-health report off")
+            return
+        day = min(28, max(1, int(settings.source_health_report_day)))
+        from app.services.source_health_report import send_monthly_report
+        self._scheduler.add_job(
+            send_monthly_report,
+            CronTrigger(
+                day=day, hour=hm[0], minute=hm[1],
+                timezone=settings.source_health_report_timezone,
+            ),
+            id=_MONTHLY_HEALTH_JOB_ID, replace_existing=True, **_JOB_GUARDS,
+        )
+        log.info(
+            "Scheduler: admin-only monthly source-health report on day %s at "
+            "%02d:%02d %s", day, hm[0], hm[1],
+            settings.source_health_report_timezone,
+        )
 
     async def _window_health_check(self) -> None:
         """Still scraping at the health-check time: carry on if it is making
@@ -382,6 +420,10 @@ class ScrapeScheduler:
     def status(self) -> ScheduleStatusOut:
         next_run: datetime | None = None
         job = self._scheduler.get_job(_JOB_ID) if self._scheduler.running else None
+        if job is None and self._scheduler.running:
+            # The fixed overnight job is always the canonical automatic run;
+            # a dashboard-configured schedule is optional and may be manual.
+            job = self._scheduler.get_job(_NIGHT_START_JOB_ID)
         if job is not None and job.next_run_time is not None:
             next_run = job.next_run_time.astimezone(timezone.utc).replace(tzinfo=None)
         return ScheduleStatusOut(
@@ -394,14 +436,24 @@ class ScrapeScheduler:
 
     # --------------------------------------------------------------- execution
     async def _scrape_all(self) -> None:
-        self.last_run = datetime.now(timezone.utc).replace(tzinfo=None)
+        # Two automatic starts can now coincide: the fixed 22:00 window and a
+        # schedule still saved in the dashboard (e.g. the earlier daily 00:00).
+        # The second one must not record itself as the latest run, or the
+        # panel would show "skipped" while the real run is still going.
+        if manager.state != "idle":
+            log.info("Scheduled scrape not started — a scrape is already running "
+                     "(state=%s); its status is left unchanged", manager.state)
+            return
+        started_at = datetime.now(timezone.utc).replace(tzinfo=None)
         try:
             await manager.start()
         except RuntimeError:
             log.warning("Scheduled scrape skipped — a job is already running")
+            self.last_run = started_at
             self.last_status = "skipped"
             self._save_state()
             return
+        self.last_run = started_at
         self.last_status = "running"
         self._save_state()
         # Wait for the job to finish so the outcome can be recorded.

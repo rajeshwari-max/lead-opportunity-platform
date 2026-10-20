@@ -516,7 +516,11 @@ class ScraperManager:
                         f"nothing new — stopping this source (only older content ahead)"
                     )
                     source_stop.set()
-            prog["status"] = "stopped" if self._stop.is_set() else ("failed" if prog["errors"] else "completed")
+            # Final status is decided from the evidence below. A recovered
+            # pagination error is a warning, not proof that the whole source
+            # failed (UNDP and Bond both extracted hundreds of rows and were
+            # still painted red because one fallback request failed).
+            prog["status"] = "stopped" if self._stop.is_set() else "completed"
         except Exception as exc:                                # noqa: BLE001
             log.exception("[%s] source crashed", scraper.name)
             prog["status"] = "failed"
@@ -551,8 +555,7 @@ class ScraperManager:
             # below. The signal is sent on every exit path, so reading the
             # Event after it made every run that found 0 rows look stopped by a
             # user, and hid the real reason (blocked, parser broken, empty).
-            was_stopped = self._stop.is_set() or (
-                source_stop.is_set() and not prog["found"])
+            was_stopped = self._stop.is_set()
             source_stop.set()
             mirror.cancel()
             # What the run actually observed. Scrapers that record transport
@@ -560,8 +563,15 @@ class ScraperManager:
             # those fields None, and the classifier degrades to the page/extract
             # counts rather than inventing a status code.
             probe = getattr(scraper, "last_probe", None) or {}
+            observed_pages = max(
+                int(prog.get("pages", 0)),
+                int(probe.get("pages_fetched", 0)),
+                # Bespoke/API scrapers do not all emit page_done. Extracting a
+                # record is nevertheless positive proof that a response was read.
+                1 if prog.get("found", 0) else 0,
+            )
             evidence = Evidence(
-                pages_fetched=prog["pages"],
+                pages_fetched=observed_pages,
                 extracted=prog["found"],
                 saved=prog["saved"],
                 duplicates=prog.get("duplicates", 0),
@@ -584,8 +594,23 @@ class ScraperManager:
                 cancelled=was_stopped,
                 exception=crash,
             )
-            outcome, _, _ = classify(evidence)
-            if prog["status"] == "completed" and not outcome.is_healthy:
+            outcome, _, outcome_message = classify(evidence)
+            prog["outcome"] = outcome.value
+            prog["outcome_message"] = outcome_message
+            prog["next_action"] = outcome.next_action
+            prog["pages"] = observed_pages
+            if outcome is Outcome.CANCELLED:
+                prog["status"] = "stopped"
+            elif outcome.is_healthy:
+                prog["status"] = "completed"
+                if prog.get("errors"):
+                    prog["warnings"] = prog["errors"]
+            else:
+                prog["status"] = "failed"
+            if prog.get("stalled"):
+                # Ended by the per-source watchdog (_run_watched). Rows it read
+                # before hanging can make the evidence look healthy, but the
+                # source did not finish: keep it failed so it is investigated.
                 prog["status"] = "failed"
             await asyncio.to_thread(self._close_run, run_id, prog, evidence)
             # When closed listings are archived they are *included* in `saved`,
@@ -1222,7 +1247,7 @@ class ScraperManager:
             finished = datetime.now(timezone.utc)
             started = run.started_at
             run.finished_at = finished
-            run.pages_scraped = prog["pages"]
+            run.pages_scraped = evidence.pages_fetched if evidence is not None else prog["pages"]
             run.found = prog["found"]
             run.saved = prog["saved"]
             run.skipped_expired = prog["skipped_expired"]

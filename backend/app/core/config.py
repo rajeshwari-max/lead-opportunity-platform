@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     concurrency_per_source: int = 4     # concurrent page fetches per website
     # Walk every page of every source (no page limits, no per-source time
     # limit). Safe only because the scrape runs once a night inside a fixed
-    # window: it starts at 00:00, is health-checked at 06:00 and is stopped at
+    # window: it starts at 22:00, is health-checked at 06:00 and is stopped at
     # 08:00 at the latest (scrape_health_check_at / scrape_hard_stop_at below).
     # False = bounded scans: a source stops after `stale_page_streak` pages
     # with nothing new or after source_timeout_s; the run after run_timeout_s.
@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # then; otherwise it carries on. Either way an alert email says which.
     # 08:00: anything still scraping is stopped, so nothing scrapes in the day.
     scrape_window_timezone: str = "Asia/Kolkata"
+    scrape_window_start_at: str = "22:00"
     scrape_health_check_at: str = "06:00"
     scrape_hard_stop_at: str = "08:00"
     scrape_stall_minutes: int = 30
@@ -46,6 +47,13 @@ class Settings(BaseSettings):
     max_pages_safety_cap: int = 2000    # hard stop against infinite pagination loops
     stale_page_streak: int = 3          # stop a source after N consecutive pages with nothing new
                                         # (listings are newest-first; deeper pages are only older)
+
+    # Admin-only monthly source-health report. Each administrator receives a
+    # separate message; ordinary team members never receive operational data.
+    source_health_report_enabled: bool = True
+    source_health_report_day: int = 1
+    source_health_report_at: str = "09:30"
+    source_health_report_timezone: str = "Asia/Kolkata"
 
     # Public-web opportunity discovery ------------------------------------
     #

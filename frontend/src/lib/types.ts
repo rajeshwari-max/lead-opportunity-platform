@@ -100,6 +100,10 @@ export interface SourceProgress {
   off_vertical: number;
   errors: number;
   status: string;
+  outcome?: string;
+  outcome_message?: string;
+  next_action?: string;
+  warnings?: number;
 }
 
 export interface Progress {
@@ -324,7 +328,7 @@ export interface SourceHealth {
   last_saved_at: string | null;
   /** Measured from the last row SAVED, not the last run attempted. */
   days_since_saved: number | null;
-  state: "ok" | "never_produced" | "stale" | "failing" | "unknown";
+  state: "ok" | "confirmed_empty" | "never_produced" | "stale" | "failing" | "unknown" | "disabled";
   note: string;
 }
 

@@ -284,6 +284,12 @@ class GenericListingScraper(BaseScraper):
         item_sel = self.config.get("item_selector")
         title_sel = self.config.get("title_selector")
 
+        # A configured container is a parser contract. Record whether it still
+        # exists so zero results become STRUCTURE_CHANGED only on positive
+        # evidence, rather than every empty source being guessed broken.
+        if item_sel:
+            self.last_probe["expected_container_present"] = bool(soup.select(item_sel))
+
         containers = soup.select(item_sel) if item_sel else [soup]
         for container in containers:
             anchors = (container.select(title_sel) if title_sel
