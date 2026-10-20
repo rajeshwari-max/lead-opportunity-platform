@@ -5,6 +5,40 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-20 (later) — DevelopmentAid documents: read the page after it renders; footer file no longer "official"
+
+DevelopmentAid rows showed "No official ToR or source file was found", and
+some listed "Certified to ISO 9001:2015 by QMSCERT+ Certificate No. 230421-8"
+as their official document — although the scrape runs signed in.
+
+Cause: the detail-page enrichment (9f64a58) opened each opportunity and read
+it 1.2 s after `domcontentloaded`. DevelopmentAid is an Angular app; at that
+moment only the empty shell and the site footer exist. So no summary or
+attachments were found, and the only PDF on the page — the footer's quality
+certificate — was stored as the document. Rows read that way were then marked
+"checked" and never read again.
+
+- The enrichment now waits (up to 25 s) until the opportunity's title is on
+  the page, captures the app's own JSON for that opportunity (the most
+  reliable attachment list), and scans links only outside the footer/cookie
+  areas.
+- `services/site_chrome.py`: the website's own files (ISO 9001 / QMSCERT
+  certificate, CMS brochures, privacy/cookie policies) are never stored as an
+  opportunity's document, for new rows or on re-scrape.
+- Rows with an empty or footer-only document list are no longer "complete":
+  the next run re-reads them, and a real list then replaces the bad one.
+- Deploy step 8b: `scripts/clean_site_chrome_documents.py` removes the footer
+  file from rows already stored (backup first, rows kept, PDF link reset).
+- The one-time DevelopmentAid enrichment on deploy runs again (marker v2).
+
+"sign-in required" under a DevelopmentAid title is unchanged and correct: the
+link opens only for someone signed in to DevelopmentAid.
+
+Tests: `tests/test_site_chrome_documents.py` (6). Full suite: 1283 passed,
+3 skipped.
+
+---
+
 ## 2026-10-20 — Nightly scrape starts at 22:00; honest zero-result status; monthly source-health email (Codex work, finished)
 
 Codex prepared these today and left them uncommitted; reviewed, finished and

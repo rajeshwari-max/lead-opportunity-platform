@@ -231,6 +231,16 @@ if [ "$REPARSE_DEADLINES" = "1" ]; then
     || echo "    WARNING: deadline correction failed; nothing was changed by it. Continuing."
 fi
 
+# ------------------------------- 8b. drop website-footer files from documents
+# DevelopmentAid detail pages read before they had rendered stored the site
+# footer's ISO certificate PDF as an opportunity's "official document".
+# Removes only those entries (rows are kept) so the next run re-reads them.
+say "Removing website footer files stored as opportunity documents"
+cd "$REPO/backend"
+chrome_backup="$REPO/backend/data/backups/pre-doc-cleanup-$(date +%Y%m%d-%H%M%S).db"
+"$PYTHON" scripts/clean_site_chrome_documents.py --apply --backup "$chrome_backup" \
+  || echo "    WARNING: document cleanup failed; nothing was changed by it. Continuing."
+
 # -------------------------------------------------- 8. deadline maintenance
 # Startup has completed its migrations, so the new audit can now safely read
 # the live schema.  It first writes a dry-run report.  Only genuinely passed,
@@ -321,7 +331,9 @@ fi
 say "Checking the DevelopmentAid session"
 if "$PYTHON" scripts/devaid_session.py status; then
   echo "    DevelopmentAid session is ready"
-  enrichment_marker="$REPO/backend/data/.devaid-document-enrichment-v1"
+  # v2: v1 read detail pages before they rendered (no summaries, footer
+  # certificate stored as the document), so it runs once more.
+  enrichment_marker="$REPO/backend/data/.devaid-document-enrichment-v2"
   if [ "$RUN_DEVAID_DOCUMENT_ENRICHMENT" = "1" ] && [ ! -f "$enrichment_marker" ]; then
     say "Enriching DevelopmentAid summaries and official documents (one time)"
     if "$PYTHON" scripts/rescrape_source.py developmentaid; then

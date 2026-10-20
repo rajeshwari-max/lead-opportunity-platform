@@ -48,6 +48,8 @@ from app.services.walk_budget import WalkBudget
 
 log = logging.getLogger("scraper")
 
+from app.services.site_chrome import is_site_chrome_document  # noqa: E402
+
 _VIEW_LINK = re.compile(r"/(?:grants|tenders)/view/\d+", re.IGNORECASE)
 _DEADLINE_NEAR = re.compile(
     r"(deadline|closing)[^\d]{0,20}(\d{1,2}\s+\w{3,9}\s+\d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4})",
@@ -1196,6 +1198,37 @@ class DevelopmentAidScraper(BaseScraper):
                 return re.sub(r"\s+", " ", " ".join(parts)).strip()
         return ""
 
+    def _capture_detail_json(self, resp) -> None:
+        """Keep JSON responses that belong to the opportunity being read."""
+        try:
+            oid = getattr(self, "_detail_id", "")
+            if not oid or "/api/" not in resp.url or oid not in resp.url:
+                return
+            if "json" not in (resp.headers or {}).get("content-type", "").lower():
+                return
+            body = resp.json()
+            if isinstance(body, (dict, list)):
+                self._detail_json.append(body)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _wait_for_detail(detail, title: str, timeout_ms: int = 25_000) -> None:
+        """Wait until the rendered page shows the opportunity's title."""
+        snippet = re.sub(r"\s+", " ", (title or "")).strip()[:40].casefold()
+        try:
+            if snippet:
+                detail.wait_for_function(
+                    "s => document.body && document.body.innerText"
+                    ".replace(/\\s+/g, ' ').toLowerCase().includes(s)",
+                    arg=snippet, timeout=timeout_ms)
+            else:
+                detail.wait_for_load_state("networkidle", timeout=timeout_ms)
+            detail.wait_for_timeout(800)     # attachments render just after
+        except Exception:
+            # Proceed with whatever rendered; the junk filter still applies.
+            pass
+
     def _enrich_from_signed_in_details(self, search_page,
                                         items: list[RawOpportunity]) -> None:
         """Read missing summary/files in a second tab of the signed-in browser.
@@ -1224,7 +1257,15 @@ class DevelopmentAidScraper(BaseScraper):
                            Opportunity.documents_json)
                     .where(Opportunity.opportunity_url.in_(urls))
                 ).all() if urls else []
-            complete_urls = {row[0] for row in rows if row[1] and row[2] is not None}
+            # "Checked" is not "complete" when nothing usable was found, or
+            # when only the site's own footer files were picked up: those rows
+            # were read before the detail page had rendered, and must be read
+            # again.
+            complete_urls = {
+                row[0] for row in rows
+                if row[1] and row[2] not in (None, "", "[]")
+                and not has_site_chrome_document(row[2])
+            }
         except Exception:
             log.debug("[developmentaid] could not pre-check detail state",
                       exc_info=True)
@@ -1245,13 +1286,40 @@ class DevelopmentAidScraper(BaseScraper):
                 used += 1
                 if detail is None:
                     detail = search_page.context.new_page()
+                    detail.on("response", self._capture_detail_json)
+                self._detail_json = []
+                self._detail_id = (re.search(r"/view/(\d+)", url) or [None, ""])[1]
                 try:
                     response = detail.goto(
                         url, timeout=60_000, wait_until="domcontentloaded")
                     if response is not None and response.status in (401, 403, 429, 503):
                         continue
-                    detail.wait_for_timeout(1_200)
+                    # This is an Angular app: at "domcontentloaded" only the
+                    # shell and the site footer exist. Reading then is why rows
+                    # got no summary and the footer's ISO-certificate PDF was
+                    # stored as their "official document". Wait until the
+                    # opportunity itself is on the page.
+                    self._wait_for_detail(detail, item.title)
                     soup = BeautifulSoup(detail.content(), "lxml")
+                    for chrome in soup.select(
+                            "body > header, footer, nav, da-footer, app-footer, "
+                            "[class*=footer], [class*=cookie]"):
+                        chrome.decompose()
+                    # The app's own JSON for this opportunity carries the
+                    # attachment list most reliably; read it first.
+                    for payload in self._detail_json:
+                        if not item.summary:
+                            item.summary = self._pick_deep(
+                                payload, "description", "summary", "shortDescription",
+                                "objective", "objectives", "projectDescription")[:20000]
+                        if not item.eligibility:
+                            item.eligibility = self._pick_deep(
+                                payload, "eligibility", "eligibleApplicants",
+                                "applicantEligibility", "eligibilityCriteria")[:12000]
+                        if not item.source_documents:
+                            item.source_documents = [
+                                d for d in self._source_documents(payload)
+                                if not is_site_chrome_document(d)]
                     if not item.summary:
                         item.summary = self._section_after_heading(
                             soup, "description", "summary", "objective",
@@ -1284,8 +1352,9 @@ class DevelopmentAidScraper(BaseScraper):
                                              or "Official source document"),
                                 "downloadUrl": urljoin(detail.url, href),
                             })
-                        item.source_documents = self._source_documents(
-                            {"attachments": attachments})
+                        item.source_documents = [
+                            d for d in self._source_documents({"attachments": attachments})
+                            if not is_site_chrome_document(d)]
                     item.documents_checked = True
                 except Exception as exc:
                     log.info("[developmentaid] detail enrichment skipped %s (%s)",

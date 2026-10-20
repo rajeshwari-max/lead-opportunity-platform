@@ -45,6 +45,7 @@ from app.services.source_manifest import (
     record_is_in_scope,
 )
 from app.services.deadline_audit import is_sentinel
+from app.services.site_chrome import is_site_chrome_document
 from app.services.spam import is_spam
 from app.services.organization import extract_organization, tidy_organization
 from app.services.verticals import VERTICALS as ALL_VERTICALS
@@ -672,6 +673,7 @@ class ScraperManager:
                 {str(k): str(v) for k, v in row.items() if v is not None}
                 for row in raw.source_documents
                 if isinstance(row, dict) and str(row.get("url", "")).startswith(("http://", "https://"))
+                and not is_site_chrome_document(row)
             ]
             documents_json = json.dumps(source_documents, ensure_ascii=False) \
                 if (source_documents or raw.documents_checked) else None
@@ -893,8 +895,33 @@ class ScraperManager:
                             fields["summary"] = raw.summary
                         if not existing[3] and raw.eligibility:
                             fields["eligibility"] = raw.eligibility
-                        if documents_json is not None and existing[4] is None:
+                        # Replace a missing, empty or site-footer-only list
+                        # (stored when a detail page was read before it had
+                        # rendered). A real list already stored is kept.
+                        stored_docs = existing[4]
+                        replaceable = (stored_docs is None
+                                       or stored_docs.strip() in ("", "[]")
+                                       or is_site_chrome_document(stored_docs))
+                        if documents_json is not None and replaceable and (
+                                stored_docs is None or source_documents
+                                or is_site_chrome_document(stored_docs)):
                             fields["documents_json"] = documents_json
+                            if not source_documents and is_site_chrome_document(stored_docs or ""):
+                                # Nothing new found: keep the stored list minus
+                                # the footer files rather than wiping a real one.
+                                try:
+                                    kept = [d for d in json.loads(stored_docs)
+                                            if isinstance(d, dict)
+                                            and not is_site_chrome_document(d)]
+                                except (ValueError, TypeError):
+                                    kept = []
+                                fields["documents_json"] = json.dumps(kept, ensure_ascii=False)
+                                primary_pdf = primary_pdf or next(
+                                    (d.get("url") for d in kept
+                                     if ".pdf" in str(d.get("url", "")).casefold()), None)
+                            if not primary_pdf and is_site_chrome_document(stored_docs or ""):
+                                # The stored "official PDF" was the footer file.
+                                fields.update(pdf_url=None)
                             if primary_pdf:
                                 fields.update(
                                     pdf_url=primary_pdf[:1024],
