@@ -120,10 +120,6 @@ export function OpportunityIntelligenceSection({ opportunity, readOnly = false }
     {loading && <p className="ud-sub"><Loader2 className="ud-spin" size={14} /> Calculating fit from company history…</p>}
     {error && <p role="alert" className="ud-intelligence-error">{error}</p>}
     {data && <>
-      <div className="ud-recommendation-score">
-        <strong>{score(data.recommendation_score)}</strong>
-        <span>recommendation score<br />{data.confidence.toLowerCase()} confidence</span>
-      </div>
       <div className="ud-intelligence-metrics">
         <div><span>Eligibility</span><b>{data.computed_eligibility_level === "UNKNOWN" ? "—" : score(data.eligibility_score)}</b><small>{data.eligibility_level} · {statedCriteria.length ? `${matchedCriteria}/${statedCriteria.length} stated criteria matched` : "no stated criteria verified"}{data.eligibility_override ? ` · human override (calculated ${data.computed_eligibility_level})` : ""}</small></div>
         <div><span>Company fit</span><b>{score(data.company_fit_score)}</b></div>

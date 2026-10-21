@@ -5,6 +5,27 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-21 — Keep Miscellaneous separate and hide internal threshold ratios
+
+- The user dashboard's **Opportunities** tab now always requests classified
+  opportunities, even when an older saved preference had disabled that filter.
+  Miscellaneous/unassigned opportunities remain available only in the separate
+  **Miscellaneous** tab.
+- Removed the user-facing "150% / 300% of threshold" diagnostics and the same
+  values from hover text. They were internal keyword-score ratios, not
+  probabilities, and could exceed 100% when several phrases matched.
+- Removed the headline recommendation score from the Company intelligence
+  card. The useful eligibility, fit, historical evidence, reasons and risks
+  remain available without presenting one opaque overall number.
+- The Miscellaneous brief now shows only understandable closest-match names and
+  the words that caused those matches, while clearly saying that no brand or
+  vertical has been assigned.
+
+Verification: frontend TypeScript build passed; 68 focused classification,
+Miscellaneous, unclassified-view and scraper-health tests passed.
+
+---
+
 ## 2026-10-20 (evening) — DevelopmentAid detail pages: wait out the security check instead of skipping
 
 First run of `devaid_fetch_documents.py --limit 10` on EC2: signed in, and

@@ -13,6 +13,8 @@ export const miscName = (s: MiscSector) => s.kind === "vertical" ? shortVertical
 export const miscLabel = (m: Miscellaneous) =>
   m.reached ? `Miscellaneous — ${m.combined.map(miscName).join(" + ")}` : "Miscellaneous";
 
-/** "Health 50% · Setu 45%" — every near miss and its share of its threshold. */
+/** Human-readable evidence only.  Raw score/threshold ratios are an internal
+ *  classifier diagnostic, not probabilities, and can legitimately exceed
+ *  100% when several matching phrases contribute to one label. */
 export const miscTitle = (m: Miscellaneous) =>
-  m.sectors.length ? m.sectors.map(s => `${miscName(s)} ${s.pct}%`).join(" · ") : "No vertical or brand signal at all";
+  m.sectors.length ? `Closest matches: ${m.sectors.map(miscName).join(" · ")}` : "No vertical or brand signal found";

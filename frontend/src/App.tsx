@@ -130,8 +130,18 @@ export default function App() {
     setRefreshKey((k) => k + 1);
   }, []);
 
-  const { data, loading } = useOpportunities(filters, refreshKey);
-  const { stats, statsLoading, facets, sources } = useDashboardData(filters, refreshKey);
+  const view = new URLSearchParams(window.location.search).get("view");
+  const userView = view === "user";
+  // The user dashboard has two deliberately separate queues.  A saved filter
+  // from an older visit must never let unclassified/Miscellaneous rows leak
+  // back into the main Opportunities tab.  Keep the stored preferences intact
+  // for the admin dashboard, but make the user-view query contract explicit.
+  const dashboardFilters = userView && !filters.unclassified_only
+    ? { ...filters, has_vertical: true }
+    : filters;
+
+  const { data, loading } = useOpportunities(dashboardFilters, refreshKey);
+  const { stats, statsLoading, facets, sources } = useDashboardData(dashboardFilters, refreshKey);
   const progress = useScrapeProgress(refresh); // auto-refresh when a scrape finishes
 
   if (authed === null) return null;
@@ -139,8 +149,6 @@ export default function App() {
 
 
 
-  const view = new URLSearchParams(window.location.search).get("view");
-  const userView = view === "user";
   const viewUrl = (view: string) => {
     const params = new URLSearchParams(window.location.search);
     params.set("view", view);
