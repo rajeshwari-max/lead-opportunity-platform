@@ -26,6 +26,37 @@ Miscellaneous, unclassified-view and scraper-health tests passed.
 
 ---
 
+## 2026-10-21 — Duplicate cleanup: system-written records no longer block it; undated calls checked more carefully
+
+The deploy's duplicate cleanup reported "Safe duplicate rows to remove: 0 /
+Protected collisions left for review: 2,479". A row counted as protected if
+ANY table pointed at it — including the company-intelligence score that the
+deploy computes for every lead and the email log. So almost every duplicate
+was "protected" and none could ever be removed.
+
+- No longer protects: `opportunity_intelligence` (the removed copy's score is
+  deleted; the kept copy already has its own), `sent_log` (moved to the kept
+  copy so nobody is emailed the same lead twice), and machine `prediction`
+  events (moved to the kept copy).
+- Still protects: saved/viewed leads, application journeys, human reviews and
+  any person's experience event, Wrike tasks, approved or human-classified
+  rows, and any table not named above.
+- Stricter matching, so the larger set it can now act on stays safe:
+  - the country must match (one programme announced per country is several
+    calls);
+  - rows **without a deadline** must also have the same description text (or,
+    with no text, the same link). Generic titles such as "Call for proposals
+    for action grants…" are reused for different calls.
+- Measured on the 13 Oct local snapshot: 4,921 removable (4,128 DevelopmentAid
+  re-postings with the same title, funder, deadline and country), 15 left for
+  review. Before the stricter matching it would have been 8,212.
+- Unchanged: dry-run first, full backup and `.removed.json` list before any
+  deletion; different deadlines are never merged.
+
+Tests: `test_dedupe_dashboard.py` (+4). Full suite: 1291 passed.
+
+---
+
 ## 2026-10-21 — "New Today" counts the whole of last night's scrape
 
 New Today showed 1 on the morning of 21 October. It counted leads saved since
