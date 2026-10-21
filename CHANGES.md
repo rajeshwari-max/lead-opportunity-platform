@@ -26,6 +26,27 @@ Miscellaneous, unclassified-view and scraper-health tests passed.
 
 ---
 
+## 2026-10-21 — "New Today" counts the whole of last night's scrape
+
+New Today showed 1 on the morning of 21 October. It counted leads saved since
+midnight India time, but the nightly scrape starts at 22:00 — so everything
+saved between 22:00 and midnight was counted as the previous day and never
+appeared in the morning.
+
+- New Today (card and its filter) now runs from the latest scrape start
+  (`LOP_SCRAPE_WINDOW_START_AT`, 22:00 India time) for 24 hours: in the
+  morning it shows last night's whole batch; after 22:00 it shows the run in
+  progress. `actionable.new_leads_window_utc()`.
+- The card says "since last night's 10 pm scrape".
+- It still counts only new, live leads (open, dated or rolling) — a night
+  that mostly re-finds stored leads legitimately shows a small number; the
+  scraper panel's "new live" per source shows the same figure.
+
+Tests: `test_new_today_starts_at_last_nights_scrape_not_midnight`. Full
+suite: 1287 passed. `tsc` clean.
+
+---
+
 ## 2026-10-20 (evening) — DevelopmentAid detail pages: wait out the security check instead of skipping
 
 First run of `devaid_fetch_documents.py --limit 10` on EC2: signed in, and

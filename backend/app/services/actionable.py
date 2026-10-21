@@ -108,6 +108,34 @@ def application_day_utc_bounds(
     return start, start + timedelta(days=1)
 
 
+def new_leads_window_utc(now: datetime | None = None) -> tuple[datetime, datetime]:
+    """UTC bounds of "New Today": since the latest nightly scrape started.
+
+    The scrape runs 22:00-08:00 India time, so a calendar day splits one
+    night's results in two: everything saved between 22:00 and midnight
+    counted as "yesterday", and New Today showed only what arrived after
+    midnight (1 on 21 Oct). The window instead starts at the most recent
+    scrape start (settings.scrape_window_start_at, default 22:00 IST) and
+    runs 24 hours, so a morning view shows the whole of last night's batch.
+    Falls back to the India calendar day if the start time is blank or bad.
+    """
+    from app.core.config import settings
+
+    try:
+        h, m = (int(x) for x in (settings.scrape_window_start_at or "").split(":"))
+        if not (0 <= h < 24 and 0 <= m < 60):
+            raise ValueError
+    except ValueError:
+        return application_day_utc_bounds()
+    local_tz = timezone(timedelta(minutes=IST_OFFSET_MINUTES))
+    now_local = (now or datetime.now(timezone.utc)).astimezone(local_tz)
+    start_local = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+    if start_local > now_local:
+        start_local -= timedelta(days=1)
+    start = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+    return start, start + timedelta(days=1)
+
+
 # --------------------------------------------------------------- the predicate
 
 def is_actionable(

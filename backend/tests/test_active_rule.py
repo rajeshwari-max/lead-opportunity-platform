@@ -56,7 +56,7 @@ def test_new_today_counts_early_india_morning_stored_on_previous_utc_date(
     start = datetime(2026, 10, 15, 18, 30)
     end = datetime(2026, 10, 16, 18, 30)
     monkeypatch.setattr(
-        "app.services.filter_service.application_day_utc_bounds",
+        "app.services.filter_service.new_leads_window_utc",
         lambda: (start, end),
     )
     inside = add(db, "inside-india-day", date(2099, 1, 1))
@@ -109,3 +109,17 @@ def test_admin_include_undated_uses_broader_rule(db, monkeypatch):
     result = FilterService(db).query(OpportunityFilters(include_undated=True))
     assert [row.unique_id for row in result.items] == ["rolling"]
 
+
+
+def test_new_today_starts_at_last_nights_scrape_not_midnight():
+    from datetime import timezone as tz
+
+    from app.services.actionable import new_leads_window_utc
+
+    # 11:40 IST on 21 Oct -> window opened 22:00 IST on 20 Oct (16:30 UTC).
+    start, end = new_leads_window_utc(datetime(2026, 10, 21, 6, 10, tzinfo=tz.utc))
+    assert start == datetime(2026, 10, 20, 16, 30)
+    assert end == datetime(2026, 10, 21, 16, 30)
+    # 23:00 IST on 21 Oct -> tonight's run, opened 22:00 IST on 21 Oct.
+    start, _ = new_leads_window_utc(datetime(2026, 10, 21, 17, 30, tzinfo=tz.utc))
+    assert start == datetime(2026, 10, 21, 16, 30)

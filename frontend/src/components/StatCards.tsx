@@ -124,9 +124,13 @@ export function StatCards({ stats, loading, filters, onChange }: Props) {
                 <p className="mt-1 text-2xl font-bold tabular-nums">
                   {value(c.key).toLocaleString()}
                 </p>
-                {isActive(c.key) && (
+                {isActive(c.key) ? (
                   <p className="mt-0.5 text-[10px] font-medium text-muted-foreground">
                     filtering · click to clear
+                  </p>
+                ) : c.key === "today" && (
+                  <p className="mt-0.5 text-[10px] font-medium text-muted-foreground">
+                    since last night's 10 pm scrape
                   </p>
                 )}
               </div>

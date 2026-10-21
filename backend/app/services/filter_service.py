@@ -21,7 +21,7 @@ from app.schemas.opportunity import (
 )
 from app.services.actionable import (
     actionable_clause,
-    application_day_utc_bounds,
+    new_leads_window_utc,
     application_today,
     expired_clause,
     strict_actionable_clause,
@@ -134,7 +134,7 @@ class FilterService:
             # Matches the "New Today" stat card. Clicking it used to only change
             # the sort order, so the table looked identical and the card seemed
             # broken; it now narrows to exactly what the card counted.
-            day_start, day_end = application_day_utc_bounds()
+            day_start, day_end = new_leads_window_utc()
             stmt = stmt.where(
                 Opportunity.date_scraped >= day_start,
                 Opportunity.date_scraped < day_end,
@@ -429,7 +429,7 @@ class FilterService:
             ).scalar_one()
 
         total = self.db.execute(select(func.count()).select_from(active)).scalar_one()
-        day_start, day_end = application_day_utc_bounds()
+        day_start, day_end = new_leads_window_utc()
         todays = self.db.execute(
             select(func.count()).select_from(active).where(
                 active.c.date_scraped >= day_start,
