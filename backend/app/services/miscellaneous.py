@@ -156,6 +156,8 @@ def for_row(row) -> dict | None:
         return None
     if (getattr(row, "brands", "") or "").strip():
         return None
+    if "Social Business" in (getattr(row, "archetypes", "") or ""):
+        return None
     body = body_for(getattr(row, "summary", ""), getattr(row, "vertical", ""),
                     getattr(row, "eligibility", ""))
     return describe(getattr(row, "title", "") or "", body).as_dict()

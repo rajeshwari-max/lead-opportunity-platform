@@ -170,6 +170,9 @@ class FilterService:
             from app.services.verticals import HUMAN
             stmt = stmt.where(
                 or_(Opportunity.verticals.is_(None), Opportunity.verticals == ""),
+                or_(Opportunity.brands.is_(None), Opportunity.brands == ""),
+                or_(Opportunity.archetypes.is_(None),
+                    ~Opportunity.archetypes.like("%Social Business%")),
                 or_(Opportunity.verticals_source.is_(None), Opportunity.verticals_source != HUMAN),
             )
         elif f.has_vertical and not f.brands:
@@ -179,7 +182,10 @@ class FilterService:
             # they sit outside the CMS taxonomy.
             stmt = stmt.where(or_(
                 Opportunity.verticals.is_not(None) & (Opportunity.verticals != ""),
-                Opportunity.archetypes.is_not(None) & (Opportunity.archetypes != ""),
+                # Devsol by itself is only a parent bucket; without one of its
+                # six verticals it has no usable classification. Social
+                # Business is a complete CMS archetype and is routable alone.
+                Opportunity.archetypes.like("%Social Business%"),
                 Opportunity.brands.is_not(None) & (Opportunity.brands != ""),
             ))
         if f.categories:
@@ -236,7 +242,7 @@ class FilterService:
                 # written to the non-CMS `brands` column by the classifier.
                 # Keep older rows with canonical verticals discoverable too.
                 clauses.append(or_(
-                    Opportunity.archetypes.is_not(None) & (Opportunity.archetypes != ""),
+                    Opportunity.archetypes.like("%Social Business%"),
                     *(Opportunity.verticals.like(f"%{vertical}%") for vertical in VERTICALS),
                 ))
                 continue
@@ -418,7 +424,7 @@ class FilterService:
             return counts
 
         brand_counts = {"CMS": self.db.execute(select(func.count()).select_from(active).where(
-            or_(active.c.archetypes.is_not(None) & (active.c.archetypes != ""),
+            or_(active.c.archetypes.like("%Social Business%"),
                 *(active.c.verticals.like(f"%{v}%") for v in VERTICALS))
         )).scalar_one()}
         for brand in ("Green Foundation", "Vrutti", "Swasti", "Setu", "Upfront", "Community Action Collab"):

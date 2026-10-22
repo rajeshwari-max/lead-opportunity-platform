@@ -215,6 +215,8 @@ def test_team_member_brand_routing_matches_cms_and_other_brand_without_duplicate
         db.add_all([
             Opportunity(unique_id="cms", title="CMS call", archetypes="Devsol",
                         verticals="", brands="", **common),
+            Opportunity(unique_id="social", title="Social enterprise call",
+                        archetypes="Social Business", verticals="", brands="", **common),
             Opportunity(unique_id="vrutti", title="FPO call", archetypes="",
                         verticals="", brands="Vrutti", **common),
             Opportunity(unique_id="both", title="Combined call", archetypes="Devsol",
@@ -228,8 +230,11 @@ def test_team_member_brand_routing_matches_cms_and_other_brand_without_duplicate
         db.add(member)
         db.flush()
         matches = MatchingService(db).matches_for(member)
-        assert {row.unique_id for row in matches} == {"cms", "vrutti", "both"}
-        assert len(matches) == 3
+        # A bare Devsol parent is not a usable CMS classification. It belongs
+        # in Miscellaneous until one of the six Devsol verticals is assigned.
+        # Social Business is a complete CMS archetype and routes on its own.
+        assert {row.unique_id for row in matches} == {"social", "vrutti", "both"}
+        assert len(matches) == 3          # "both" once, not once per brand
         member.brands = "Swasti"
         member.verticals = "Health"
         assert {row.unique_id for row in MatchingService(db).matches_for(member)} == {"both", "other"}

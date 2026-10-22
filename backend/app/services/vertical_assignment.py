@@ -241,6 +241,9 @@ def unclassified_clause():
     return and_(
         actionable_clause(),
         or_(Opportunity.verticals.is_(None), Opportunity.verticals == ""),
+        or_(Opportunity.brands.is_(None), Opportunity.brands == ""),
+        or_(Opportunity.archetypes.is_(None),
+            ~Opportunity.archetypes.like("%Social Business%")),
         or_(Opportunity.verticals_source.is_(None),
             Opportunity.verticals_source != HUMAN),
     )

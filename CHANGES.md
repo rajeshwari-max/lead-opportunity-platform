@@ -5,6 +5,25 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-22 — Miscellaneous and Classified now use one ownership rule
+
+- Fixed the remaining leak where a row containing only the broad `Devsol`
+  parent archetype was treated as classified by the API but labelled
+  Miscellaneous by the dashboard.
+- Classified now means the opportunity has a real Devsol vertical, a named
+  brand, or the independently routable Social Business archetype.
+- The main table, Miscellaneous tab, CMS counts and row labels now follow the
+  same rule.
+- Team routing: a member following CMS no longer receives a lead tagged only
+  with the bare Devsol parent; Social Business leads still reach them. (Codex
+  left `test_team_member_brand_routing…` contradicting itself — expecting 2
+  matches and then 3 — fixed on review, with a Social Business row added.)
+
+Tests: full backend suite 1292 passed, 3 skipped; frontend
+`tests/opportunity-loading.mjs` passes; `tsc` clean.
+
+---
+
 ## 2026-10-22 — Restore Social Business across the dashboard
 
 - Restored **Social Business** under CMS as an archetype alongside Devsol.

@@ -212,6 +212,36 @@ def test_the_main_table_still_hides_unclassified_rows_by_default(db):
     assert got.total == 0, "unclassified rows must not reach the Active table"
 
 
+def test_devsol_parent_alone_is_miscellaneous_but_social_business_is_classified(db):
+    """Devsol needs a real child vertical; Social Business is independently
+    routable. The list filter and the row label must use the same definition."""
+    from app.database.models import Opportunity
+    from app.schemas.opportunity import OpportunityFilters
+    from app.services.filter_service import FilterService
+
+    row = db.get(Opportunity, 1)
+    row.archetypes = "Devsol"
+    db.flush()
+    service = FilterService(db)
+
+    assert service.query(OpportunityFilters()).total == 0
+    miscellaneous = service.query(OpportunityFilters(
+        has_vertical=False, unclassified_only=True,
+    ))
+    assert 1 in {item.id for item in miscellaneous.items}
+    assert next(item for item in miscellaneous.items if item.id == 1).miscellaneous
+
+    row.archetypes = "Social Business"
+    db.flush()
+    classified = service.query(OpportunityFilters())
+    assert {item.id for item in classified.items} == {1}
+    assert classified.items[0].miscellaneous is None
+    miscellaneous = service.query(OpportunityFilters(
+        has_vertical=False, unclassified_only=True,
+    ))
+    assert 1 not in {item.id for item in miscellaneous.items}
+
+
 def test_the_flag_can_now_actually_be_turned_off(db):
     """It was `if True:` — documented as an option and ignored. A caller
     passing has_vertical=false got the same rows as one passing true, and the
