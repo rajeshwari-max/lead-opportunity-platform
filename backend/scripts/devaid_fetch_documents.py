@@ -97,6 +97,46 @@ def save(lead: dict, item) -> str:
     return "documents" if docs else "none"
 
 
+def save_debug(page, scraper, leads: list[dict]) -> None:
+    """Write the rendered page and every JSON response for a few leads, so the
+    page structure can be inspected when summaries or files are not found.
+    Contains only opportunity content — no cookies or session data."""
+    import re as _re
+
+    out = Path(__file__).resolve().parents[1] / "logs" / "devaid_debug"
+    out.mkdir(parents=True, exist_ok=True)
+    for lead in leads:
+        oid = (_re.search(r"/view/(\d+)", lead["url"]) or [None, "x"])[1]
+        captured: list[dict] = []
+
+        def keep(resp, oid=oid, captured=captured):
+            try:
+                if "json" in (resp.headers or {}).get("content-type", "").lower() \
+                        and "/api/" in resp.url:
+                    captured.append({"url": resp.url, "status": resp.status,
+                                     "body": resp.json()})
+            except Exception:
+                pass
+
+        page.on("response", keep)
+        try:
+            response = page.goto(lead["url"], timeout=90_000, wait_until="domcontentloaded")
+            if response is not None and response.status in (403, 503):
+                scraper._wait_out_challenge(page, "debug", 45_000)
+            scraper._wait_for_detail(page, lead["title"])
+            page.wait_for_timeout(3_000)
+            (out / f"{oid}.html").write_text(page.content(), encoding="utf-8")
+            (out / f"{oid}.json").write_text(
+                json.dumps(captured, ensure_ascii=False, indent=1)[:5_000_000],
+                encoding="utf-8")
+            print(f"debug: saved logs/devaid_debug/{oid}.html and {oid}.json "
+                  f"({len(captured)} JSON responses; title {page.title()!r})")
+        except Exception as exc:
+            print(f"debug: {oid} failed: {type(exc).__name__}: {exc}")
+        finally:
+            page.remove_listener("response", keep)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--all", action="store_true", help="include closed/expired leads")
@@ -107,6 +147,9 @@ def main() -> int:
     ap.add_argument("--until", default="21:45",
                     help="India time to stop by, HH:MM (blank = no limit)")
     ap.add_argument("--dry-run", action="store_true", help="count only; no browser")
+    ap.add_argument("--debug", type=int, default=0,
+                    help="save what the browser sees for the first N leads "
+                         "(page HTML + the site's JSON) to logs/devaid_debug/")
     a = ap.parse_args()
 
     leads = select_leads(a.all, a.retry_empty, a.limit)
@@ -154,6 +197,8 @@ def main() -> int:
                           f"({evidence}). Sign in again, then re-run.")
                     return 1
                 print(f"Signed-in check: {state} ({evidence})")
+                if a.debug:
+                    save_debug(page, scraper, leads[:a.debug])
 
                 for n, lead in enumerate(leads, 1):
                     if stop_at and datetime.now(IST) >= stop_at:
