@@ -219,7 +219,8 @@ export interface WrikeFolder {
   title: string;
 }
 
-/** Canonical six-vertical system — these strings must match backend
+/** Canonical CMS classification choices — six Devsol verticals plus the
+ *  Social Business archetype. These strings must match backend
  *  services/verticals.py EXACTLY. The backend drops any vertical it doesn't
  *  recognise, so a mismatch here silently turns a vertical-filtered scrape
  *  into an unfiltered one (previously "E4C" and "Climate/Sustainability" were

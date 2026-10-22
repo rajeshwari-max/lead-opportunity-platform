@@ -32,11 +32,6 @@ export function BrandFilters({ selectedVerticals, selectedBrands, availableBrand
 }) {
   const selectedCount = selectedVerticals.length + selectedBrands.length;
   const otherBrands = availableBrands.filter(brand => brand !== 'CMS');
-  useEffect(() => {
-    if (selectedVerticals.includes('Social Business')) {
-      onVerticalChange(selectedVerticals.filter(v => v !== 'Social Business'));
-    }
-  }, [selectedVerticals, onVerticalChange]);
   return <section className="ud-brand-tree" aria-label="Brands">
     <div className="flex items-center justify-between"><h3>Brands</h3>{selectedCount > 0 &&
       <button type="button" onClick={onClear} className="text-xs underline">Clear</button>}</div>
@@ -47,6 +42,7 @@ export function BrandFilters({ selectedVerticals, selectedBrands, availableBrand
           <Selection label="All Devsol" values={DEVSOL} selected={selectedVerticals} onChange={onVerticalChange} />
           {DEVSOL.map(v => <Selection key={v} label={v} values={[v]} selected={selectedVerticals} onChange={onVerticalChange} />)}
         </div></details>
+        <Selection label="Social Business" values={['Social Business']} selected={selectedVerticals} onChange={onVerticalChange} />
       </div></details>
       <Selection label="Select all below" values={availableBrands} selected={selectedBrands} onChange={onBrandChange} />
       {otherBrands.map(brand => <Selection key={brand} label={brand} values={[brand]}

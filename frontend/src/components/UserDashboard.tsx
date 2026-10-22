@@ -40,7 +40,7 @@ const count = (n: number) => n.toLocaleString("en-IN");
 // CMS verticals only. `vertical` is the SOURCE's own sector (e.g. "Gender & Human
 // Rights"); falling back to it showed that as "CMS / Devsol / ..." in the brief.
 const CMS_VERTICALS: readonly string[] = VERTICALS;
-const tags = (o: Opportunity) => (o.verticals || (CMS_VERTICALS.includes(o.vertical) ? o.vertical : "")).split(",").map(v => v.trim()).filter(v => !!v && v !== "Social Business");
+const tags = (o: Opportunity) => (o.verticals || (CMS_VERTICALS.includes(o.vertical) ? o.vertical : "")).split(",").map(v => v.trim()).filter(Boolean);
 const sourceSector = (o: Opportunity) => (o.vertical && !CMS_VERTICALS.includes(o.vertical) ? o.vertical : "");
 const brandTags = (o: Opportunity) => (o.brands || "").split(",").map(v => v.trim()).filter(Boolean);
 const shortVertical = (s: string) => s.replace(/\(.*\)/, "").trim();

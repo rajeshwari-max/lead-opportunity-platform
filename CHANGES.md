@@ -5,6 +5,16 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-22 — Restore Social Business across the dashboard
+
+- Restored **Social Business** under CMS as an archetype alongside Devsol.
+- It is available in the user filter tree, CMS classification chart,
+  opportunity tags and lead-team-member routing preferences.
+- Removed the frontend rule that silently cleared Social Business whenever it
+  was selected. Existing backend classification and stored data are unchanged.
+
+---
+
 ## 2026-10-21 — Keep Miscellaneous separate and hide internal threshold ratios
 
 - The user dashboard's **Opportunities** tab now always requests classified

@@ -382,6 +382,20 @@ export function TeamPanel({ readOnly = false }: { readOnly?: boolean }) {
                   );
                 })}
               </div>
+              <p className="pt-1 text-[11px] font-semibold text-muted-foreground">CMS archetype</p>
+              <div className="flex flex-wrap gap-1.5">
+                {(() => {
+                  const socialBusiness = "Social Business";
+                  const on = form.verticals.includes(socialBusiness);
+                  return <button type="button" onClick={() => toggleVertical(socialBusiness)}
+                    aria-pressed={on}
+                    className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                      on ? "border-accent bg-accent/20 text-accent"
+                         : "border-border text-muted-foreground hover:bg-muted"}`}>
+                    {socialBusiness}
+                  </button>;
+                })()}
+              </div>
               {/* Geography. Roughly a third of the database is US / UK /
                   Australia / Austria / Canada listings against India at 1.8%,
                   and until now the digest had no way to know where anyone
