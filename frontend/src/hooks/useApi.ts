@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, filterParams } from "@/lib/api";
 import type { Facets, FilterState, Paginated, Progress, SourceInfo, Stats } from "@/lib/types";
 
 /** Debounced, filter-driven opportunity list (server-side filtering — never re-scrapes). */
@@ -7,20 +7,25 @@ export function useOpportunities(filters: FilterState, refreshKey: number) {
   const [data, setData] = useState<Paginated | null>(null);
   const [loading, setLoading] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>();
+  // Depend on the actual request, not an object recreated by a parent render.
+  const queryKey = filterParams(filters).toString();
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     clearTimeout(timer.current);
     timer.current = setTimeout(() => {
       api
-        .opportunities(filters)
+        .opportunities(filtersRef.current, controller.signal)
         .then((result) => { if (!cancelled) setData(result); })
         .catch((error) => { if (!cancelled) { setData(null); console.error(error); } })
         .finally(() => { if (!cancelled) setLoading(false); });
     }, 200); // debounce keystrokes in the search box
-    return () => { cancelled = true; clearTimeout(timer.current); };
-  }, [filters, refreshKey]);
+    return () => { cancelled = true; clearTimeout(timer.current); controller.abort(); };
+  }, [queryKey, refreshKey]);
 
   return { data, loading };
 }

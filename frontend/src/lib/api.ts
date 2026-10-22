@@ -47,8 +47,8 @@ function unclassifiedParams(q: UnclassifiedQuery): URLSearchParams {
   return p;
 }
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { signal });
   if (!res.ok) {
     // Prefer the server's own explanation ("Wrike rejected the saved sign-in")
     // over the bare status line ("502 Bad Gateway").
@@ -107,7 +107,7 @@ export const api = {
     }
     return res.json() as Promise<WrikeTaskLink>;
   },
-  opportunities: (f: FilterState) => get<Paginated>(`/opportunities?${filterParams(f)}`),
+  opportunities: (f: FilterState, signal?: AbortSignal) => get<Paginated>(`/opportunities?${filterParams(f)}`, signal),
   facets: (f?: FilterState) =>
     get<Facets>(f ? `/filters?${filterParams(f)}` : "/filters"),
   config: () => get<{

@@ -1,5 +1,5 @@
 import { DashboardLeads } from "@/components/DashboardLeads";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChartsRow } from "@/components/ChartsRow";
 import { ExpertsCard } from "@/components/ExpertsCard";
 import { SiteLoginsCard } from "@/components/SiteLoginsCard";
@@ -136,9 +136,9 @@ export default function App() {
   // from an older visit must never let unclassified/Miscellaneous rows leak
   // back into the main Opportunities tab.  Keep the stored preferences intact
   // for the admin dashboard, but make the user-view query contract explicit.
-  const dashboardFilters = userView && !filters.unclassified_only
+  const dashboardFilters = useMemo(() => userView && !filters.unclassified_only
     ? { ...filters, has_vertical: true }
-    : filters;
+    : filters, [userView, filters]);
 
   const { data, loading } = useOpportunities(dashboardFilters, refreshKey);
   const { stats, statsLoading, facets, sources } = useDashboardData(dashboardFilters, refreshKey);
