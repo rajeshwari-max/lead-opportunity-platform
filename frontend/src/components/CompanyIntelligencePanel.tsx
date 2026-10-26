@@ -107,6 +107,11 @@ export function CompanyIntelligencePanel({ readOnly = false }: { readOnly?: bool
           <p className="text-muted-foreground">
             These facts drive eligibility and company-fit recommendations. Enter one item per line.
           </p>
+          <p className="text-muted-foreground">
+            Use Catalyst’s Big Bets to review focus areas, capabilities, project types and beneficiaries.
+            Strategic fit contributes to the overall recommendation score using the weights below.
+            A strategic match does not establish legal eligibility or change the trained classification model.
+          </p>
           <label className="block font-medium">Company name
             <input className="mt-1 w-full rounded-md border bg-background px-2 py-1.5" value={profile.company_name}
               disabled={readOnly || busy} onChange={event => setProfile({ ...profile, company_name: event.target.value })} />

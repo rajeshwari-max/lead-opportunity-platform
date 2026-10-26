@@ -1,3 +1,4 @@
+import { WrikeWorkflow } from "./WrikeWorkflow";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import type { WrikeAssignee, WrikeFolder, WrikeStatus, WrikeTaskLink } from "../lib/types";
@@ -103,6 +104,7 @@ export function WrikeTaskAction({ opportunityId, opportunityTitle, readOnly, onC
       {/Reconnect Wrike/i.test(error) && <> <a href="/api/wrike/connect">Reconnect Wrike now</a></>}</p>}
     {link?.status === "created" && <>
       <p className="ud-sub">One shared Wrike task has been created for this opportunity.</p>
+      <WrikeWorkflow key={opportunityId} opportunityId={opportunityId}/>
       {link.permalink && <a className="ud-primary-button" href={link.permalink} target="_blank" rel="noopener noreferrer">Open task in Wrike ↗</a>}
       {link.assignment_warning && <p role="alert" className="ud-wrike-error">Check the task in Wrike: one or more assignees may not have been added.</p>}
     </>}

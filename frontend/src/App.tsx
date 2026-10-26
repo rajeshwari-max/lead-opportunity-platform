@@ -1,4 +1,4 @@
-import { DashboardLeads } from "@/components/DashboardLeads";
+import { LeadTools } from "@/components/LeadTools";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChartsRow } from "@/components/ChartsRow";
 import { ExpertsCard } from "@/components/ExpertsCard";
@@ -164,12 +164,11 @@ export default function App() {
   return (
     <div className="min-h-screen">
       <Header filters={filters} onChange={setFilters} onRefresh={resetAndRefresh} stats={stats}
-              userMenu={<div className="flex items-center gap-3"><a href="#my-leads" className="whitespace-nowrap rounded-md border border-border px-3 py-2 text-xs font-medium">My leads & team activity</a>{workspaceEnabled && <a href={viewUrl("workspace")} className="whitespace-nowrap rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-accent">My workspace</a>}<a href={viewUrl("user")} className="whitespace-nowrap rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-accent">User dashboard</a><UserMenu name={user.name} email={user.email} isAdmin={isAdmin}
+              userMenu={<div className="flex flex-wrap items-center gap-3"><LeadTools isAdmin={isAdmin} name={user.name} readOnly={readOnly} />{workspaceEnabled && <a href={viewUrl("workspace")} className="whitespace-nowrap rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-accent">My workspace</a>}<a href={viewUrl("user")} className="whitespace-nowrap rounded-md border border-border px-3 py-2 text-xs font-medium hover:bg-accent">User dashboard</a><UserMenu name={user.name} email={user.email} isAdmin={isAdmin}
                                   authRequired={user.authRequired} /></div>} />
 
       <main className="mx-auto flex max-w-[1600px] flex-col gap-6 p-4 sm:p-6">
         <p role="status">{preferencesError}</p>
-        <DashboardLeads isAdmin={isAdmin} name={user.name} />
         <StatCards stats={stats} loading={statsLoading} filters={filters} onChange={setFilters} />
         <ChartsRow stats={stats} loading={statsLoading} filters={filters} onChange={setFilters} />
 

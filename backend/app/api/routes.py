@@ -303,7 +303,7 @@ border-radius:12px;padding:32px;">
 
 
 @router.get("/keywords")
-def get_keywords() -> dict:
+def get_keywords(db: Session = Depends(get_db)) -> dict:
     """The BD team's own search vocabulary, for the dashboard search box.
 
     Grouped the way the team thinks about it (Health, Waste, Funding, Leads…)
@@ -311,8 +311,19 @@ def get_keywords() -> dict:
     type when hunting, not a taxonomy.
     """
     from app.services.keyword_inventory import ALL_SEARCH_TERMS, KEYWORD_INVENTORY
-
-    return {"groups": KEYWORD_INVENTORY, "all": ALL_SEARCH_TERMS}
+    from app.database.models import DirectoryEntry
+    entries = db.scalars(select(DirectoryEntry).where(DirectoryEntry.kind == "keyword")).all()
+    retired = {r.name.casefold() for r in entries if r.status != "active"}
+    groups = {name: [term for term in terms if term.casefold() not in retired]
+              for name, terms in KEYWORD_INVENTORY.items()}
+    for row in entries:
+        if row.status == "active":
+            groups.setdefault(row.scope, []).append(row.name)
+    terms = set(term for group in groups.values() for term in group)
+    if not entries:
+        terms.update(ALL_SEARCH_TERMS)
+    return {"groups": {key: sorted(set(value), key=str.casefold) for key, value in groups.items()},
+            "all": sorted(terms, key=str.casefold)}
 
 
 @router.get("/filters")

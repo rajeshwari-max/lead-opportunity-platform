@@ -1,4 +1,6 @@
+import { AddLeadButton } from "./LeadTools";
 import { OpportunityDocument } from "./OpportunityDocument";
+import { AwardBenefit } from "./LeadIntake";
 import { SaveLeadButton, ReviewLeadButton, recordLeadActivity } from "./DashboardLeads";
 import {
   createColumnHelper,
@@ -60,7 +62,7 @@ interface Props {
   workspaceViewUrl?: string;
 }
 
-export function OpportunitiesTable({ data, loading, filters, onChange, facets, workspaceViewUrl }: Props) {
+export function OpportunitiesTable({ data, loading, filters, onChange, facets, readOnly = false, workspaceViewUrl }: Props) {
   const workspaceOpportunityUrl = (id: number) => {
     const url = new URL(workspaceViewUrl || "?view=workspace", window.location.href);
     url.searchParams.set("opportunity", String(id));
@@ -419,6 +421,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, w
           )}
         </CardTitle>
         <div className="flex flex-wrap items-center gap-1.5">
+          <AddLeadButton readOnly={readOnly} />
           {/* Source and Type filter right above the table, where the eye already
               is. The sidebar carries the same two filters and stays in sync —
               both write the same FilterState, so picking a source here ticks
@@ -552,7 +555,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, w
                             />
                             <div className="min-w-0 flex-1">
                               {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                              <div className="mt-2"><SaveLeadButton id={o.id} /><OpportunityDocument opportunity={o} /></div>
+                              <div className="mt-2"><SaveLeadButton id={o.id} /><OpportunityDocument opportunity={o} />{o.category === "Award" && <AwardBenefit key={o.id} opportunityId={o.id} isAdmin readOnly={readOnly}/>}</div>
                             </div>
                           </div>
                         ) : (

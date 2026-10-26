@@ -61,6 +61,30 @@ def get_folder(db: Session, folder_id: str) -> dict:
     return folder
 
 
+def workflow_state(db: Session, task_id: str) -> dict:
+    """Read Wrike's own workflow labels, never translate local journey stages."""
+    if not re.fullmatch(r"[A-Za-z0-9_:.-]{1,128}", task_id):
+        raise WrikeConnectionError("Invalid Wrike task ID")
+    rows = _wrike_get(db, f"/tasks/{quote(task_id, safe='')}").get("data")
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict) or rows[0].get("id") != task_id:
+        raise WrikeConnectionError("The linked Wrike task is unavailable")
+    task = rows[0]
+    status_id = task.get("customStatusId", "")
+    workflows = _wrike_get(db, "/workflows").get("data")
+    if not isinstance(workflows, list):
+        raise WrikeConnectionError("Wrike returned an invalid workflow list")
+    for workflow in workflows:
+        if not isinstance(workflow, dict):
+            continue
+        for status in workflow.get("customStatuses", []):
+            if isinstance(status, dict) and status.get("id") == status_id and status_id:
+                return {"task_id": task_id, "status_id": status_id, "status_name": status.get("name", ""),
+                        "status_group": status.get("group", task.get("status", "")),
+                        "workflow_name": workflow.get("name", ""), "resolved": True}
+    return {"task_id": task_id, "status_id": status_id, "status_name": "",
+            "status_group": task.get("status", ""), "workflow_name": "", "resolved": False}
+
+
 def contact_ids_by_email(db: Session, emails: list[str]) -> dict[str, set[str]]:
     """Only exact, active Person matches; an ambiguous email is not usable."""
     result: dict[str, set[str]] = {email.strip().lower(): set() for email in emails}

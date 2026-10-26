@@ -1,6 +1,6 @@
 """Account-owned saved leads inside the dashboard; explicit admin oversight."""
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -10,9 +10,141 @@ from sqlalchemy.orm import Session
 from app.api import workspace as storage
 from app.api.accounts import administrator
 from app.database.db import get_db
-from app.database.models import ApplicationJourney, TeamMember, DashboardPreferences, LeadActivity, Opportunity
+from app.database.models import (ApplicationJourney, TeamMember, DashboardPreferences,
+    LeadActivity, Opportunity, Category, Status, LeadMetadata, DirectoryEntry,
+    JourneyEvent, ExperienceEvent)
 
 router = APIRouter(prefix="/my-leads", dependencies=[Depends(storage.private_cache)])
+
+
+class ManualLeadInput(storage.Input):
+    title: str = Field(min_length=3, max_length=1000)
+    organization: str = Field(default="", max_length=512)
+    opportunity_url: str = Field(default="", max_length=2048)
+    category: Category = Category.OTHER
+    summary: str = Field(default="", max_length=20000)
+    country: str = Field(default="", max_length=128)
+    location: str = Field(default="", max_length=512)
+    eligibility: str = Field(default="", max_length=10000)
+    funding_amount: str = Field(default="", max_length=256)
+    deadline: date | None = None
+    rolling: bool = False
+    next_action: str = Field(default="", max_length=2000)
+    next_action_date: date | None = None
+    resource_organisation_id: int | None = Field(default=None, gt=0)
+    award_type: Literal["unknown", "monetary", "recognition", "both"] = "unknown"
+    award_evidence: str = Field(default="", max_length=10000)
+
+
+@router.post("/manual", status_code=201)
+def manual_lead(body: ManualLeadInput, owner=Depends(storage.personal), db: Session=Depends(get_db)):
+    from pydantic import HttpUrl, TypeAdapter, ValidationError
+    from app.services.deduplication import make_unique_id
+    from app.services.ml_hierarchy import classify_hierarchy
+    from app.services.actionable import application_today
+    from sqlalchemy.exc import IntegrityError
+    title = body.title.strip()
+    if len(title) < 3:
+        raise HTTPException(422, "Enter a lead title")
+    if body.rolling and body.deadline:
+        raise HTTPException(422, "Choose either a deadline or rolling applications")
+    url = body.opportunity_url.strip()
+    if url:
+        try:
+            url = str(TypeAdapter(HttpUrl).validate_python(url))
+        except ValidationError:
+            raise HTTPException(422, "Enter a valid HTTP or HTTPS source URL")
+    if body.award_type != "unknown" and body.category != Category.AWARD:
+        raise HTTPException(422, "Award benefit applies only to Award leads")
+    if body.award_type != "unknown" and not body.award_evidence.strip():
+        raise HTTPException(422, "Record evidence for the award benefit")
+    if body.resource_organisation_id:
+        resource = db.get(DirectoryEntry, body.resource_organisation_id)
+        if not resource or resource.kind != "organisation" or resource.role != "resource" or resource.status != "active":
+            raise HTTPException(422, "Choose an active resource organisation")
+    uid = make_unique_id(title, body.organization, body.deadline, url)
+    opportunity = db.scalar(select(Opportunity).where(Opportunity.unique_id == uid))
+    reused = opportunity is not None
+    if not opportunity:
+        prediction = classify_hierarchy(title, body.summary, body.eligibility,
+            body.organization, body.location, body.country, category_hint=body.category)
+        opportunity = Opportunity(unique_id=uid, title=title, organization=body.organization.strip(),
+            opportunity_url=url, source_website="Manual entry", summary=body.summary,
+            country=body.country, location=body.location, eligibility=body.eligibility,
+            funding_amount=body.funding_amount, category=body.category, deadline=body.deadline,
+            deadline_state="dated" if body.deadline else "rolling" if body.rolling else "unknown",
+            deadline_raw=body.deadline.isoformat() if body.deadline else "Rolling" if body.rolling else "",
+            deadline_confidence="human", status=Status.EXPIRED if body.deadline and body.deadline < application_today() else Status.ACTIVE,
+            verticals=", ".join(prediction.verticals), brands=", ".join(prediction.brands),
+            archetypes=", ".join(prediction.archetypes), classification_status=prediction.status,
+            classification_source=prediction.source, classification_version=prediction.version,
+            classification_evidence=prediction.evidence_json())
+        db.add(opportunity)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            opportunity = db.scalar(select(Opportunity).where(Opportunity.unique_id == uid))
+            if opportunity is None:
+                raise
+            reused = True
+    row = db.scalar(select(ApplicationJourney).where(ApplicationJourney.owner == owner, ApplicationJourney.opportunity_id == opportunity.id))
+    if not row:
+        row = ApplicationJourney(owner=owner, opportunity_id=opportunity.id,
+            next_action=body.next_action, next_action_date=body.next_action_date)
+        db.add(row)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "This lead was just saved. Refresh My leads.")
+        db.add(JourneyEvent(journey_id=row.id, stage="Saved", note="Added manually" if not reused else "Saved existing catalogue lead"))
+    row.saved = True
+    if not reused:
+        db.add(LeadMetadata(opportunity_id=opportunity.id, entered_by=owner,
+            award_type=body.award_type, award_evidence=body.award_evidence,
+            resource_organisation_id=body.resource_organisation_id))
+        db.add(ExperienceEvent(opportunity_id=opportunity.id, event_type="manual_entry", actor=owner))
+    db.commit()
+    return {**storage.journey_data(row, db), "reused_existing": reused}
+
+
+@router.get("/due")
+def due_leads(owner=Depends(storage.personal), db: Session=Depends(get_db)):
+    from app.services.actionable import application_today
+    return [storage.journey_data(r, db) for r in db.scalars(select(ApplicationJourney).where(
+        ApplicationJourney.owner == owner, ApplicationJourney.saved.is_(True),
+        ApplicationJourney.next_action_date <= application_today()).order_by(ApplicationJourney.next_action_date))]
+
+
+class AwardInput(storage.Input):
+    award_type: Literal["unknown", "monetary", "recognition", "both"]
+    award_evidence: str = Field(default="", max_length=10000)
+
+
+@router.get("/awards/{opportunity_id}")
+def award_details(opportunity_id: int, owner=Depends(storage.personal), db: Session=Depends(get_db)):
+    if not db.get(Opportunity, opportunity_id):
+        raise HTTPException(404, "Opportunity not found")
+    row = db.get(LeadMetadata, opportunity_id)
+    return {"award_type": row.award_type if row else "unknown", "award_evidence": row.award_evidence if row else ""}
+
+
+@router.put("/awards/{opportunity_id}")
+def update_award(opportunity_id: int, body: AwardInput, identity=Depends(administrator), db: Session=Depends(get_db)):
+    opportunity = db.get(Opportunity, opportunity_id)
+    if not opportunity:
+        raise HTTPException(404, "Opportunity not found")
+    if opportunity.category != Category.AWARD:
+        raise HTTPException(422, "Only Award opportunities have an award benefit")
+    if body.award_type != "unknown" and not body.award_evidence.strip():
+        raise HTTPException(422, "Record evidence for the award benefit")
+    row = db.get(LeadMetadata, opportunity_id) or LeadMetadata(opportunity_id=opportunity_id)
+    row.award_type, row.award_evidence = body.award_type, body.award_evidence.strip()
+    db.add(row)
+    db.add(ExperienceEvent(opportunity_id=opportunity_id, event_type="award_review", actor=identity.get("email", ""), payload=json.dumps(body.model_dump())))
+    db.commit()
+    return body.model_dump()
 
 class ActivityInput(BaseModel):
     opportunity_id: int = Field(gt=0)

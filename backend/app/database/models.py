@@ -14,6 +14,66 @@ class Base(DeclarativeBase):
     pass
 
 
+class DirectoryEntry(Base):
+    """Editable operational catalog; registered crawlers remain code-owned."""
+    __tablename__ = "directory_entries"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(24), index=True)
+    key: Mapped[str] = mapped_column(String(512))
+    name: Mapped[str] = mapped_column(String(256))
+    scope: Mapped[str] = mapped_column(String(256), default="")
+    url: Mapped[str] = mapped_column(String(2048), default="")
+    institution: Mapped[str] = mapped_column(String(256), default="")
+    location: Mapped[str] = mapped_column(String(256), default="")
+    role: Mapped[str] = mapped_column(String(32), default="")
+    status: Mapped[str] = mapped_column(String(24), default="active")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    review_date: Mapped[date | None] = mapped_column(Date, index=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_by: Mapped[str] = mapped_column(String(320), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    __table_args__ = (UniqueConstraint("kind", "key"),)
+
+
+class DirectorySeed(Base):
+    """Remember one-time imports, so a renamed term is not resurrected."""
+    __tablename__ = "directory_seeds"
+    kind: Mapped[str] = mapped_column(String(24), primary_key=True)
+    initialized_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class DirectoryEvent(Base):
+    __tablename__ = "directory_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entry_id: Mapped[int] = mapped_column(index=True)
+    action: Mapped[str] = mapped_column(String(32))
+    note: Mapped[str] = mapped_column(Text, default="")
+    actor: Mapped[str] = mapped_column(String(320))
+    payload: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class LeadMetadata(Base):
+    """Human-entered provenance and award evidence, separate from scraped text."""
+    __tablename__ = "lead_metadata"
+    opportunity_id: Mapped[int] = mapped_column(primary_key=True)
+    entered_by: Mapped[str] = mapped_column(String(320), default="")
+    award_type: Mapped[str] = mapped_column(String(24), default="unknown")
+    award_evidence: Mapped[str] = mapped_column(Text, default="")
+    resource_organisation_id: Mapped[int | None] = mapped_column(index=True)
+
+
+class WrikeWorkflowSnapshot(Base):
+    __tablename__ = "wrike_workflow_snapshots"
+    opportunity_id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(128))
+    status_id: Mapped[str] = mapped_column(String(128), default="")
+    status_name: Mapped[str] = mapped_column(String(256), default="")
+    status_group: Mapped[str] = mapped_column(String(32), default="")
+    workflow_name: Mapped[str] = mapped_column(String(256), default="")
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class Category(str, enum.Enum):
     GRANT = "Grant"
     RFP = "RFP"

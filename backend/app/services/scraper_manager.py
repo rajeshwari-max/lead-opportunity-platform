@@ -116,6 +116,16 @@ class ScraperManager:
         # cross-process lease has to be taken — see services/run_lock.py for
         # why max_instances=1 is not sufficient.
         scrapers = get_scrapers(sources or None)
+        # Operational pause/drop decisions apply to manual and scheduled runs.
+        # Restore the directory entry before testing a retired source again.
+        from app.services.directories import blocked_sources
+        def directory_blocks():
+            with session_scope() as db:
+                return blocked_sources(db)
+        held = await asyncio.to_thread(directory_blocks)
+        scrapers = [s for s in scrapers if s.name not in held]
+        for key in sorted(held.intersection(sources or held)):
+            self._log(f"Skipping {key} - paused or dropped in website directory")
         # A source marked production_enabled=False must not run in a scheduled
         # all-source scrape.
         #

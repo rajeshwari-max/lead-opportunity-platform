@@ -27,6 +27,10 @@ from app.services.scraper_manager import manager
 async def lifespan(_app: FastAPI):
     setup_logging()
     init_db()
+    from app.database.db import SessionLocal
+    from app.services.directories import seed_directories
+    with SessionLocal() as db:
+        seed_directories(db)
     # Email newly-scraped matches as soon as a scrape finishes. The hook itself
     # checks the dashboard's send_on_scrape switch, so this wiring is permanent
     # and the behaviour is controlled from the UI rather than by commenting out
@@ -169,6 +173,8 @@ if settings.workspace_enabled:
     app.include_router(workspace_router, prefix=settings.api_prefix)
 from app.api.leads import router as leads_router
 app.include_router(leads_router, prefix=settings.api_prefix)
+from app.api.directories import router as directories_router
+app.include_router(directories_router, prefix=settings.api_prefix)
 
 
 from app.api.wrike import router as wrike_router

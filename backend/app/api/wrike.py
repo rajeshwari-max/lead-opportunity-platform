@@ -141,6 +141,33 @@ def wrike_task_for_opportunity(
     return _task_link_data(link)
 
 
+@router.get("/opportunities/{opportunity_id}/workflow")
+def current_workflow(opportunity_id: int, db: Session = Depends(get_db), _member: str = Depends(require_wrike_member)):
+    from datetime import datetime, timezone
+    from app.database.models import WrikeWorkflowSnapshot, ExperienceEvent
+    from app.services.wrike_tasks import workflow_state
+    link = db.scalar(select(WrikeTaskLink).where(WrikeTaskLink.opportunity_id == opportunity_id))
+    if not link or not link.task_id or link.status != "created":
+        raise HTTPException(404, "No linked Wrike task")
+    try:
+        state = workflow_state(db, link.task_id)
+    except WrikeConnectionError as exc:
+        raise HTTPException(502, str(exc))
+    now = datetime.now(timezone.utc)
+    if not settings.read_only:
+        row = db.get(WrikeWorkflowSnapshot, opportunity_id)
+        changed = row is None or row.status_id != state["status_id"] or row.status_name != state["status_name"]
+        row = row or WrikeWorkflowSnapshot(opportunity_id=opportunity_id)
+        for key in ("task_id", "status_id", "status_name", "status_group", "workflow_name"):
+            setattr(row, key, state[key])
+        row.synced_at = now
+        db.add(row)
+        if changed:
+            db.add(ExperienceEvent(opportunity_id=opportunity_id, event_type="wrike_status_sync", actor=_member, payload=json.dumps(state)))
+        db.commit()
+    return {**state, "synced_at": now, "permalink": link.permalink if link.permalink and valid_task_permalink(link.permalink) else None}
+
+
 @router.post("/opportunities/{opportunity_id}/tasks", status_code=201)
 def create_wrike_task_for_opportunity(
     opportunity_id: int,

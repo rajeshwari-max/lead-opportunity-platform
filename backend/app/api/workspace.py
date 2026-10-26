@@ -120,9 +120,18 @@ def opportunity_data(row):
 
 
 def journey_data(row, db):
+    from app.database.models import WrikeTaskLink, WrikeWorkflowSnapshot, LeadMetadata, DirectoryEntry
+    link = db.scalar(select(WrikeTaskLink).where(WrikeTaskLink.opportunity_id == row.opportunity_id, WrikeTaskLink.status == "created"))
+    snapshot = db.get(WrikeWorkflowSnapshot, row.opportunity_id) if link else None
+    metadata = db.get(LeadMetadata, row.opportunity_id)
+    resource = db.get(DirectoryEntry, metadata.resource_organisation_id) if metadata and metadata.resource_organisation_id else None
     return {"id": row.id, "opportunity": opportunity_data(db.get(Opportunity, row.opportunity_id)),
             "stage": row.stage, "notes": row.notes, "factors": json.loads(row.factors),
-            "next_action": row.next_action, "next_action_date": row.next_action_date, "updated_at": row.updated_at}
+            "next_action": row.next_action, "next_action_date": row.next_action_date, "updated_at": row.updated_at,
+            "wrike_task_id": link.task_id if link else None,
+            "resource_organisation": {"id": resource.id, "name": resource.name, "institution": resource.institution, "location": resource.location} if resource else None,
+            "workflow_stage": snapshot.status_name or snapshot.status_group if snapshot else None,
+            "workflow_synced_at": snapshot.synced_at if snapshot else None}
 
 
 @router.get("/journeys")
@@ -173,6 +182,10 @@ class JourneyInput(Input):
 @router.put("/journeys/{journey_id}")
 def update_journey(journey_id: int, body: JourneyInput, owner: str = Depends(personal), db: Session = Depends(get_db)):
     row = owned(db, owner, journey_id)
+    from app.database.models import WrikeTaskLink
+    linked = db.scalar(select(WrikeTaskLink).where(WrikeTaskLink.opportunity_id == row.opportunity_id, WrikeTaskLink.status == "created"))
+    if linked and body.stage != row.stage:
+        raise HTTPException(409, "This lead's workflow is managed in Wrike. Refresh its Wrike status instead.")
     if any(f not in FACTORS for f in body.factors):
         raise HTTPException(422, "Unknown outcome factor")
     changed = row.stage != body.stage

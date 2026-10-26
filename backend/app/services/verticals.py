@@ -276,7 +276,7 @@ _VERTICAL_KEYWORDS: dict[str, list[str]] = {
     ],
 }
 
-def _merge_team_keywords() -> dict[str, list[str]]:
+def _merge_team_keywords(team_keywords=None) -> dict[str, list[str]]:
     """Fold the BD team's spreadsheet keywords into the patterns above.
 
     Added rather than replacing: the hand-written patterns encode word
@@ -311,7 +311,7 @@ def _merge_team_keywords() -> dict[str, list[str]]:
             p for p in patterns
             if not pattern_is_service_line(vertical, p)
         ]
-    for vertical, terms in VERTICAL_KEYWORDS.items():
+    for vertical, terms in (VERTICAL_KEYWORDS if team_keywords is None else team_keywords).items():
         if vertical not in merged:
             continue                       # unknown vertical name — ignore quietly
         for term in terms:
@@ -341,6 +341,13 @@ _COMPILED: dict[str, list[re.Pattern[str]]] = {
     vertical: [re.compile(p, re.IGNORECASE) for p in patterns]
     for vertical, patterns in _merge_team_keywords().items()
 }
+
+
+def reload_team_keywords(terms):
+    """Replace the team inventory atomically; retain curated core regex rules."""
+    global _COMPILED
+    _COMPILED = {v: [re.compile(p, re.IGNORECASE) for p in patterns]
+                 for v, patterns in _merge_team_keywords(terms).items()}
 
 _TITLE_WEIGHT = 3
 _BODY_WEIGHT = 1
