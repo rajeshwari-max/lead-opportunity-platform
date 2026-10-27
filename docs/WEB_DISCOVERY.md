@@ -30,6 +30,7 @@ LOP_BRAVE_SEARCH_API_KEY=replace-with-your-real-key
 LOP_WEB_DISCOVERY_MAX_QUERIES=18
 LOP_WEB_DISCOVERY_RESULTS_PER_QUERY=20
 LOP_WEB_DISCOVERY_FETCH_CONCURRENCY=4
+LOP_WEB_DISCOVERY_INTERVAL_DAYS=3
 LOP_WEB_DISCOVERY_FRESHNESS=pm
 LOP_WEB_DISCOVERY_REQUIRE_DEADLINE=true
 ```
@@ -44,6 +45,20 @@ backend/data/debug/web_discovery_last_run.json
 
 Use `LOP_WEB_DISCOVERY_FRESHNESS=py` for a deliberate one-off initial search of
 the past year. Change it back to `pm` for routine scheduled runs.
+
+## Schedule and monthly allowance
+
+The ordinary website scrapers still run every night. Whole Web Discovery is
+included in that same protected, single-process batch only once every three
+days, and it runs first on an eligible night. Its last automatic attempt is
+saved in `backend/data/schedule.json`, so restarting or deploying the service
+does not reset the three-day clock.
+
+With `LOP_WEB_DISCOVERY_MAX_QUERIES=18`, a 31-day month has at most 11 eligible
+runs: `11 x 18 = 198` Search API requests. This is comfortably below the 1,000
+monthly Search requests covered by Brave's current $5 monthly credit. A manual
+Whole Web Discovery run is additional usage, so reserve it for testing or a
+deliberate one-off search.
 
 ## Configure EC2
 

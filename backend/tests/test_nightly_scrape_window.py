@@ -250,6 +250,55 @@ def test_second_automatic_start_leaves_the_running_status_alone(sched, monkeypat
     assert sched.last_status == "running" and sched.last_run is None
 
 
+def test_web_discovery_is_excluded_until_three_days_have_elapsed(sched, monkeypatch):
+    from app.services import scheduler as mod
+    monkeypatch.setattr(mod.settings, "web_discovery_enabled", True)
+    monkeypatch.setattr(mod.settings, "brave_search_api_key", "test-key")
+    monkeypatch.setattr(mod.settings, "web_discovery_interval_days", 3)
+    sched.web_discovery_last_run = datetime.now()
+
+    class _Idle:
+        state = "idle"
+        progress = {"ordinary": {"status": "completed"}}
+        excluded = None
+
+        async def start(self, *, exclude_sources=None, priority_sources=None):
+            self.excluded = exclude_sources
+
+    fake = _Idle()
+    monkeypatch.setattr(mod, "manager", fake)
+    asyncio.run(sched._scrape_all())
+    assert fake.excluded == {"web_discovery"}
+
+
+def test_web_discovery_is_included_when_three_days_are_due(sched, monkeypatch):
+    from datetime import timedelta, timezone
+    from app.services import scheduler as mod
+    monkeypatch.setattr(mod.settings, "web_discovery_enabled", True)
+    monkeypatch.setattr(mod.settings, "brave_search_api_key", "test-key")
+    monkeypatch.setattr(mod.settings, "web_discovery_interval_days", 3)
+    sched.web_discovery_last_run = (
+        datetime.now(timezone.utc) - timedelta(days=3)
+    ).replace(tzinfo=None)
+
+    class _Idle:
+        state = "idle"
+        progress = {"web_discovery": {"status": "completed"}}
+        excluded = "not-called"
+        priority = None
+
+        async def start(self, *, exclude_sources=None, priority_sources=None):
+            self.excluded = exclude_sources
+            self.priority = priority_sources
+
+    fake = _Idle()
+    monkeypatch.setattr(mod, "manager", fake)
+    asyncio.run(sched._scrape_all())
+    assert fake.excluded is None
+    assert fake.priority == ["web_discovery"]
+    assert sched.web_discovery_last_run is not None
+
+
 def test_a_source_ended_by_the_watchdog_stays_failed(monkeypatch):
     # Rows read before the hang make the evidence look healthy; the final
     # outcome step must not repaint a stalled source as completed.

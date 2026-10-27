@@ -160,6 +160,10 @@ class ScrapeScheduler:
         self.last_run: datetime | None = None
         self.last_status: str | None = None
         self.last_success: datetime | None = None
+        # API searches are billable even if none of their results survive the
+        # opportunity gates, so store the last automatic attempt rather than
+        # only a successful discovery run.
+        self.web_discovery_last_run: datetime | None = None
         self._load_state()
 
     # ------------------------------------------------------------- lifecycle
@@ -250,6 +254,27 @@ class ScrapeScheduler:
         of Chrome processes.
         """
         await self._scrape_all()
+
+    def _web_discovery_due(self, now: datetime | None = None) -> bool:
+        """Whether the metered Whole Web Discovery source may run tonight."""
+        if not (
+            settings.web_discovery_enabled
+            and settings.brave_search_api_key.strip()
+        ):
+            return False
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        if self.web_discovery_last_run is None:
+            return True
+        previous = self.web_discovery_last_run
+        if previous.tzinfo is None:
+            previous = previous.replace(tzinfo=timezone.utc)
+        interval = max(1, int(settings.web_discovery_interval_days))
+        tz = ZoneInfo(settings.scrape_window_timezone)
+        return (
+            current.astimezone(tz).date() - previous.astimezone(tz).date()
+        ).days >= interval
 
     def _install_monthly_source_health_report(self) -> None:
         try:
@@ -445,14 +470,35 @@ class ScrapeScheduler:
                      "(state=%s); its status is left unchanged", manager.state)
             return
         started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        discovery_due = self._web_discovery_due(
+            started_at.replace(tzinfo=timezone.utc)
+        )
+        excluded = None if discovery_due else {"web_discovery"}
         try:
-            await manager.start()
+            await manager.start(
+                exclude_sources=excluded,
+                priority_sources=["web_discovery"] if discovery_due else None,
+            )
         except RuntimeError:
             log.warning("Scheduled scrape skipped — a job is already running")
             self.last_run = started_at
             self.last_status = "skipped"
             self._save_state()
             return
+        if discovery_due:
+            # Record on dispatch, not completion: Brave requests consume the
+            # allowance even when every candidate is later rejected.
+            self.web_discovery_last_run = started_at
+            log.info(
+                "Whole Web Discovery included in tonight's batch; next "
+                "automatic run is eligible in %s day(s)",
+                max(1, int(settings.web_discovery_interval_days)),
+            )
+        else:
+            log.info(
+                "Whole Web Discovery skipped tonight; ordinary website "
+                "scrapers continue on their daily schedule"
+            )
         self.last_run = started_at
         self.last_status = "running"
         self._save_state()
@@ -480,6 +526,10 @@ class ScrapeScheduler:
                         "last_run": self.last_run.isoformat() if self.last_run else None,
                         "last_status": self.last_status,
                         "last_success": self.last_success.isoformat() if self.last_success else None,
+                        "web_discovery_last_run": (
+                            self.web_discovery_last_run.isoformat()
+                            if self.web_discovery_last_run else None
+                        ),
                     },
                     indent=2,
                 ),
@@ -497,6 +547,10 @@ class ScrapeScheduler:
             for attr in ("last_run", "last_success"):
                 raw = data.get(attr)
                 setattr(self, attr, datetime.fromisoformat(raw) if raw else None)
+            raw_discovery = data.get("web_discovery_last_run")
+            self.web_discovery_last_run = (
+                datetime.fromisoformat(raw_discovery) if raw_discovery else None
+            )
             self.last_status = data.get("last_status")
         except (ValueError, TypeError, json.JSONDecodeError):
             log.exception("Could not load persisted schedule state — using defaults")

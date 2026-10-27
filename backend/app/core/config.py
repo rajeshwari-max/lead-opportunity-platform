@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     web_discovery_max_queries: int = 18
     web_discovery_results_per_query: int = 20
     web_discovery_fetch_concurrency: int = 4
+    # Whole-web search is metered separately from ordinary website scraping.
+    # Automatic runs include it only after this many calendar days; all other
+    # registered sources retain their normal daily cadence.
+    web_discovery_interval_days: int = 3
     # Brave freshness code: pd (day), pw (week), pm (31 days), py (year), or a
     # supported custom date range. pm is right for scheduled discovery; use py
     # deliberately for a one-off initial backfill.

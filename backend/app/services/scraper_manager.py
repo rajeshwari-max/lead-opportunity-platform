@@ -102,12 +102,20 @@ class ScraperManager:
 
     # ------------------------------------------------------------- lifecycle
     async def start(
-        self, sources: list[str] | None = None, verticals: list[str] | None = None
+        self, sources: list[str] | None = None, verticals: list[str] | None = None,
+        *, exclude_sources: set[str] | None = None,
+        priority_sources: list[str] | None = None,
     ) -> None:
         async with self._start_lock:
-            await self._start(sources, verticals)
+            await self._start(
+                sources, verticals, exclude_sources=exclude_sources,
+                priority_sources=priority_sources,
+            )
 
-    async def _start(self, sources=None, verticals=None) -> None:
+    async def _start(
+        self, sources=None, verticals=None, *, exclude_sources=None,
+        priority_sources=None,
+    ) -> None:
         if self._task and not self._task.done():
             raise RuntimeError("A scrape job is already running")
 
@@ -116,6 +124,8 @@ class ScraperManager:
         # cross-process lease has to be taken — see services/run_lock.py for
         # why max_instances=1 is not sufficient.
         scrapers = get_scrapers(sources or None)
+        if exclude_sources:
+            scrapers = [s for s in scrapers if s.name not in exclude_sources]
         # Operational pause/drop decisions apply to manual and scheduled runs.
         # Restore the directory entry before testing a retired source again.
         from app.services.directories import blocked_sources
@@ -157,6 +167,21 @@ class ScraperManager:
                 for key, why in sorted(blocked.items()):
                     self._log(f"Skipping {key} — held out of production: "
                               f"{why.splitlines()[0][:160]}")
+            # Metered or otherwise time-sensitive scheduled sources can run
+            # first without turning the request into an operator override.
+            # This preserves all production-disable checks above.
+            priorities = {
+                name: index for index, name in enumerate(priority_sources or [])
+            }
+            if priorities:
+                original_order = {s.name: index for index, s in enumerate(scrapers)}
+                scrapers.sort(
+                    key=lambda s: (
+                        0 if s.name in priorities else 1,
+                        priorities.get(s.name, original_order[s.name]),
+                        original_order[s.name],
+                    )
+                )
         if not scrapers:
             raise RuntimeError(
                 "Every requested source is held out of production. Name one "

@@ -5,6 +5,16 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-10-27 — Whole Web Discovery three-day API budget
+
+- Kept ordinary source scrapers on their existing daily overnight schedule.
+- Whole Web Discovery is now excluded on ordinary nights and included in the
+  same single-process scrape batch only when three days have elapsed.
+- Persisted the last automatic discovery attempt so an application restart
+  cannot reset the interval and spend the Brave allowance twice.
+- Added `LOP_WEB_DISCOVERY_INTERVAL_DAYS` (default `3`). At the existing limit
+  of 18 searches per run this uses at most 198 searches in a 31-day month.
+
 ## 2026-10-22 — Miscellaneous and Classified now use one ownership rule
 
 - Fixed the remaining leak where a row containing only the broad `Devsol`
