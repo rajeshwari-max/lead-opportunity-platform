@@ -5,6 +5,28 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-02 - DevelopmentAid Connect from the EC2 dashboard
+
+- Connect in Site Logins and Expert Pool now opens an authenticated browser
+  viewer on Linux. An admin signs in manually and clicks Done; a verified
+  session is saved to the same dedicated profile used by scraping, with a
+  fresh session-file backup. Windows retains local Chrome login.
+- Each login gets an isolated Xvfb desktop and loopback-only x11vnc process.
+  The API relays binary WebSocket traffic after checking the live admin role,
+  session owner and Origin. No public VNC port or tunnel is required.
+- A maximum 15-minute lifetime, shutdown cleanup, scrape-start reservation,
+  profile lock checks and configured nightly-window checks prevent abandoned
+  browsers from sharing the scraper's profile. Unknown sign-in evidence never
+  becomes a successful connection.
+- One-time server setup and HTTPS nginx WebSocket routing are described in
+  `docs/BROWSER_LOGIN_EC2.md`; packages are installed by
+  `bash deploy/setup-browser-login.sh`. This change is local, not deployed.
+- Validation: targeted backend authorization/lifecycle tests and frontend
+  connection-flow tests; TypeScript and production bundle build. A live EC2
+  browser/account test remains necessary after server setup.
+
+---
+
 ## 2026-11-02 — DevelopmentAid searches for Setu, Community Action Collab and Upfront
 
 - Added the three keyword searches the team built on DevelopmentAid to

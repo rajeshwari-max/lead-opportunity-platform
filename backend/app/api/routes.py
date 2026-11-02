@@ -105,6 +105,14 @@ def require_writable() -> None:
         )
 
 
+def require_login_idle() -> None:
+    from app.services.remote_login import require_profile_free
+    try:
+        require_profile_free()
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.get("/classification/status", dependencies=[Depends(require_admin)])
 def classification_status() -> dict:
     """Expose the active classifier and training provenance to administrators."""
@@ -851,7 +859,7 @@ def devaid_status() -> dict[str, bool]:
     return {"connected": has_profile()}
 
 
-@router.get("/devaid/session/export", dependencies=[Depends(require_admin)])
+@router.get("/devaid/session/export", dependencies=[Depends(require_admin), Depends(require_login_idle)])
 async def devaid_session_export() -> Response:
     """Download this machine's signed-in session as a file.
 
@@ -876,7 +884,7 @@ async def devaid_session_export() -> Response:
     )
 
 
-@router.post("/devaid/session/import", dependencies=[Depends(require_writable), Depends(require_admin)])
+@router.post("/devaid/session/import", dependencies=[Depends(require_writable), Depends(require_admin), Depends(require_login_idle)])
 async def devaid_session_import(payload: dict) -> dict:
     """Install a session exported from a machine that has a screen.
 
@@ -919,7 +927,7 @@ def sessions_status() -> list[dict]:
 
 
 @router.post("/sessions/{source}/connect",
-             dependencies=[Depends(require_writable), Depends(require_admin)])
+             dependencies=[Depends(require_writable), Depends(require_admin), Depends(require_login_idle)])
 async def sessions_connect(source: str) -> dict[str, str]:
     from app.scrapers import site_auth
 
@@ -938,7 +946,7 @@ async def sessions_connect(source: str) -> dict[str, str]:
     return {"status": "connected", "source": source}
 
 
-@router.get("/sessions/{source}/export", dependencies=[Depends(require_admin)])
+@router.get("/sessions/{source}/export", dependencies=[Depends(require_admin), Depends(require_login_idle)])
 async def sessions_export(source: str) -> Response:
     from app.scrapers import site_auth
 
@@ -956,7 +964,7 @@ async def sessions_export(source: str) -> Response:
 
 
 @router.post("/sessions/{source}/import",
-             dependencies=[Depends(require_writable), Depends(require_admin)])
+             dependencies=[Depends(require_writable), Depends(require_admin), Depends(require_login_idle)])
 async def sessions_import(source: str, payload: dict) -> dict[str, int | str]:
     from app.scrapers import site_auth
 
@@ -968,7 +976,7 @@ async def sessions_import(source: str, payload: dict) -> dict[str, int | str]:
 
 
 @router.delete("/sessions/{source}",
-               dependencies=[Depends(require_writable), Depends(require_admin)])
+               dependencies=[Depends(require_writable), Depends(require_admin), Depends(require_login_idle)])
 def sessions_forget(source: str) -> dict[str, str]:
     from app.scrapers import site_auth
 
@@ -989,7 +997,7 @@ async def devaid_probe() -> dict:
     return await asyncio.to_thread(devaid_http.probe)
 
 
-@router.post("/devaid/connect", dependencies=[Depends(require_admin)])
+@router.post("/devaid/connect", dependencies=[Depends(require_admin), Depends(require_login_idle)])
 async def devaid_connect() -> dict[str, str]:
     """Open a visible browser window for the user to log into DevelopmentAid.
 

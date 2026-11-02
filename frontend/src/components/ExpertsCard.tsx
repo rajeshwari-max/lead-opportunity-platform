@@ -3,6 +3,7 @@ import { Download, KeyRound, Loader2, RefreshCw, Upload, UserSearch } from "luci
 import { VerticalBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { connectAccount } from "@/lib/connectAccount";
 
 interface ExpertRow {
   vertical: string;
@@ -98,17 +99,10 @@ export function ExpertsCard({ readOnly = false, isAdmin = true }:
     setConnecting(true);
     setError(null);
     try {
-      const res = await fetch("/api/devaid/connect", { method: "POST" });
-      if (res.ok) {
-        setConnected(true);
-      } else {
-        // A 400 here means the window was closed before the login completed —
-        // report it instead of optimistically flipping to "connected".
-        setConnected(false);
-        setError((await res.json()).detail ?? "Could not open login window");
-      }
-    } catch {
-      setError("Connection failed — is the backend running?");
+      await connectAccount("developmentaid", "/api/devaid/connect");
+      setConnected(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Connection failed.");
     } finally {
       setConnecting(false);
       load();
@@ -150,9 +144,10 @@ export function ExpertsCard({ readOnly = false, isAdmin = true }:
         {!connected && !readOnly && isAdmin && (
           <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5">
             <p className="text-xs text-amber-500">
-              Not connected to DevelopmentAid. Click below — a Chrome window opens.
+              Not connected to DevelopmentAid. Click below to open the login window.
               Sign in fully (email, password and the reCAPTCHA), wait until you can
-              see you're logged in, and only then close the window.
+              see you're logged in, then click Done in the browser tab (or close
+              the Chrome window when connecting locally).
             </p>
             <Button size="sm" variant="outline" disabled={connecting} onClick={connect}>
               {connecting
@@ -173,15 +168,13 @@ export function ExpertsCard({ readOnly = false, isAdmin = true }:
               : <><KeyRound className="h-3.5 w-3.5" /> Reconnect account</>}
           </Button>
         )}
-        {/* Session transfer. On a server the Connect button above cannot work —
-            there is no screen to open a login window on — so the session is
-            carried across from a machine that has one. */}
+        {/* Optional session transfer remains available for other environments. */}
         {!readOnly && isAdmin && (
           <div className="space-y-1.5 rounded-lg border border-border p-2.5">
             <p className="text-xs font-medium">Move this session to another machine</p>
             <p className="text-xs text-muted-foreground">
-              A server can't show a login window. Log in here, download the
-              session, then upload it on the server.
+              On EC2, Connect opens a login tab. You can also transfer a saved
+              session using Download and Upload.
             </p>
             <div className="flex flex-wrap gap-1.5">
               <Button size="sm" variant="outline" onClick={downloadSession}>

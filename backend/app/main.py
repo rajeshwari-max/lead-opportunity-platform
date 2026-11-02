@@ -122,6 +122,8 @@ async def lifespan(_app: FastAPI):
 
     maintenance_task.cancel()
     scheduler.shutdown()
+    from app.services.remote_login import shutdown as close_remote_login
+    await close_remote_login()
 
 
 app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan)
@@ -167,6 +169,8 @@ async def _require_password(request, call_next):
 
 from app.api.accounts import router as accounts_router
 app.include_router(accounts_router, prefix=settings.api_prefix)
+from app.api.remote_login import router as remote_login_router
+app.include_router(remote_login_router, prefix=settings.api_prefix)
 app.include_router(router, prefix=settings.api_prefix)
 from app.api.workspace import router as workspace_router
 if settings.workspace_enabled:

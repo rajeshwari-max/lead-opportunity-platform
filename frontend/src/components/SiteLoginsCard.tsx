@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Download, KeyRound, Loader2, LogOut, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { connectAccount } from "@/lib/connectAccount";
 
 interface SiteSession {
   source: string;
@@ -42,13 +43,10 @@ export function SiteLoginsCard({ isAdmin = true }: { isAdmin?: boolean }) {
     setBusy(s.source);
     setMsg(null);
     try {
-      const r = await fetch(`/api/sessions/${s.source}/connect`, { method: "POST" });
-      const body = await r.json();
-      setMsg(r.ok
-        ? { ok: true, text: `${s.display} connected.` }
-        : { ok: false, text: body.detail ?? "Could not open a login window" });
-    } catch {
-      setMsg({ ok: false, text: "Connection failed — is the backend running?" });
+      await connectAccount(s.source, `/api/sessions/${s.source}/connect`);
+      setMsg({ ok: true, text: `${s.display} connected.` });
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : "Connection failed." });
     } finally {
       setBusy(null);
       load();
@@ -114,7 +112,8 @@ export function SiteLoginsCard({ isAdmin = true }: { isAdmin?: boolean }) {
       <CardContent className="space-y-2">
         <p className="text-xs text-muted-foreground">
           These boards hide most listings from anonymous visitors. Sign in once in
-          the window that opens — the app never sees or stores your password.
+          the window that opens. Enter your password on the site's login page;
+          the platform saves the resulting session for scraping.
         </p>
 
         {sites.map((s) => (
@@ -165,8 +164,8 @@ export function SiteLoginsCard({ isAdmin = true }: { isAdmin?: boolean }) {
           </p>
         )}
         <p className="text-[11px] text-muted-foreground">
-          A server has no screen, so Connect only works on your computer. Sign in
-          there, download the session, then upload it on the server.
+          For DevelopmentAid on EC2, Connect opens a browser tab; sign in and click
+          Done. For other boards, connect locally and transfer the saved session.
         </p>
       </CardContent>
     </Card>

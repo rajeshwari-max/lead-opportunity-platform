@@ -191,6 +191,8 @@ def open_persistent(pw, headless: bool = True):
     returns 403 to Playwright's bundled Chromium (bot detection). Falls back
     to bundled Chromium if Chrome isn't installed.
     """
+    from app.services.remote_login import require_profile_free
+    require_profile_free()
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     common = dict(
         headless=headless,
@@ -528,6 +530,11 @@ def membership_state(page) -> tuple[str, str]:
     except Exception as exc:                                    # noqa: BLE001
         return "unknown", f"the page could not be inspected ({type(exc).__name__})"
 
+    return membership_evidence(info)
+
+
+def membership_evidence(info: dict) -> tuple[str, str]:
+    """Interpret DOM evidence for both sync scrapes and async remote login."""
     if info.get("logout"):
         return "in", f"a log-out control ({info.get('logoutSel') or '?'})"
     if info.get("account"):

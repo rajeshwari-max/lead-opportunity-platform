@@ -116,6 +116,8 @@ class ScraperManager:
         self, sources=None, verticals=None, *, exclude_sources=None,
         priority_sources=None,
     ) -> None:
+        from app.services.remote_login import require_profile_free
+        require_profile_free()
         if self._task and not self._task.done():
             raise RuntimeError("A scrape job is already running")
 
