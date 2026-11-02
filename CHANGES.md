@@ -5,6 +5,26 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-02 - Match Connect's Chrome launch to the working TigerVNC method
+
+- The human login browser now starts with the ordinary `google-chrome`
+  command, the dedicated profile and `--no-first-run`, matching the command
+  recorded in the earlier VNC instructions. Playwright no longer launches or
+  controls that interactive browser. The existing authenticated viewer stays.
+- Done closes native Chrome before a separate, bounded verification process
+  opens the profile. Verification explicitly ignores stale uploaded sessions
+  and personal Chrome overrides. Positive membership evidence saves a fresh
+  session backup and connected marker; a blocked or unclear check keeps the
+  profile and reports unverified instead of pretending that login succeeded.
+- Cancellation, expiry and shutdown clean up the owned Chrome and verification
+  process groups before removing the virtual display. Profile reservation,
+  admin/owner checks and loopback-only VNC remain in force.
+- Local regression coverage tests the native command, close-before-verify
+  ordering, cancellation, old-session exclusion and verified-only saving.
+  The real EC2 login still needs testing after this backend change is deployed.
+
+---
+
 ## 2026-11-02 - DevelopmentAid Connect from the EC2 dashboard
 
 - Connect in Site Logins and Expert Pool now opens an authenticated browser

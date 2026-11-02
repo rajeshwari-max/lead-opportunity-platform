@@ -119,6 +119,10 @@ def test_websocket_relays_binary_and_releases_single_viewer(client, monkeypatch)
                                   headers={"origin": "http://testserver"}) as ws:
         ws.send_bytes(b"RFB-test-binary\x00\xff")
         assert ws.receive_bytes() == b"RFB-test-binary\x00\xff"
+        # Wait for the server's close acknowledgement before TestClient tears
+        # down its portal, rather than cancelling relay cleanup mid-flight.
+        ws.close()
+        assert ws.receive()["type"] == "websocket.close"
     assert not s.attached
 
 
@@ -179,58 +183,118 @@ def test_hard_deadline_cancels_worker_and_runs_cleanup(monkeypatch):
     assert s.state == "expired" and cleaned == [True]
 
 
-@pytest.mark.parametrize("signed_in,expected", [(True, "connected"), (False, "unverified")])
-def test_session_saved_only_after_positive_evidence_and_chrome_closed(monkeypatch, tmp_path, signed_in, expected):
+@pytest.mark.parametrize("result,action,expected", [(0, "finish", "connected"),
+    (3, "finish", "unverified"), (0, "cancel", "cancelled")])
+def test_native_login_closes_chrome_before_separate_verification(monkeypatch, tmp_path, result, action, expected):
     events = []
     class Process:
         returncode = None
         stdout = None
-        def __init__(self):
+        def __init__(self, name):
+            self.name = name
             self.stdout = self
         async def readline(self): return b"91\n"
-        def terminate(self): self.returncode = 0; events.append("terminate")
+        def terminate(self):
+            self.returncode = 0
+            events.append(self.name + " closed")
         async def wait(self): return 0
     async def spawn(*args, **kwargs):
         events.append(args)
-        return Process()
-    class Page:
-        async def goto(self, *args, **kwargs): pass
-        def is_closed(self): return False
-        async def evaluate(self, _js): return {"logout": signed_in, "signin": not signed_in}
-    class Context:
-        pages = [Page()]
-        async def storage_state(self): return {"cookies": [{"name":"session", "value":"test"}]}
-        async def close(self): events.append("chrome closed")
-    class Playwright:
-        def __init__(self): self.chromium = self
-        async def start(self): return self
-        async def stop(self): events.append("playwright stopped")
-        async def launch_persistent_context(self, *args, **kwargs):
+        proc = Process(args[0])
+        if args[0] == "google-chrome":
+            assert args == ("google-chrome", f"--user-data-dir={tmp_path}",
+                            "--no-first-run", devaid_auth.LOGIN_URL)
             assert kwargs["env"]["DISPLAY"] == ":91"
-            return Context()
+            assert kwargs["start_new_session"] is True
+        elif "--verify" in args:
+            assert "google-chrome closed" in events
+            assert args[1:] == ("-m", "app.services.remote_login", "--verify")
+            assert kwargs["start_new_session"] is True
+            proc.returncode = result
+        return proc
     class Writer:
         def close(self): pass
         async def wait_closed(self): pass
     async def connect(*args): return None, Writer()
     async def no_sleep(_seconds): pass
-    import playwright.async_api
-    monkeypatch.setattr(playwright.async_api, "async_playwright", Playwright)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
     monkeypatch.setattr(asyncio, "open_connection", connect)
     monkeypatch.setattr(asyncio, "sleep", no_sleep)
     monkeypatch.setattr(devaid_auth, "PROFILE_DIR", tmp_path)
-    monkeypatch.setattr(devaid_auth, "_CONNECTED_MARKER", tmp_path / ".connected")
-    monkeypatch.setattr(devaid_auth, "import_session_state", lambda _s: events.append("saved"))
     s = remote.Desktop(owner="a", deadline=time.monotonic() + 900)
-    s.finish.set()
+    getattr(s, action).set()
     asyncio.run(remote._run(s))
     assert s.state == expected
-    assert events.count("terminate") == 2
-    assert "chrome closed" in events and "playwright stopped" in events
-    assert (tmp_path / ".connected").exists() == signed_in
-    if signed_in:
-        assert events.index("chrome closed") < events.index("saved")
-    else:
-        assert "saved" not in events
+    assert "google-chrome closed" in events
+    assert "Xvfb closed" in events and "x11vnc closed" in events
+    assert any(isinstance(e, tuple) and "--verify" in e for e in events) == (action == "finish")
     vnc = next(e for e in events if isinstance(e, tuple) and e[0] == "x11vnc")
     assert "-localhost" in vnc
+
+
+def test_dedicated_profile_never_loads_old_uploaded_session(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    monkeypatch.setattr(remote, "desktop", None)
+    monkeypatch.setattr(devaid_auth, "PROFILE_DIR", tmp_path)
+    monkeypatch.setattr(devaid_auth, "_CONNECTED_MARKER", tmp_path / ".connected")
+    monkeypatch.setattr(devaid_auth, "has_session_file", lambda: True)
+    # Must not consult the personal Chrome override when verifying this login.
+    monkeypatch.setattr(devaid_auth, "_own_chrome_dir", lambda: pytest.fail("personal Chrome used"))
+    monkeypatch.setattr(devaid_auth, "_context_from_session", lambda *a: pytest.fail("old session used"))
+    monkeypatch.setattr(devaid_auth, "_mask_headless", lambda c: c)
+    launches = []
+    context = object()
+    def launch(profile, **kwargs):
+        launches.append(profile)
+        return context
+    pw = SimpleNamespace(chromium=SimpleNamespace(launch_persistent_context=launch))
+    assert devaid_auth.open_persistent(pw, dedicated_profile=True) is context
+    assert launches == [str(tmp_path)]
+
+
+def test_done_signals_chrome_parent_before_group_cleanup(monkeypatch):
+    from types import SimpleNamespace
+    events = []
+    monkeypatch.setattr(remote, "os", SimpleNamespace(name="posix",
+        killpg=lambda pid, sig: events.append((pid, sig))))
+    class Process:
+        pid = 1234
+        returncode = None
+        def terminate(self):
+            events.append("parent terminated")
+            self.returncode = 0
+        async def wait(self): return 0
+    proc = Process()
+    asyncio.run(remote._stop_process(proc, group=True, graceful=True))
+    assert events == ["parent terminated"]
+    # Even with the parent gone, the final cleanup addresses only its owned
+    # group, in case a helper outlived it.
+    asyncio.run(remote._stop_process(proc, group=True))
+    assert events[-1] == (1234, remote.signal.SIGTERM)
+
+
+@pytest.mark.parametrize("state", ["in", "out", "unknown"])
+def test_post_login_verifier_saves_only_confirmed_fresh_profile(monkeypatch, tmp_path, state):
+    from types import SimpleNamespace
+    from contextlib import nullcontext
+    import playwright.sync_api
+    events = []
+    class Page:
+        def goto(self, *a, **k): pass
+        def title(self): return "DevelopmentAid"
+        def content(self): return "A normal rendered page"
+        def wait_for_selector(self, *a, **k): pass
+    context = SimpleNamespace(pages=[Page()], storage_state=lambda: {"cookies": [{"name": "test"}]})
+    def open_profile(_pw, **kwargs):
+        assert kwargs["dedicated_profile"] is True
+        return context
+    monkeypatch.setattr(playwright.sync_api, "sync_playwright", lambda: nullcontext(object()))
+    monkeypatch.setattr(devaid_auth, "open_persistent", open_profile)
+    monkeypatch.setattr(devaid_auth, "membership_state", lambda _p: (state, "test evidence"))
+    monkeypatch.setattr(devaid_auth, "import_session_state", lambda saved: events.append(saved))
+    monkeypatch.setattr(devaid_auth, "_CONNECTED_MARKER", tmp_path / ".connected")
+    monkeypatch.setattr(devaid_auth.site_auth, "close_owned", lambda _c: events.append("closed"))
+    assert devaid_auth.verify_session(dedicated_profile=True, save=True) == (state == "in")
+    assert (tmp_path / ".connected").exists() == (state == "in")
+    assert any(isinstance(e, dict) for e in events) == (state == "in")
+    assert events[-1] == "closed"

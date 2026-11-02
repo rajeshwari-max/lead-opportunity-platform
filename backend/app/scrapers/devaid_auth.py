@@ -184,7 +184,7 @@ def _chrome_is_running(user_data_dir: Path) -> str:
     return ""
 
 
-def open_persistent(pw, headless: bool = True):
+def open_persistent(pw, headless: bool = True, *, dedicated_profile: bool = False):
     """Launch a browser bound to the saved DevelopmentAid profile.
 
     Prefers the real installed Google Chrome (channel="chrome") — the site
@@ -215,7 +215,7 @@ def open_persistent(pw, headless: bool = True):
     # Your everyday Chrome, when configured. Highest priority, because if you
     # pointed us at it you are already signed in there and no other route is
     # needed on this machine.
-    own = _own_chrome_dir()
+    own = None if dedicated_profile else _own_chrome_dir()
     if own:
         blocker = _chrome_is_running(own)
         if blocker:
@@ -241,7 +241,7 @@ def open_persistent(pw, headless: bool = True):
     # this machine has no interactive login of its own. That ordering matters:
     # on your PC the profile is the live thing and stays authoritative, while
     # on a server the uploaded session is the only thing there is.
-    if has_session_file() and not _CONNECTED_MARKER.exists():
+    if not dedicated_profile and has_session_file() and not _CONNECTED_MARKER.exists():
         return _context_from_session(pw, common)
 
     # The user agent is NOT set from settings here, in either mode.
@@ -565,13 +565,15 @@ _CHALLENGE_MARKERS = (
 )
 
 
-def verify_session() -> bool:
+def verify_session(*, dedicated_profile: bool = False, save: bool = False) -> bool:
     """Load a real search page headlessly and report whether we're signed in.
 
     Logs what it actually saw, so a failure is diagnosable instead of a bare
     "not connected" — the check runs in a different browser process from the
     window the user logged into, and the profile has to carry the session across.
     """
+    if save and not dedicated_profile:
+        raise ValueError("Saving requires the dedicated profile")
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as pw:
@@ -579,7 +581,8 @@ def verify_session() -> bool:
         # while scraping headed (or the reverse) would test a different client
         # than the one that does the work — the check could pass and every
         # scrape still be challenged, or vice versa.
-        context = open_persistent(pw, headless=settings.devaid_headless)
+        kwargs = {"dedicated_profile": True} if dedicated_profile else {}
+        context = open_persistent(pw, headless=settings.devaid_headless, **kwargs)
         try:
             page = context.pages[0] if context.pages else context.new_page()
             page.goto("https://www.developmentaid.org/grants/search", timeout=90_000,
@@ -643,6 +646,9 @@ def verify_session() -> bool:
                     "account that returns no results.", evidence,
                 )
                 return False
+            if save:
+                import_session_state(context.storage_state())
+                _CONNECTED_MARKER.write_text("connected", encoding="utf-8")
             return True
         finally:
             try:

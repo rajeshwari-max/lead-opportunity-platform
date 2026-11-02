@@ -10,6 +10,7 @@ import asyncio
 import os
 import secrets
 import shutil
+import signal
 import socket
 import sys
 import time
@@ -25,7 +26,8 @@ NOVNC = Path("/usr/share/novnc")
 
 def available() -> bool:
     return (sys.platform.startswith("linux") and NOVNC.joinpath("core/rfb.js").is_file()
-            and bool(shutil.which("Xvfb")) and bool(shutil.which("x11vnc")))
+            and bool(shutil.which("Xvfb")) and bool(shutil.which("x11vnc"))
+            and bool(shutil.which("google-chrome")))
 
 
 def login_seconds(now: datetime | None = None) -> float:
@@ -109,17 +111,39 @@ async def start(owner: str) -> Desktop:
         return desktop
 
 
-async def _stop_process(proc):
-    if proc is not None and proc.returncode is None:
+async def _stop_process(proc, *, group: bool = False, graceful: bool = False):
+    if proc is None:
+        return
+    def send(sig):
         try:
-            proc.terminate()
+            if group and not graceful and os.name == "posix":
+                os.killpg(proc.pid, sig)
+            elif sig == signal.SIGTERM:
+                proc.terminate()
+            else:
+                proc.kill()
         except ProcessLookupError:
-            return
-        try:
-            await asyncio.wait_for(proc.wait(), 5)
-        except asyncio.TimeoutError:
+            pass
+    if group and not graceful:
+        # The parent may already have exited while leaving a browser helper.
+        send(signal.SIGTERM)
+    if proc.returncode is not None:
+        return
+    if not group or graceful:
+        send(signal.SIGTERM)
+    try:
+        await asyncio.wait_for(proc.wait(), 5)
+    except asyncio.TimeoutError:
+        # Chrome was launched in its own group, so stuck helper processes can
+        # be stopped as well. This never targets another user's browser.
+        if group and os.name == "posix":
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
             proc.kill()
-            await proc.wait()
+        await proc.wait()
 
 
 async def _run(s: Desktop):
@@ -131,9 +155,8 @@ async def _run(s: Desktop):
 
 
 async def _run_desktop(s: Desktop):
-    from playwright.async_api import async_playwright
     from app.scrapers import devaid_auth
-    xvfb = vnc = ctx = pw = None
+    xvfb = vnc = chrome = verifier = None
     try:
         xvfb = await asyncio.create_subprocess_exec(
             "Xvfb", "-displayfd", "1", "-screen", "0", "1400x900x24", "-nolisten", "tcp",
@@ -148,29 +171,14 @@ async def _run_desktop(s: Desktop):
             "x11vnc", "-display", f":{number}", "-localhost", "-rfbport", str(s.port),
             "-nopw", "-forever", "-shared", "-quiet",
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        pw = await async_playwright().start()
         devaid_auth.PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-        options = dict(headless=False, viewport={"width": 1400, "height": 900},
-                       locale="en-US", env={**os.environ, "DISPLAY": f":{number}"},
-                       # Match the existing scraper's dedicated Chrome launch.
-                       args=["--disable-blink-features=AutomationControlled",
-                             "--no-first-run", "--no-default-browser-check"],
-                       ignore_default_args=["--enable-automation"],
-                       timeout=30_000)
-        try:
-            ctx = await pw.chromium.launch_persistent_context(
-                str(devaid_auth.PROFILE_DIR), channel="chrome", **options)
-        except Exception as exc:
-            if "executable" not in str(exc).lower():
-                raise
-            ctx = await pw.chromium.launch_persistent_context(str(devaid_auth.PROFILE_DIR), **options)
-        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        # Navigation can be slow. Let the person see/interact with the desktop
-        # while it loads rather than holding the Connect HTTP request open.
-        try:
-            await page.goto(devaid_auth.LOGIN_URL, wait_until="domcontentloaded", timeout=60_000)
-        except Exception:
-            pass  # Keep the real browser visible so the person can retry.
+        # Match the working TigerVNC command. No Playwright driver, debugging
+        # port, injected scripts or extra browser flags during human sign-in.
+        chrome = await asyncio.create_subprocess_exec(
+            "google-chrome", f"--user-data-dir={devaid_auth.PROFILE_DIR}",
+            "--no-first-run", devaid_auth.LOGIN_URL,
+            env={**os.environ, "DISPLAY": f":{number}"}, start_new_session=True,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         for _ in range(50):
             if vnc.returncode is not None:
                 raise RuntimeError("The remote viewer could not start.")
@@ -187,33 +195,42 @@ async def _run_desktop(s: Desktop):
         while not s.finish.is_set() and not s.cancel.is_set() and time.monotonic() < s.deadline:
             if xvfb.returncode is not None or vnc.returncode is not None:
                 raise RuntimeError("The temporary desktop stopped unexpectedly.")
+            if chrome.returncode is not None:
+                if chrome.returncode != 0:
+                    raise RuntimeError("Chrome exited before login could be saved.")
+                s.finish.set()  # Native window closed: verify, never assume login.
+                break
             await asyncio.sleep(0.25)
         if s.cancel.is_set():
             s.state, s.message = "cancelled", "Login cancelled."
         elif not s.finish.is_set():
-            s.state, s.message = "expired", "The 15-minute login window ended. Click Connect to try again."
+            s.state, s.message = "expired", "The login window ended. Click Connect to try again."
         else:
-            s.state, s.message = "saving", "Checking and saving your login…"
-            # Only explicit membership evidence counts as success.
-            state = "unknown"
-            for _ in range(30):
-                if page.is_closed():
-                    break
-                state, _ = await _membership(page)
-                if state == "in" or s.cancel.is_set():
-                    break
-                await asyncio.sleep(1)
-            if state == "in" and not s.cancel.is_set():
-                # Export before close as backup, then close Chrome to flush the
-                # persistent store. The fresh profile is authoritative at scrape.
-                saved = await ctx.storage_state()
-                await asyncio.wait_for(ctx.close(), 10)
-                ctx = None
-                devaid_auth.import_session_state(saved)
-                devaid_auth._CONNECTED_MARKER.write_text("connected", encoding="utf-8")
+            s.state, s.message = "saving", "Checking and saving your login."
+            # Close Chrome before reading the same profile. SIGTERM first;
+            # forced group cleanup is reserved for an unresponsive process.
+            await _stop_process(chrome, group=True, graceful=True)
+            if s.cancel.is_set():
+                s.state, s.message = "cancelled", "Login cancelled."
+                return
+            # Separate process: the API keeps its scrape reservation throughout
+            # verification, and cancellation can also stop Playwright children.
+            verifier = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "app.services.remote_login", "--verify",
+                cwd=str(devaid_auth.PROFILE_DIR.parent.parent),
+                env={**os.environ, "DISPLAY": f":{number}"}, start_new_session=True,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            while verifier.returncode is None and not s.cancel.is_set():
+                await asyncio.sleep(0.25)
+            if s.cancel.is_set():
+                s.state, s.message = "cancelled", "Login cancelled."
+            elif verifier.returncode == 0:
                 s.state, s.message = "connected", "DevelopmentAid connected. You can close this tab."
             else:
-                s.state, s.message = "unverified", "Sign-in could not be confirmed. Click Connect and finish signing in before Done."
+                s.state, s.message = "unverified", (
+                    "Chrome saved its profile, but the scrape-session check could not confirm sign-in. "
+                    "A security check can prevent verification even after a successful login. "
+                    "Your profile has been kept; check the scraper log for details.")
     except asyncio.CancelledError:
         s.state, s.message = "cancelled", "Login closed."
         raise
@@ -222,22 +239,24 @@ async def _run_desktop(s: Desktop):
         logging.getLogger("scraper").exception("Remote DevelopmentAid login failed")
         s.state, s.message = "error", "Could not open or save the login window. Check the API logs."
     finally:
-        # A broken browser/driver must not prevent the display processes from
-        # being stopped, or hold the scrape reservation indefinitely.
-        if ctx:
-            await asyncio.gather(asyncio.wait_for(ctx.close(), 10), return_exceptions=True)
-        if pw:
-            await asyncio.gather(asyncio.wait_for(pw.stop(), 10), return_exceptions=True)
+        # Keep DISPLAY alive until browsers are stopped. Each process group is
+        # dedicated to this login; never terminate unrelated Chrome processes.
+        await asyncio.gather(_stop_process(verifier, group=True), return_exceptions=True)
+        await asyncio.gather(_stop_process(chrome, group=True), return_exceptions=True)
         await asyncio.gather(_stop_process(vnc), _stop_process(xvfb), return_exceptions=True)
-
-
-async def _membership(page):
-    """Reuse the exact existing membership detector without duplicating JS."""
-    from app.scrapers.devaid_auth import _MEMBER_STATE_JS, membership_evidence
-    return membership_evidence(await page.evaluate(_MEMBER_STATE_JS) or {})
 
 
 async def shutdown():
     if active():
         desktop.task.cancel()
         await asyncio.gather(desktop.task, return_exceptions=True)
+
+
+if __name__ == "__main__":
+    # Used only by the post-login child; ordinary imports never launch Chrome.
+    if sys.argv[1:] != ["--verify"]:
+        raise SystemExit(2)
+    from app.core.logging_config import setup_logging
+    from app.scrapers.devaid_auth import verify_session
+    setup_logging()
+    raise SystemExit(0 if verify_session(dedicated_profile=True, save=True) else 3)

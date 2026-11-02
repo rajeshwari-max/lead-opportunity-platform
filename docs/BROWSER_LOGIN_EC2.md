@@ -1,9 +1,11 @@
 # DevelopmentAid login from the dashboard
 
 An administrator clicks Connect in Site Logins or Expert Pool. A tab shows
-Chrome running on EC2. Sign in yourself, then click **Done — save login**.
-The platform verifies the account controls, saves a session backup, and closes
-Chrome to flush the persistent profile used by the scraper.
+ordinary Google Chrome running on EC2, launched directly in the same way as
+the working TigerVNC command. Sign in yourself, then click **Done — save login**.
+The platform closes Chrome to release and flush its persistent profile, then
+runs a separate scraper-session verification process. Only verified sign-in
+saves a fresh session backup and marks the account connected.
 
 No VPN, SSH tunnel or desktop VNC client is needed after setup. Authentication
 and human verification on DevelopmentAid remain manual. A site may expire its
@@ -22,6 +24,12 @@ session later; Connect renews it but cannot guarantee indefinite sign-in.
    the existing single API worker. No security-group or VNC ports need opening.
 
 The API starts its own Xvfb and loopback-only x11vnc processes for each login.
+Google Chrome must be installed (`google-chrome --version`). The interactive
+browser uses only `--user-data-dir=<devaid_profile> --no-first-run <login-url>`;
+Playwright is not attached to the browser while the person signs in. Its later
+verification process reads that dedicated profile explicitly, even if an older
+uploaded session file exists. Verification can still encounter a site security
+check; a saved native profile alone is not reported as a verified connection.
 It does not connect to, replace, or reveal an existing VNC desktop. It needs no
 DISPLAY setting or persistent desktop service. Use the dedicated DevelopmentAid
 profile; personal Chrome profile overrides on EC2 are rejected with an error.
