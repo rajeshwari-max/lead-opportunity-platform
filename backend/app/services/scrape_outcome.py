@@ -182,6 +182,13 @@ class Evidence:
     structure_signature: str = ""
     last_good_signature: str = ""
     expected_container_present: bool | None = None
+    # Self-healing (scrapers/fallback_extract.py): which alternative reader
+    # produced the rows when the configured parser found nothing, and what
+    # kind of non-content page ("challenge" | "js_shell") was seen, if any.
+    extraction_strategy: str = ""
+    page_wall: str = ""
+    # "no opportunity signal 12, no usable link 7" — why rows were rejected.
+    reject_reasons: str = ""
 
     cancelled: bool = False
     timed_out: bool = False
@@ -240,6 +247,13 @@ def classify(ev: Evidence) -> tuple[Outcome, ErrorCode | None, str]:
 
     # ---- we read a page. Did the parser find anything? --------------------
     if ev.extracted <= 0:
+        # A bot check that came back as a 200 page is still a block, not a
+        # parser fault. The November 2026 report listed several ~28 KB
+        # "pages" under PARSE_ZERO that were this.
+        if ev.page_wall == "challenge" or _challenge_seen(ev):
+            return (Outcome.BLOCKED, ErrorCode.CHALLENGE,
+                    "A page came back, but it is a bot check rather than the listing "
+                    f"(title {ev.page_title!r}); every alternative reader was tried.")
         # Drift beats a bare parse failure, but only on positive evidence: a
         # signature that actually differs from the last known-good one, or a
         # container the parser requires that is no longer in the document.
@@ -265,17 +279,30 @@ def classify(ev: Evidence) -> tuple[Outcome, ErrorCode | None, str]:
                     "The listing page states it currently has none.")
 
         # Otherwise we do not know, and we say so rather than promoting a guess.
+        shell = (" The page is a JavaScript shell with almost no text — the listing "
+                 "loads from somewhere the scraper is not reading."
+                 if ev.page_wall == "js_shell" else "")
         return (Outcome.PARSE_ZERO, None,
                 f"{ev.pages_fetched} page(s) fetched ({ev.response_bytes:,} bytes) but the "
-                "parser produced no candidates. This is NOT evidence the source is empty.")
+                "parser produced no candidates, and no alternative reader (other fetch "
+                "mode, structured data, off-site links, feed) found any either. This is "
+                f"NOT evidence the source is empty.{shell}")
 
     # ---- the parser produced rows -----------------------------------------
+    healed = (f" Recovered by fallback ({ev.extraction_strategy}): the configured "
+              "parser found nothing, so the page structure has changed — update "
+              "this source's config." if ev.extraction_strategy else "")
+    why = (f" Rejected because: {ev.reject_reasons}."
+           if ev.rejected and ev.reject_reasons else "")
     if ev.saved > 0:
         return (Outcome.SUCCESS_WITH_RESULTS, None,
-                f"{ev.saved} new of {ev.extracted} extracted.")
+                f"{ev.saved} new of {ev.extracted} extracted.{why}{healed}")
+    # "All already stored" was printed even when every row had been REJECTED
+    # by the opportunity filter — rejected rows are never stored. Say which.
     return (Outcome.SUCCESS_NO_NEW, None,
-            f"{ev.extracted} extracted, all already stored "
-            f"({ev.duplicates} duplicate, {ev.rejected} rejected, {ev.expired} expired).")
+            f"{ev.extracted} extracted, none new: {ev.duplicates} already stored, "
+            f"{ev.rejected} rejected by the opportunity filter, {ev.expired} already "
+            f"closed.{why}{healed}")
 
 
 def reconcile_stale(status: str, has_finished_at: bool) -> tuple[Outcome, str]:

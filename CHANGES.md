@@ -5,6 +5,98 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-02 — Meaning-based second opinion on brands and verticals
+
+The hierarchy classifier (TF-IDF + logistic regression) weighs the words in a
+lead and learned mostly from labels the keyword rules produced (5,262 of 5,360
+training rows; 98 human-reviewed). On its held-out reviewed rows, brand tags
+were right about half the time and vertical tags less often. A call worded
+differently from the keyword lists — "raising incomes of smallholder tea
+growers" — scores low for Livelihood even though that is plainly what it is.
+
+- **New `backend/app/services/semantic_classifier.py`.** A small local
+  sentence-embedding model (`BAAI/bge-small-en-v1.5`, ONNX on CPU via
+  `fastembed`; no GPU, no API key, no lead text leaves the server) compares
+  each lead's meaning with a profile of every brand, Social Business and every
+  Devsol vertical. Profiles = the brand teams' keyword inventories
+  (`brand_keywords.py`) + descriptions/phrases in the new, editable
+  `backend/app/ml_models/semantic_profiles.json`.
+- **The ML classifier is unchanged.** `ml_hierarchy.py` runs exactly as before
+  and then attaches the semantic opinion:
+  - `LOP_SEMANTIC_MODE=shadow` (default): recorded in the row's
+    classification evidence (`"semantic"` key); no label changes.
+  - `LOP_SEMANTIC_MODE=blend`: ML labels kept; a label whose meaning score
+    clears `LOP_SEMANTIC_MIN_SIMILARITY` is added, hierarchy still enforced.
+    Optional `LOP_SEMANTIC_ML_FLOOR` and `LOP_SEMANTIC_VETO_BELOW` (both off).
+    The row version gains `+semantic-…`, so switching on, re-tuning or editing
+    profiles re-labels automatic rows at the next startup. Human labels are
+    never touched.
+  - `LOP_SEMANTIC_MODE=off`: not loaded at all.
+- **Never fatal.** If `fastembed` or the model is unavailable, one warning is
+  logged and classification is ML-only, exactly as before.
+- **New `backend/scripts/semantic_eval.py`** (read-only): ML vs meaning vs
+  blend on human-labelled leads, a threshold sweep, a recommended
+  `LOP_SEMANTIC_MIN_SIMILARITY`, and disagreements to read.
+- `deploy/update.sh` warms the model (first deploy downloads ~130 MB into
+  `backend/data/models`, git-ignored) and prints its status; never fatal.
+- `requirements.txt`: `fastembed>=0.7,<1.0`.
+- `tests/conftest.py` keeps the layer off in tests unless a test enables it.
+- **Brand profiles filled from the brand teams' Brand Classification Input
+  Forms** for the four platform brands they cover — Swasti, Vrutti, Upfront
+  and GREEN Foundation: what the brand does, who it works with, its themes,
+  services and strong keywords, plus its "words to exclude". Brands in the
+  forms that are not platform brands (CMS itself, Shoonya, Collaborative
+  Orchestration, MEL) were not added; Setu and Community Action Collab have no
+  form yet and keep only their keyword inventories. The Vertical
+  Classification Input Form was blank, so vertical profiles are unchanged.
+- **Exclusions.** A profile's `exclude` entries describe look-alikes (e.g.
+  "Clinical or hospital infrastructure tenders" for Swasti). A lead closer in
+  meaning to an exclusion than to the profile does not get the label; the
+  evidence records `excluded_by`.
+- Internal refactor: the brand > archetype > vertical hierarchy rule is one
+  function (`_enforce_hierarchy`) instead of two copies; behaviour unchanged.
+
+Verify: `pytest tests/test_semantic_classifier.py` (16 tests); staged suite
+725 passed (1 failure is a script not present in the test copy). On EC2:
+`.venv/bin/python scripts/semantic_eval.py`.
+
+---
+
+## 2026-11-02 — Sources keep producing leads when a funder site changes
+
+The November source-health report listed 35 sources that fetched a page but
+parsed nothing, 4 that fetched nothing, and 12 whose every row was rejected.
+Those are exactly the places where a real opportunity is missed silently.
+
+- **Fallback readers** (`backend/app/scrapers/fallback_extract.py`, new). When
+  a config-driven source's page 1 parses to nothing, the generic scraper now
+  tries, in order: the other fetch mode (plain HTTP if the browser got a bot
+  check or blank page, the browser if plain HTTP got a JavaScript shell);
+  schema.org JSON-LD; funding links whose application lives on another domain
+  (e.g. Global EbA → gms-portal.iucn.org); the site's RSS/Atom feed, posts
+  from the last 18 months only. Every recovered row still passes the same
+  funding-signal, furniture, opportunity-gate and classification tests.
+- **No self-rewriting code.** A recovery is recorded on the run
+  ("Recovered by fallback (feed …): … update this source's config") and the
+  monthly report gets a section *RECOVERED BY FALLBACK — CONFIG UPDATE NEEDED*,
+  so a person updates `sources.json` deliberately.
+- **Bot checks are named.** A fetched page that is a Cloudflare/Incapsula
+  challenge is now `BLOCKED / CHALLENGE`, not "parser produced no candidates".
+  The ~28 KB near-identical pages in the report (Triple Funds, Grantmakers
+  Community Project, Gulbenkian, Pfizer Foundation) are this case. Nothing
+  tries to get past a challenge.
+- **Why rows were rejected.** The run message now ends with e.g.
+  "Rejected because: no opportunity signal 12, no usable link 7", and the
+  report has a section *EVERY ROW REJECTED BY THE FILTER — CHECK FOR MISSED
+  OPPORTUNITIES* (ISTI, Woodcock, Audacious, Rockefeller, Google.org, ...).
+- `scripts/check_scraper.py` prints the opportunity-filter verdict and reason
+  for every row, the page wall, and which fallback produced the rows.
+
+Verify: `pytest tests/test_fallback_extraction.py` (20 tests); full staged
+suite 521 passed. On EC2: `python scripts/check_scraper.py <source>`.
+
+---
+
 ## 2026-10-27 — Whole Web Discovery three-day API budget
 
 - Kept ordinary source scrapers on their existing daily overnight schedule.

@@ -336,6 +336,33 @@ class BaseScraper(ABC):
                     log.exception("[%s] parse error on page %s — skipping page", self.name, page_number)
                     items = []
 
+                # Self-healing: the configured parse of the FIRST page found
+                # nothing. Before reporting "parser produced no candidates",
+                # try the source's alternative readers (other fetch mode,
+                # structured data, off-site apply links, RSS/Atom feed — see
+                # scrapers/fallback_extract.py). Rows found this way are
+                # yielded once and the walk stops: pagination belonged to the
+                # layout that no longer parses.
+                recover = getattr(self, "recover_empty_page", None)
+                if not items and page_number == 1 and recover is not None:
+                    try:
+                        items, strategy = await recover(client, html, str(request.url))
+                    except Exception:                       # noqa: BLE001
+                        log.exception("[%s] fallback extraction failed", self.name)
+                        items, strategy = [], ""
+                    if items:
+                        self.last_probe["extraction_strategy"] = strategy
+                        log.warning(
+                            "[%s] configured parser found nothing; recovered %s "
+                            "row(s) via %s — the page structure has changed, "
+                            "update this source's config", self.name, len(items), strategy)
+                        await self._enrich_batch(items, client, detail_budget)
+                        yield items
+                        await progress("page_done", {"source": self.name,
+                                                     "page": page_number, "found": len(items)})
+                        await progress("pages_end", {"source": self.name, "page": page_number})
+                        return
+
                 if not items:
                     try:  # keep the raw body — shows WHY it parsed to nothing
                         debug_dir = settings.log_dir.parent / "data" / "debug"

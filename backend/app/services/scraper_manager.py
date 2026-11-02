@@ -8,7 +8,7 @@ import json
 import logging
 import threading
 import time
-from collections import deque
+from collections import Counter, deque
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -441,6 +441,7 @@ class ScraperManager:
     async def _run_source(self, scraper: BaseScraper) -> None:
         prog = self.progress[scraper.name]
         prog["status"] = "running"
+        self.__dict__.setdefault("_reject_reasons", {}).pop(scraper.name, None)
         run_id = await asyncio.to_thread(self._open_run, scraper.display_name, scraper.name)
 
         # Per-source stop: lets one source finish early (stale pages) without
@@ -627,6 +628,9 @@ class ScraperManager:
                 structure_signature=probe.get("structure_signature", ""),
                 last_good_signature=await asyncio.to_thread(self._last_good_signature, scraper),
                 expected_container_present=probe.get("expected_container_present"),
+                extraction_strategy=probe.get("extraction_strategy", ""),
+                page_wall=probe.get("page_wall", ""),
+                reject_reasons=self._rejection_reasons(scraper.name),
                 cancelled=was_stopped,
                 exception=crash,
             )
@@ -664,6 +668,23 @@ class ScraperManager:
             )
 
     # -------------------------------------------------------------- pipeline
+    def _note_rejection(self, source_key: str, reason: str) -> None:
+        """Tally WHY a row was dropped, per source, for the run's message.
+
+        The monthly report flagged sources such as ISTI (19 of 19) whose every
+        row was rejected. "19 rejected" cannot say whether the page lists no
+        open calls or the filter is throwing real calls away; the reasons can.
+        """
+        book = self.__dict__.setdefault("_reject_reasons", {})
+        book.setdefault(source_key or "", Counter())[reason or "unspecified"] += 1
+
+    def _rejection_reasons(self, source_key: str) -> str:
+        book = self.__dict__.get("_reject_reasons", {})
+        tally = book.get(source_key or "")
+        if not tally:
+            return ""
+        return ", ".join(f"{why} {n}" for why, n in tally.most_common(4))
+
     def _ingest(self, batch: list[RawOpportunity],
                 curated: bool = False,
                 source_key: str = "") -> tuple[int, int, int, int, int, int]:
@@ -838,6 +859,7 @@ class ScraperManager:
             if settings.require_usable_link and not is_usable_link(
                     raw.opportunity_url, raw.website):
                 rejected += 1
+                self._note_rejection(source_key, "no usable link")
                 log.debug("[%s] no usable link, row dropped: %s",
                           raw.source_website, (raw.title or "")[:60])
                 continue
@@ -861,6 +883,7 @@ class ScraperManager:
             if not keep_scope:
                 out_of_scope += 1
                 rejected += 1
+                self._note_rejection(source_key, f"out of scope ({scope_why})")
                 log.debug("[%s] out of scope (%s): %s", raw.source_website,
                           scope_why, (raw.title or "")[:60])
                 continue
@@ -876,6 +899,7 @@ class ScraperManager:
                     str(getattr(category, "value", category) or ""), curated)
                 if not keep:
                     rejected += 1
+                    self._note_rejection(source_key, why)
                     log.debug("[%s] rejected (%s): %s", raw.source_website,
                               why, (raw.title or "")[:60])
                     continue
@@ -886,6 +910,8 @@ class ScraperManager:
             # an Other/Award/Challenge into stored dashboard inventory.
             if category.value not in enabled_categories:
                 rejected += 1
+                self._note_rejection(source_key,
+                                     f"category {category.value} outside dashboard scope")
                 log.debug("[%s] rejected (category outside dashboard scope): %s",
                           raw.source_website, (raw.title or "")[:60])
                 continue

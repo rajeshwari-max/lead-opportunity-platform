@@ -13,6 +13,7 @@ from app.database.models import Category
 from app.services.brands import classify_brands
 from app.services.classification import KeywordClassifier
 from app.services.classification_model import classify as classify_vertical_rules
+from app.services import semantic_classifier
 from app.services.verticals import VERTICAL_SOCIAL_BUSINESS
 
 log = logging.getLogger("scraper")
@@ -34,6 +35,9 @@ class HierarchyPrediction:
     status: str = "unclassified"
     source: str = "rule"
     version: str = ""
+    # The meaning-based second opinion (services/semantic_classifier.py):
+    # its scores, the labels it would choose, and in blend mode what it added.
+    semantic: dict = field(default_factory=dict)
 
     def scores_json(self, group: str) -> str:
         return json.dumps({key: round(value, 4) for key, value in self.scores.get(group, {}).items()}, sort_keys=True)
@@ -44,6 +48,7 @@ class HierarchyPrediction:
             "model_version": self.version,
             "top_terms": self.evidence,
             "archetype_scores": self.scores.get("archetypes", {}),
+            **({"semantic": self.semantic} if self.semantic else {}),
         }, sort_keys=True)
 
 
@@ -97,7 +102,92 @@ def model_status() -> dict:
         "unresolved_rows_excluded": metadata.get("unresolved_rows_excluded", 0),
         "path": str(_configured_path()),
         "error": _load_error,
+        "semantic": semantic_classifier.status(),
     }
+
+
+def current_version() -> str:
+    """The version a freshly classified row carries. In blend mode the
+    semantic profile version is part of it, so tuning the threshold or editing
+    the profiles makes the startup backfill re-label automatic rows."""
+    base = str(model_status()["version"])
+    if semantic_classifier.enabled() and semantic_classifier.blending():
+        extra = semantic_classifier.version()
+        if extra:
+            return f"{base}+{extra}"
+    return base
+
+
+def _enforce_hierarchy(selected: dict[str, list[str]]) -> None:
+    """Verticals imply Devsol, Devsol implies CMS; nothing below CMS without it."""
+    if selected["verticals"] and "Devsol" not in selected["archetypes"]:
+        selected["archetypes"].append("Devsol")
+    if selected["archetypes"] and "CMS" not in selected["brands"]:
+        selected["brands"].insert(0, "CMS")
+    if "CMS" not in selected["brands"]:
+        selected["archetypes"] = []
+        selected["verticals"] = []
+    elif "Devsol" not in selected["archetypes"]:
+        selected["verticals"] = []
+
+
+def _routed(selected: dict[str, list[str]]) -> bool:
+    return bool(selected["verticals"] or "Social Business" in selected["archetypes"]
+                or any(label != "CMS" for label in selected["brands"]))
+
+
+def _blend(prediction: HierarchyPrediction, result) -> None:
+    """Add the labels the meaning score is confident about; keep ML's."""
+    selected = {"brands": list(prediction.brands),
+                "archetypes": list(prediction.archetypes),
+                "verticals": list(prediction.verticals)}
+    floor = float(settings.semantic_ml_floor)
+    veto = float(settings.semantic_veto_below)
+    added: list[str] = []
+    dropped: list[str] = []
+    for group in ("brands", "archetypes", "verticals"):
+        ml_scores = prediction.scores.get(group, {})
+        if veto > 0:
+            for label in list(selected[group]):
+                meaning = result.scores[group].get(label)
+                if meaning is not None and meaning < veto:
+                    selected[group].remove(label)
+                    dropped.append(label)
+        for label in result.selected[group]:
+            if label not in selected[group] and label not in dropped \
+                    and float(ml_scores.get(label, 0.0)) >= floor:
+                selected[group].append(label)
+                added.append(label)
+    if not added and not dropped:
+        prediction.semantic.update(added=[], dropped=[])
+    else:
+        _enforce_hierarchy(selected)
+        prediction.brands = selected["brands"]
+        prediction.archetypes = selected["archetypes"]
+        prediction.verticals = selected["verticals"]
+        if _routed(selected):
+            prediction.status = "classified"
+        elif prediction.status == "classified":
+            prediction.status = "uncertain"
+        prediction.semantic.update(added=added, dropped=dropped)
+    prediction.source = f"{prediction.source}+semantic"
+    prediction.version = f"{prediction.version}+{result.version}"
+
+
+def _attach_semantic(predictions: list[HierarchyPrediction], texts: list[str]) -> None:
+    """Shadow: record the meaning scores. Blend: also let them add labels.
+    Does nothing — and costs nothing — when LOP_SEMANTIC_MODE=off or the
+    embedding model is unavailable."""
+    if not predictions or not semantic_classifier.enabled():
+        return
+    results = semantic_classifier.score_texts(texts)
+    if not results:
+        return
+    blend = semantic_classifier.blending()
+    for prediction, result in zip(predictions, results):
+        prediction.semantic = result.as_evidence()
+        if blend:
+            _blend(prediction, result)
 
 
 def _input_text(title: str, summary: str, eligibility: str, organization: str,
@@ -164,7 +254,9 @@ def classify_hierarchy(title: str, summary: str = "", eligibility: str = "",
     body = " ".join(filter(None, [summary, eligibility, location]))
     artifact = _load()
     if artifact is None:
-        return _fallback(title, body, category_hint)
+        prediction = _fallback(title, body, category_hint)
+        _attach_semantic([prediction], [semantic_classifier.lead_text(title, summary, eligibility)])
+        return prediction
 
     text = _input_text(title, summary, eligibility, organization, location,
                        country, region, source, category_hint)
@@ -207,23 +299,14 @@ def classify_hierarchy(title: str, summary: str = "", eligibility: str = "",
     # Enforce the declared hierarchy upward. A confident Devsol vertical is
     # also evidence for Devsol and CMS even if those broader heads sit just
     # below their thresholds.
-    if selected["verticals"] and "Devsol" not in selected["archetypes"]:
-        selected["archetypes"].append("Devsol")
-    if selected["archetypes"] and "CMS" not in selected["brands"]:
-        selected["brands"].insert(0, "CMS")
-    if "CMS" not in selected["brands"]:
-        selected["archetypes"] = []
-        selected["verticals"] = []
-    elif "Devsol" not in selected["archetypes"]:
-        selected["verticals"] = []
+    _enforce_hierarchy(selected)
 
-    routed = bool(selected["verticals"] or "Social Business" in selected["archetypes"]
-                  or any(label != "CMS" for label in selected["brands"]))
+    routed = _routed(selected)
     all_scores = [value for group in ("brands", "archetypes", "verticals") for value in scores[group].values()]
     uncertain_floor = float(artifact["thresholds"].get("uncertain_floor", 0.35))
     status = "classified" if routed else ("uncertain" if max(all_scores, default=0.0) >= uncertain_floor else "unclassified")
 
-    return HierarchyPrediction(
+    prediction = HierarchyPrediction(
         category=category,
         brands=selected["brands"],
         archetypes=selected["archetypes"],
@@ -234,6 +317,8 @@ def classify_hierarchy(title: str, summary: str = "", eligibility: str = "",
         source="model",
         version=str(artifact["metadata"]["version"]),
     )
+    _attach_semantic([prediction], [semantic_classifier.lead_text(title, summary, eligibility)])
+    return prediction
 
 
 def classify_hierarchy_batch(records: list[dict]) -> list[HierarchyPrediction]:
@@ -241,8 +326,13 @@ def classify_hierarchy_batch(records: list[dict]) -> list[HierarchyPrediction]:
     if not records:
         return []
     artifact = _load()
+    semantic_texts = [
+        semantic_classifier.lead_text(str(row.get("title", "")), str(row.get("summary", "")),
+                                      str(row.get("eligibility", "")))
+        for row in records
+    ]
     if artifact is None:
-        return [
+        fallback = [
             _fallback(
                 str(row.get("title", "")),
                 " ".join(filter(None, [row.get("summary", ""), row.get("eligibility", ""), row.get("location", "")])),
@@ -250,6 +340,8 @@ def classify_hierarchy_batch(records: list[dict]) -> list[HierarchyPrediction]:
             )
             for row in records
         ]
+        _attach_semantic(fallback, semantic_texts)
+        return fallback
 
     texts = [
         _input_text(
@@ -307,19 +399,8 @@ def classify_hierarchy_batch(records: list[dict]) -> list[HierarchyPrediction]:
                 label for label, probability in scores[group].items()
                 if probability >= float(artifact["thresholds"][group].get(label, 0.5))
             ]
-        if selected["verticals"] and "Devsol" not in selected["archetypes"]:
-            selected["archetypes"].append("Devsol")
-        if selected["archetypes"] and "CMS" not in selected["brands"]:
-            selected["brands"].insert(0, "CMS")
-        if "CMS" not in selected["brands"]:
-            selected["archetypes"] = []
-            selected["verticals"] = []
-        elif "Devsol" not in selected["archetypes"]:
-            selected["verticals"] = []
-        routed = bool(
-            selected["verticals"] or "Social Business" in selected["archetypes"]
-            or any(label != "CMS" for label in selected["brands"])
-        )
+        _enforce_hierarchy(selected)
+        routed = _routed(selected)
         all_scores = [value for group in ("brands", "archetypes", "verticals") for value in scores[group].values()]
         status = "classified" if routed else (
             "uncertain" if max(all_scores, default=0.0) >= uncertain_floor else "unclassified")
@@ -334,6 +415,7 @@ def classify_hierarchy_batch(records: list[dict]) -> list[HierarchyPrediction]:
             source="model",
             version=str(artifact["metadata"]["version"]),
         ))
+    _attach_semantic(predictions, semantic_texts)
     return predictions
 
 
@@ -347,11 +429,11 @@ def backfill_hierarchy(active_only: bool = True) -> int:
     from app.services.brands import brands_to_str
     from app.services.verticals import HUMAN, verticals_to_str
 
-    current_version = model_status()["version"]
+    version_now = current_version()
 
     stale = and_(
         or_(Opportunity.verticals_source.is_(None), Opportunity.verticals_source != HUMAN),
-        or_(Opportunity.classification_version.is_(None), Opportunity.classification_version != current_version),
+        or_(Opportunity.classification_version.is_(None), Opportunity.classification_version != version_now),
     )
     where = and_(stale, strict_actionable_clause()) if active_only else stale
     updated = 0

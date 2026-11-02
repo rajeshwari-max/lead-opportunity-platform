@@ -434,6 +434,105 @@ class GenericListingScraper(BaseScraper):
                      self.name, len(items), rejected)
         return items
 
+    # ------------------------------------------------ self-healing fallback
+    def _row_from(self, title: str, url: str, text: str,
+                  deadline: str = "") -> RawOpportunity | None:
+        """Same acceptance tests as parse_listing, for a fallback candidate."""
+        title = strip_field_label(clean_title(title))
+        if not _looks_like_opportunity(title, url):
+            return None
+        if self.config.get("require_funding_signal", True) and \
+                not looks_like_funding(title, url, text):
+            return None
+        if is_furniture(title, url):
+            return None
+        m = _DEADLINE.search(text or "")
+        return RawOpportunity(
+            title=title[:500],
+            organization=self.display_name,
+            summary=text[:1000] if len(text or "") > len(title) + 40 else "",
+            deadline_raw=(deadline or (m.group(1) if m else ""))[:64],
+            opportunity_url=url,
+            website=self.website,
+            source_website=self.display_name,
+            category_hint=Category.GRANT,
+            assume_active=_says_rolling(text or ""),
+        )
+
+    def _rows(self, candidates: list[dict], page_url: str) -> list[RawOpportunity]:
+        out, seen = [], set()
+        for c in candidates:
+            url = c.get("url") or ""
+            if not url or url in seen or _same_page(url, page_url):
+                continue
+            row = self._row_from(c.get("title", ""), url, c.get("text", ""),
+                                 c.get("deadline", ""))
+            if row is not None:
+                seen.add(url)
+                out.append(row)
+        return out
+
+    async def recover_empty_page(self, client, html: str,
+                                 page_url: str) -> tuple[list[RawOpportunity], str]:
+        """The configured parse of page 1 found nothing: try the alternatives
+        in scrapers/fallback_extract.py. Returns (rows, strategy) — ([], "")
+        when none of them finds a funding opportunity. Never raises."""
+        from app.scrapers import fallback_extract as fx
+        from app.scrapers.base_scraper import PageRequest, _playwright_available
+
+        wall = fx.page_wall(html)
+        if wall:
+            self.last_probe["page_wall"] = wall
+        attempts: list[str] = []
+
+        # 1. The other fetch mode, then the normal parser.
+        try:
+            used_browser = self.last_probe.get("fetch_mode") == "browser"
+            other = None
+            if used_browser:
+                resp = await client.get(page_url)
+                if resp.status_code < 400:
+                    other = resp.text
+            elif _playwright_available():
+                other = await self._fetch_rendered(PageRequest(page_url))
+            attempts.append("other_fetch_mode")
+            if other and not fx.page_wall(other):
+                rows = self.parse_listing(other, page_url)
+                if rows:
+                    return rows, ("plain_http" if used_browser else "browser") + "_fetch"
+                html = other if wall else html     # read the real page below
+        except Exception:                                   # noqa: BLE001
+            log.debug("[%s] other fetch mode failed", self.name, exc_info=True)
+
+        # 2-3. Structured data and off-site application links on the page.
+        for strategy, finder in (
+            ("structured_data", lambda: fx.structured_data(html, page_url)),
+            ("offsite_links", lambda: fx.offsite_links(html, page_url, self.website)),
+        ):
+            try:
+                attempts.append(strategy)
+                rows = self._rows(finder(), page_url)
+                if rows:
+                    return rows, strategy
+            except Exception:                               # noqa: BLE001
+                log.debug("[%s] %s failed", self.name, strategy, exc_info=True)
+
+        # 4. The site's own feed.
+        for feed in fx.feed_urls(html, page_url, self.website):
+            try:
+                attempts.append("feed")
+                resp = await client.get(feed)
+                if resp.status_code >= 400:
+                    continue
+                rows = self._rows(fx.feed_items(resp.text), page_url)
+                if rows:
+                    return rows, f"feed ({feed})"
+            except Exception:                               # noqa: BLE001
+                log.debug("[%s] feed %s failed", self.name, feed, exc_info=True)
+
+        self.last_probe["fallbacks_tried"] = ", ".join(dict.fromkeys(attempts))
+        return [], ""
+
     @staticmethod
     def _heading_title(anchor) -> str:
         """Nearest heading text around a link, for card layouts where the

@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.scrapers.registry import SCRAPER_REGISTRY, get_scrapers  # noqa: E402
 from app.services.deadline_parser import DeadlineParser  # noqa: E402
 from app.services.links import is_furniture, is_usable_link, link_kind  # noqa: E402
+from app.services.opportunity_gate import is_opportunity, rejection_summary  # noqa: E402
 
 _deadlines = DeadlineParser()
 
@@ -105,6 +106,17 @@ def report(scraper, items, page_count, rows: int) -> dict:
     print(f"items     : {len(items)}")
     print("=" * 100)
 
+    probe = getattr(scraper, "last_probe", {}) or {}
+    if probe.get("page_wall"):
+        print(f"page wall : {probe['page_wall']}  (challenge = bot check, "
+              "js_shell = page loads its listing with JavaScript)")
+    if probe.get("extraction_strategy"):
+        print(f"RECOVERED : the configured parser found nothing; rows came from "
+              f"the fallback reader '{probe['extraction_strategy']}'. Update this "
+              "source's url/selectors in sources.json.")
+    elif probe.get("fallbacks_tried"):
+        print(f"fallbacks : tried {probe['fallbacks_tried']} — none found a call")
+
     if not items:
         print("\nNOTHING WAS PRODUCED.")
         print("  * page_count 0  -> the fetch itself failed: DNS, a block, a "
@@ -132,8 +144,18 @@ def report(scraper, items, page_count, rows: int) -> dict:
         if i.opportunity_url:
             urls.append(i.opportunity_url)
 
+    # The same opportunity test production applies before storing a row. A
+    # source whose every row fails it shows in the monthly report as
+    # "every row rejected" — this is where you see WHY.
+    curated = bool(getattr(scraper, "curated", False))
+    gate = [is_opportunity(i.title or "", i.summary or "", i.opportunity_url or "",
+                           "", curated) for i in items]
+    kept = sum(1 for ok, _ in gate if ok)
+
     n = len(items)
-    print(f"\nlinks to a specific opportunity : {deep}/{n} ({100*deep/n:.0f}%)")
+    print(f"\npass the opportunity filter     : {kept}/{n}"
+          + (f"   rejected: {rejection_summary(gate)}" if kept < n else ""))
+    print(f"links to a specific opportunity : {deep}/{n} ({100*deep/n:.0f}%)")
     print(f"carry a deadline string         : {dated}/{n} ({100*dated/n:.0f}%)")
     print(f"  ... that actually parses      : {parsed_dates}/{n} "
           f"({100*parsed_dates/n:.0f}%)")
@@ -146,6 +168,8 @@ def report(scraper, items, page_count, rows: int) -> dict:
     print("-" * 100)
     for idx, i in enumerate(items[:rows], 1):
         print(f"{idx:>3}. {i.title[:92]}")
+        ok, why = gate[idx - 1]
+        print(f"     filter   : {'KEPT' if ok else 'REJECTED - ' + why}")
         print(f"     url      : {i.opportunity_url[:110]}  [{link_kind(i.opportunity_url)}]")
         print(f"     org      : {i.organization[:60]:<60} country: {i.country[:30]}")
         print(f"     deadline : {i.deadline_raw or '(none)':<28} "
@@ -159,6 +183,11 @@ def report(scraper, items, page_count, rows: int) -> dict:
     # A short, honest verdict. The thresholds are the ones validate_sources
     # uses, so the two tools cannot disagree about the same source.
     problems = []
+    if kept == 0:
+        problems.append("the opportunity filter rejects EVERY row - either the "
+                        "page lists no open calls (repoint the URL with "
+                        "scripts/find_listing_url.py) or real calls are being "
+                        "thrown away (read the REJECTED titles above)")
     if junk:
         problems.append(f"{junk} row(s) are site furniture, not opportunities")
     if 100 * deep / n < 50:
@@ -177,6 +206,9 @@ def report(scraper, items, page_count, rows: int) -> dict:
         "pages": page_count, "items": n, "deep": deep, "dated": dated,
         "deadlines_parsed": parsed_dates, "junk": junk,
         "dup_url": len(urls) - len(set(urls)), "problems": problems,
+        "kept_by_filter": kept, "rejections": rejection_summary(gate),
+        "page_wall": probe.get("page_wall", ""),
+        "extraction_strategy": probe.get("extraction_strategy", ""),
         "rows": [i.model_dump() for i in items],
     }
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -31,8 +32,18 @@ def admin_recipients(db) -> list[str]:
     return sorted({str(email).strip().lower() for email in rows if "@" in str(email)})
 
 
+RECOVERED = "RECOVERED BY FALLBACK — CONFIG UPDATE NEEDED"
+REJECTED = "EVERY ROW REJECTED BY THE FILTER — CHECK FOR MISSED OPPORTUNITIES"
+
+
 def _bucket(entry) -> str:
     outcome = entry.last_outcome
+    message = (getattr(entry, "last_error_message", "") or "")
+    if "recovered by fallback" in message.lower():
+        return RECOVERED
+    m = re.search(r"(\d+) extracted, none new: 0 already stored, (\d+) rejected", message)
+    if m and m.group(1) == m.group(2) and int(m.group(1)) > 0:
+        return REJECTED
     if outcome == Outcome.CONFIRMED_EMPTY.value:
         return "NO ACTIVE OPPORTUNITIES (source confirmed empty)"
     if outcome in (Outcome.NO_FETCH.value, Outcome.BLOCKED.value,
@@ -59,6 +70,8 @@ def build_report(entries, generated_at: datetime | None = None) -> str:
         "NO ACTIVE OPPORTUNITIES (source confirmed empty)",
         "NO PAGE FETCHED / ACCESS FAILURE",
         "PAGE FETCHED BUT NO RESULTS / STRUCTURE CHECK NEEDED",
+        RECOVERED,
+        REJECTED,
         "OTHER ATTENTION REQUIRED",
     ):
         lines.append(f"{label}: {counts[label]}")
@@ -69,11 +82,18 @@ def build_report(entries, generated_at: datetime | None = None) -> str:
         "- No page fetched means URL/network/access/login/bot protection must be checked.",
         "- Page fetched but no results means the parser or changed page structure must be checked.",
         "- Confirmed empty is healthy: the source explicitly showed no active opportunity and remains scheduled.",
+        "- Recovered by fallback: the normal parser found nothing but an alternative reader "
+        "(other fetch mode, structured data, off-site links, feed) did — leads were still "
+        "collected, but the source's config should be updated.",
+        "- Every row rejected: the page produced candidates and the opportunity filter "
+        "discarded all of them — check that real calls are not being thrown away.",
     ]
 
     for label in (
         "NO PAGE FETCHED / ACCESS FAILURE",
         "PAGE FETCHED BUT NO RESULTS / STRUCTURE CHECK NEEDED",
+        RECOVERED,
+        REJECTED,
         "OTHER ATTENTION REQUIRED",
         "NO ACTIVE OPPORTUNITIES (source confirmed empty)",
     ):

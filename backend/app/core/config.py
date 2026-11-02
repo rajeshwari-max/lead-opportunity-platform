@@ -161,6 +161,24 @@ class Settings(BaseSettings):
     # auditable keyword rules without interrupting scraping.
     ml_classifier_enabled: bool = True
     ml_model_path: str = ""
+    # Meaning-based second opinion on brands and verticals
+    # (services/semantic_classifier.py). "off" | "shadow" | "blend".
+    # shadow: computed and recorded beside the ML result, labels unchanged.
+    # blend: ML labels kept, a label whose meaning score clears
+    # semantic_min_similarity is added. Measure with scripts/semantic_eval.py
+    # before switching to blend.
+    semantic_mode: str = "shadow"
+    semantic_model: str = "BAAI/bge-small-en-v1.5"
+    semantic_cache_dir: str = ""          # default backend/data/models
+    semantic_profiles_path: str = ""      # default app/ml_models/semantic_profiles.json
+    semantic_min_similarity: float = 0.72
+    # Blend only: a semantic label is added only if the ML model gave it at
+    # least this probability (0 = meaning alone may add it).
+    semantic_ml_floor: float = 0.0
+    # Blend only: drop an ML label whose meaning score is below this
+    # (0 = never drop anything the ML model chose).
+    semantic_veto_below: float = 0.0
+    semantic_threads: int = 1
     # Baseline filter options always shown, merged with values found in scraped
     # data. Countries only — "Global" is a scope, not a country, and belongs in
     # default_regions (listing it here put a region into the country filter).

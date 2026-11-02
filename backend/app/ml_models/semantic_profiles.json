@@ -1,0 +1,125 @@
+{
+  "_how_to_edit": "Meaning profiles for the semantic classifier (services/semantic_classifier.py). For each label, 'description' is one or two plain sentences saying what work the brand or vertical does and for whom; 'phrases' are extra ways funders describe that work. Brand keyword inventories from services/brand_keywords.py are added automatically, so do not repeat them here. Write the kind of sentence a call for proposals would contain, not internal jargon. After editing, run scripts/semantic_eval.py to see whether it helped.",
+  "brands": {
+    "Swasti": {
+      "description": "",
+      "phrases": []
+    },
+    "Vrutti": {
+      "description": "",
+      "phrases": []
+    },
+    "Upfront": {
+      "description": "",
+      "phrases": []
+    },
+    "Green Foundation": {
+      "description": "",
+      "phrases": []
+    },
+    "Community Action Collab": {
+      "description": "",
+      "phrases": []
+    },
+    "Setu": {
+      "description": "",
+      "phrases": []
+    }
+  },
+  "archetypes": {
+    "Social Business": {
+      "description": "Enterprise-led development: social ventures, agribusiness and food businesses, market systems and market linkages for producers, value chains and post-harvest, farmer producer organisations and cooperatives, and the debt, equity and blended capital that funds them.",
+      "phrases": [
+        "impact ventures and social enterprises",
+        "agribusiness development",
+        "market linkages for smallholder producers",
+        "value chain development",
+        "farmer producer companies and cooperatives",
+        "revolving funds for producer groups",
+        "equity and debt investment in enterprises",
+        "organic and residue-free produce businesses"
+      ]
+    }
+  },
+  "verticals": {
+    "Livelihood": {
+      "description": "Agriculture and rural livelihoods: raising incomes of farmers, smallholders, fishers, livestock keepers, artisans and rural households through farming, food systems, skills, self-help groups, producer organisations and rural development.",
+      "phrases": [
+        "smallholder farmer incomes",
+        "agriculture and rural development",
+        "food security and food systems",
+        "farmer producer organisations",
+        "self-help groups and women's collectives",
+        "skills and vocational training for rural youth",
+        "livestock, dairy, fisheries and aquaculture",
+        "poverty reduction and economic empowerment"
+      ]
+    },
+    "Health": {
+      "description": "Health: public and primary health care, health systems, maternal and child health, nutrition, communicable and non-communicable disease, sexual and reproductive health, mental health, water sanitation and hygiene, and the health workforce.",
+      "phrases": [
+        "public health programmes",
+        "primary health care and health systems strengthening",
+        "maternal, newborn and child health",
+        "nutrition and anaemia",
+        "tuberculosis, HIV and malaria",
+        "non-communicable diseases such as diabetes and cancer",
+        "mental health services",
+        "community health workers",
+        "water, sanitation and hygiene"
+      ]
+    },
+    "E4C(Evidence for Change)": {
+      "description": "Evidence for Change: research, monitoring and evaluation, impact assessment, baseline and endline studies, data collection and analysis, learning and knowledge management, and capacity building that produces evidence for programmes and policy.",
+      "phrases": [
+        "impact evaluation of a programme",
+        "monitoring and evaluation framework",
+        "baseline, midline and endline survey",
+        "third-party assessment",
+        "policy research and evidence synthesis",
+        "data collection and analysis",
+        "capacity building and technical assistance",
+        "learning and knowledge management"
+      ]
+    },
+    "Climate/Sustainability(ESG)": {
+      "description": "Climate and sustainability: climate adaptation and mitigation, resilience, renewable and clean energy, biodiversity and conservation, natural resource management, disaster risk reduction, pollution and waste, and ESG.",
+      "phrases": [
+        "climate adaptation and resilience",
+        "renewable energy and energy access",
+        "biodiversity and ecosystem conservation",
+        "natural resource management",
+        "disaster risk reduction",
+        "air pollution and waste management",
+        "decarbonisation and net zero",
+        "environmental, social and governance (ESG)"
+      ]
+    },
+    "Worker Wellbeing": {
+      "description": "Worker wellbeing: the health, safety, rights and welfare of workers in factories, supply chains and the informal economy, including decent work, wages, occupational health, gender equality at the workplace, migrant and domestic workers, and social protection for workers.",
+      "phrases": [
+        "garment and factory workers",
+        "supply chain worker welfare",
+        "occupational health and safety",
+        "decent work and fair wages",
+        "migrant and informal workers",
+        "gender equality and safety at the workplace",
+        "employee mental health and wellbeing",
+        "forced labour and child labour"
+      ]
+    },
+    "Innovative Finance": {
+      "description": "Innovative finance: impact investing, blended and catalytic capital, outcome- and results-based financing, social and development impact bonds, microfinance and financial inclusion, and finance for enterprises and MSMEs.",
+      "phrases": [
+        "blended finance facility",
+        "impact investment fund",
+        "results-based or outcomes-based financing",
+        "social impact bond",
+        "microfinance and financial inclusion",
+        "access to finance for MSMEs and startups",
+        "guarantee and first-loss capital",
+        "climate finance mobilisation"
+      ]
+    }
+  }
+}

@@ -73,6 +73,17 @@ cd "$REPO/backend"
 # silently publish that fallback as success.
 "$PYTHON" -c 'from app.services.ml_hierarchy import model_status; s=model_status(); print("    classifier:", s["mode"], s["version"], "rows=", s["training_rows"], "reviewed=", s["gold_rows"]); assert s["loaded"], s["error"]'
 
+# The meaning-based second opinion (services/semantic_classifier.py). The
+# first run downloads its ~130 MB embedding model into backend/data/models;
+# later runs reuse it. Never fatal: if the model cannot be fetched, the API
+# classifies with the ML model alone, exactly as before.
+"$PYTHON" -c 'from app.services import semantic_classifier as s
+if not s.enabled():
+    print("    semantic layer: off")
+else:
+    v = s.version(); st = s.status()
+    print("    semantic layer:", st["mode"], v or "UNAVAILABLE", st["error"])'   || echo "    WARNING: semantic layer check failed; ML-only classification continues"
+
 # Validate the reviewed-label export itself. The application applies matched
 # decisions first on startup, then the automatic backfill skips those rows.
 "$PYTHON" -c 'import json, pathlib; p=pathlib.Path("ml/review_labels.jsonl"); rows=[json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]; reviewed=sum(str(r.get("human_status", "")).casefold()=="reviewed" for r in rows); unresolved=len(rows)-reviewed; print(f"    review labels: {reviewed} reviewed, {unresolved} excluded"); assert reviewed > 0'
