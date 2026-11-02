@@ -14,7 +14,7 @@ def test_every_supplied_brand_search_is_walked_once():
     sections = set(da._SECTION_URLS.values())
     for url in EXPECTED_BRAND:
         assert (url in walked) != (url in sections), url
-    assert len(walked) == len(set(walked)) == 4
+    assert len(walked) == len(set(walked)) == 7
     assert {kind for _, kind in da._BRAND_SEARCHES} == {"grants"}
 
 

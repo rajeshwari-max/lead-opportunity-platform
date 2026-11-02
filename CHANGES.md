@@ -5,6 +5,25 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-02 — DevelopmentAid searches for Setu, Community Action Collab and Upfront
+
+- Added the three keyword searches the team built on DevelopmentAid to
+  `devaid_brand_search_urls` (backend/app/core/config.py), verbatim from the
+  site's address bar. Brand-level searches go from 4 to 7; each is walked
+  like the others (the site's search API, then its pagination control), so
+  every result page is reached, and the keyword text is kept on every page.
+- These three have no Status = Open or Language filter, unlike the earlier
+  four, so closed calls are returned as well; the normal deadline check
+  archives them. The Setu search contains "entitlement acce" (cut short on
+  the site); it is kept as supplied.
+- `scripts/devaid_urls.py` (run by every deploy) and the two DevelopmentAid
+  URL tests now expect the three new searches; a new test proves the
+  keywords survive pagination.
+- If LOP_DEVAID_BRAND_SEARCH_URLS is set in backend/.env it overrides this
+  list; the deploy's URL audit prints "override ... is set" in that case.
+
+---
+
 ## 2026-11-02 — Meaning-based second opinion on brands and verticals
 
 The hierarchy classifier (TF-IDF + logistic regression) weighs the words in a

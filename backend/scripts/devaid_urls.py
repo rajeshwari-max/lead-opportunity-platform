@@ -51,6 +51,27 @@ EXPECTED_BRAND = [
     "&sectors=100,3,5,9,8,29,30,85,87,43,22&statuses=3",
     "https://www.developmentaid.org/grants/search?languages=92"
     "&sectors=100,7,3,95,5,6,11,54,8,78,80,30,44,87,85,22,34,48,27&statuses=3",
+    # Setu, Community Action Collab, Upfront — keyword searches (2026-11-02).
+    'https://www.developmentaid.org/grants/search?sort=relevance.desc&searc'
+    'hedText=social%20protection%20%7C%20social%20security%20%7C%20welfare%'
+    '20scheme%20%7C%20last-mile%20delivery%20%7C%20direct%20benefit%20trans'
+    'fer%20%7C%20entitlement%20acce%20%7C%20informal%20worker%20%7C%20migra'
+    'nt%20worker%20%7C%20universal%20health%20coverage%20%7C%20shock-respon'
+    'sive%20social%20protection%20%7C%20aspirational%20district%20%7C%20pan'
+    'chayati%20raj',
+    'https://www.developmentaid.org/grants/search?sort=relevance.desc&searc'
+    'hedText=collaborative%20action%20%7C%20collective%20impact%20%7C%20sys'
+    'tems%20change%20%7C%20multi-stakeholder%20partnership%20%7C%20coalitio'
+    'n%20building%20%7C%20disaster%20risk%20reduction%20%7C%20resilience%20'
+    '%7C%20social%20protection%20%7C%20workers%27%20right%20%7C%20network%2'
+    '0effect',
+    'https://www.developmentaid.org/grants/search?sort=relevance.desc&searc'
+    'hedText=workforce%20wellbeing%20%7C%20workplace%20wellbeing%20%7C%20ga'
+    'rment%20worker%20%7C%20factory%20worker%20%7C%20informal%20worker%20%7'
+    'C%20gig%20worker%20%7C%20occupational%20health%20safety%20%7C%20gender'
+    '%20equality%20in%20the%20workplace%20%7C%20women%20safety%20at%20workp'
+    'lace%20%7C%20business%20human%20right%20%7C%20supply%20chain%20%7C%20B'
+    'RSR',
 ]
 BRAND_OVERRIDE = "LOP_DEVAID_BRAND_SEARCH_URLS"
 

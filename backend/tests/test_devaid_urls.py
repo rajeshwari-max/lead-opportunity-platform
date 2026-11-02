@@ -32,5 +32,18 @@ def test_audit_passes_for_the_current_runtime():
     passed, rows = audit()
     assert passed
     assert {row["section"] for row in rows} == {
-        "grants", "tenders", "brand-1", "brand-2", "brand-3", "brand-4", "brand-5"}
+        "grants", "tenders", *(f"brand-{i}" for i in range(1, 9))}
 
+
+
+def test_brand_keyword_searches_keep_their_keywords_on_every_page():
+    """The Setu, Community Action Collab and Upfront searches are filtered by
+    keywords alone, so losing searchedText while paging would turn them into
+    an unfiltered walk of every grant on the site."""
+    from app.scrapers.developmentaid import _BRAND_SEARCHES
+
+    keyword = [url for url, _ in _BRAND_SEARCHES if "searchedText=" in url]
+    assert len(keyword) == 3
+    for url in keyword:
+        text = parse_qs(urlparse(url).query)["searchedText"]
+        assert parse_qs(urlparse(_page_url(url, 5)).query)["searchedText"] == text
