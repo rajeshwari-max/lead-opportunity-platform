@@ -168,6 +168,9 @@ export function ExpertsCard({ readOnly = false, isAdmin = true }:
               : <><KeyRound className="h-3.5 w-3.5" /> Reconnect account</>}
           </Button>
         )}
+        {error && (
+          <p role="alert" className="rounded-lg bg-red-500/15 px-3 py-2 text-xs text-red-400">{error}</p>
+        )}
         {/* Optional session transfer remains available for other environments. */}
         {!readOnly && isAdmin && (
           <div className="space-y-1.5 rounded-lg border border-border p-2.5">
@@ -216,9 +219,6 @@ export function ExpertsCard({ readOnly = false, isAdmin = true }:
           <p className="text-right text-[11px] text-muted-foreground">
             Updated {new Date(updated).toLocaleString()}
           </p>
-        )}
-        {error && (
-          <p className="rounded-lg bg-red-500/15 px-3 py-2 text-xs text-red-400">{error}</p>
         )}
       </CardContent>
     </Card>

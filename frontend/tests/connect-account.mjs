@@ -11,7 +11,7 @@ const compiled = ts.transpileModule(
 function setup(responses, popup = true) {
   const calls = [];
   const tab = {
-    closed: false, document: { title: '', body: {} },
+    closed: false, document: { title: '', body: {style:{}} },
     close() { this.closed = true; },
     location: { href: 'about:blank', replace(url) { this.href = url; } },
   };
@@ -47,7 +47,22 @@ function setup(responses, popup = true) {
 {
   const s = setup([{body:{remote:true}}, {ok:false, body:{detail:'A scrape is running.'}}]);
   await assert.rejects(s.connect('developmentaid', '/api/devaid/connect'), /scrape is running/);
-  assert.equal(s.tab.closed, true);
+  assert.equal(s.tab.closed, false);
+  assert.match(s.tab.document.body.textContent, /A scrape is running/);
+  assert.match(s.tab.document.title, /Could not open/);
+}
+{
+  const s = setup([{body:{remote:true}},
+    {ok:false,body:{detail:'The DevelopmentAid profile is locked. Close its existing Chrome window first.'}}]);
+  await assert.rejects(s.connect('developmentaid', '/api/devaid/connect'), /profile is locked/);
+  assert.equal(s.tab.closed, false);
+  assert.match(s.tab.document.body.textContent, /Close its existing Chrome window/);
+}
+{
+  const s = setup([{ok:false,body:{detail:'Not authenticated'}}]);
+  await assert.rejects(s.connect('developmentaid', '/api/devaid/connect'), /Not authenticated/);
+  assert.equal(s.tab.closed, false);
+  assert.match(s.tab.document.body.textContent, /Not authenticated/);
 }
 {
   const s = setup([{body:{remote:true}}], false);

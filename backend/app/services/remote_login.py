@@ -84,6 +84,95 @@ def require_profile_free() -> None:
         raise RuntimeError("A DevelopmentAid login window is open. Finish or cancel it first.")
 
 
+def _profile_processes(profile: Path, proc_root: Path = Path("/proc")) -> list[int]:
+    """Linux profile owners, using exact arguments rather than a process regex.
+
+    An unreadable process owned by this service user is uncertain, not proof
+    that Chrome is absent. Never clear a lock when inspection is incomplete.
+    """
+    owners = []
+    try:
+        entries = list(proc_root.iterdir())
+        uid = os.getuid()
+        for entry in entries:
+            if not entry.name.isdecimal():
+                continue
+            try:
+                if entry.stat().st_uid != uid:
+                    continue
+                args = [os.fsdecode(a) for a in (entry / "cmdline").read_bytes().split(b"\0") if a]
+            except (FileNotFoundError, ProcessLookupError):
+                continue  # Process exited while inspecting it.
+            if not args or not any(n in Path(args[0]).name.lower() for n in ("chrome", "chromium")):
+                continue
+            for index, arg in enumerate(args):
+                raw = arg.partition("=")[2] if arg.startswith("--user-data-dir=") else (
+                    args[index + 1] if arg == "--user-data-dir" and index + 1 < len(args) else "")
+                if raw and Path(raw).resolve() == profile.resolve():
+                    owners.append(int(entry.name))
+                    break
+    except (OSError, AttributeError) as exc:
+        raise RuntimeError("Could not check whether Chrome owns the profile. "
+                           "Its lock files were kept; check the server processes.") from exc
+    return owners
+
+
+def _recover_profile_locks(profile: Path) -> None:
+    """Remove only stale Chrome lock entries after verifying the owner is gone."""
+    names = ("SingletonLock", "SingletonCookie", "SingletonSocket", "lockfile")
+    locked = [profile / name for name in names
+              if (profile / name).exists() or (profile / name).is_symlink()]
+    if not locked:
+        return
+    try:
+        snapshots = {entry: entry.lstat() for entry in locked}
+    except OSError as exc:
+        raise RuntimeError("Profile lock files changed during inspection. Try reconnecting again.") from exc
+    owners = _profile_processes(profile)
+    if owners:
+        raise RuntimeError("The DevelopmentAid profile is open in Chrome (PID "
+                           + ", ".join(map(str, owners))
+                           + "). Close that Chrome window before reconnecting.")
+    singleton = profile / "SingletonLock"
+    if singleton.exists() or singleton.is_symlink():
+        try:
+            host, raw_pid = os.readlink(singleton).rsplit("-", 1)
+            pid = int(raw_pid)
+            if pid <= 0 or host != socket.gethostname():
+                raise ValueError("Unrecognised owner")
+        except (OSError, ValueError) as exc:
+            raise RuntimeError("The profile lock's owner could not be verified. "
+                               "The lock was kept; inspect SingletonLock on EC2.") from exc
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            pass  # Recorded browser owner has exited.
+        except OSError as exc:
+            raise RuntimeError("The profile lock's process could not be checked. Lock kept.") from exc
+        else:
+            raise RuntimeError(f"The profile lock names a live process (PID {pid}). "
+                               "The lock was kept; check that process first.")
+    # Recheck immediately before removal. Normal Connect/scrape starts are
+    # already serialized by the API's shared start lock.
+    if _profile_processes(profile):
+        raise RuntimeError("Chrome opened the DevelopmentAid profile. Close it before reconnecting.")
+    try:
+        for entry in locked:
+            try:
+                current = entry.lstat()
+            except FileNotFoundError:
+                continue
+            before = snapshots[entry]
+            if (current.st_ino, current.st_mtime_ns, current.st_size) != (
+                    before.st_ino, before.st_mtime_ns, before.st_size):
+                raise RuntimeError("The profile lock changed during inspection. It was kept.")
+            entry.unlink(missing_ok=True)
+    except OSError as exc:
+        raise RuntimeError("Could not remove a stale profile lock. Check its ownership on EC2.") from exc
+    import logging
+    logging.getLogger("scraper").info("[devaid] removed stale Chrome lock entries; profile kept")
+
+
 async def start(owner: str) -> Desktop:
     global desktop
     from app.services.scraper_manager import manager
@@ -101,11 +190,7 @@ async def start(owner: str) -> Desktop:
         if devaid_auth._own_chrome_dir():
             raise RuntimeError("Remote login requires the dedicated DevelopmentAid profile. "
                                "Remove the personal Chrome profile override on this server first.")
-        pdir = devaid_auth.PROFILE_DIR
-        # Never remove a lock owned by another Chrome (including manual VNC).
-        if any((pdir / name).exists() or (pdir / name).is_symlink()
-               for name in ("SingletonLock", "lockfile")):
-            raise RuntimeError("The DevelopmentAid profile is locked. Close its existing Chrome window first.")
+        await asyncio.to_thread(_recover_profile_locks, devaid_auth.PROFILE_DIR)
         desktop = Desktop(owner=owner, deadline=time.monotonic() + seconds)
         desktop.task = asyncio.create_task(_run(desktop))
         return desktop

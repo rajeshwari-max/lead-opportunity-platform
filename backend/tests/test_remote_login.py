@@ -170,6 +170,76 @@ def test_login_rejects_running_scrape_before_launch(monkeypatch):
         asyncio.run(remote.start("admin@example.org"))
 
 
+def test_stale_lockfile_removed_without_touching_saved_login(monkeypatch, tmp_path):
+    (tmp_path / "lockfile").write_text("")
+    (tmp_path / ".connected").write_text("connected")
+    (tmp_path / "Cookies").write_text("saved login")
+    monkeypatch.setattr(remote, "_profile_processes", lambda _p: [])
+    remote._recover_profile_locks(tmp_path)
+    assert not (tmp_path / "lockfile").exists()
+    assert (tmp_path / ".connected").read_text() == "connected"
+    assert (tmp_path / "Cookies").read_text() == "saved login"
+
+
+def test_live_chrome_lock_is_never_removed(monkeypatch, tmp_path):
+    (tmp_path / "lockfile").write_text("")
+    monkeypatch.setattr(remote, "_profile_processes", lambda _p: [1234])
+    with pytest.raises(RuntimeError, match="PID 1234"):
+        remote._recover_profile_locks(tmp_path)
+    assert (tmp_path / "lockfile").exists()
+
+
+def test_uncertain_inspection_keeps_lock(monkeypatch, tmp_path):
+    (tmp_path / "lockfile").write_text("")
+    def fail(_p): raise RuntimeError("Could not check processes")
+    monkeypatch.setattr(remote, "_profile_processes", fail)
+    with pytest.raises(RuntimeError): remote._recover_profile_locks(tmp_path)
+    assert (tmp_path / "lockfile").exists()
+
+
+def test_browser_opening_during_check_keeps_lock(monkeypatch, tmp_path):
+    (tmp_path / "lockfile").write_text("")
+    results = iter([[], [1234]])
+    monkeypatch.setattr(remote, "_profile_processes", lambda _p: next(results))
+    with pytest.raises(RuntimeError, match="Chrome opened"):
+        remote._recover_profile_locks(tmp_path)
+    assert (tmp_path / "lockfile").exists()
+
+
+@pytest.mark.parametrize("owner", ["dead", "alive", "unknown", "other-host"])
+def test_singleton_owner_checked_before_cleanup(monkeypatch, tmp_path, owner):
+    # Mock readlink so this Linux lock protocol can be tested on Windows too.
+    (tmp_path / "SingletonLock").write_text("")
+    monkeypatch.setattr(remote, "_profile_processes", lambda _p: [])
+    monkeypatch.setattr(remote.socket, "gethostname", lambda: "this-host")
+    monkeypatch.setattr(remote.os, "readlink", lambda _p: (
+        "different-host-1234" if owner == "other-host" else "this-host-1234"))
+    def signal_owner(pid, sig):
+        assert (pid, sig) == (1234, 0)
+        if owner == "dead": raise ProcessLookupError()
+        if owner == "unknown": raise PermissionError()
+    monkeypatch.setattr(remote.os, "kill", signal_owner)
+    if owner == "dead":
+        remote._recover_profile_locks(tmp_path)
+        assert not (tmp_path / "SingletonLock").exists()
+    else:
+        with pytest.raises(RuntimeError): remote._recover_profile_locks(tmp_path)
+        assert (tmp_path / "SingletonLock").exists()
+
+
+def test_process_scan_matches_exact_profile_and_both_argument_styles(monkeypatch, tmp_path):
+    monkeypatch.setattr(remote.os, "getuid", lambda: tmp_path.stat().st_uid, raising=False)
+    profile = tmp_path / "profile"
+    for pid, args in [(1, ["/opt/google/chrome/chrome", f"--user-data-dir={profile}"]),
+                      (2, ["/opt/google/chrome/chrome", "--user-data-dir", str(profile)]),
+                      (3, ["/opt/google/chrome/chrome", f"--user-data-dir={profile}-other"]),
+                      (4, ["python", f"--user-data-dir={profile}"])]:
+        folder = tmp_path / str(pid)
+        folder.mkdir()
+        (folder / "cmdline").write_bytes(b"\0".join(a.encode() for a in args))
+    assert remote._profile_processes(profile, tmp_path) == [1, 2]
+
+
 def test_hard_deadline_cancels_worker_and_runs_cleanup(monkeypatch):
     cleaned = []
     async def worker(_s):

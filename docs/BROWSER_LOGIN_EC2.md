@@ -33,8 +33,10 @@ check; a saved native profile alone is not reported as a verified connection.
 It does not connect to, replace, or reveal an existing VNC desktop. It needs no
 DISPLAY setting or persistent desktop service. Use the dedicated DevelopmentAid
 profile; personal Chrome profile overrides on EC2 are rejected with an error.
-If a manual Chrome still owns that profile, close it before Connect. Lock files
-are never removed by this feature.
+If a manual Chrome still owns that profile, close it before Connect. Connect
+can remove stale lock entries after checking the exact-profile Chrome processes
+and the recorded singleton PID. Live, foreign-host or unverifiable owners keep
+their locks. Saved cookies, the connected marker and profile data are retained.
 
 ## Verification after deployment
 

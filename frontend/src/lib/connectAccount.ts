@@ -9,7 +9,10 @@ export async function connectAccount(source: string, localEndpoint: string): Pro
   try {
     if (source === "developmentaid") {
       const config = await fetch("/api/remote-login/config");
-      if (!config.ok) throw new Error("Could not check login availability. Sign in as an administrator.");
+      if (!config.ok) {
+        const error = await config.json().catch(() => ({}));
+        throw new Error(error.detail ?? "Could not check login availability. Sign in as an administrator.");
+      }
       if ((await config.json()).remote) {
         if (!tab) throw new Error("Allow popups for this platform, then click Connect again.");
         const res = await fetch("/api/remote-login/start", { method: "POST" });
@@ -38,8 +41,17 @@ export async function connectAccount(source: string, localEndpoint: string): Pro
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail ?? "Could not open a login window.");
   } catch (e) {
-    // Keep a real viewer open so its result remains readable.
-    try { if (tab && tab.location.href === "about:blank") tab.close(); } catch { /* navigated */ }
+    // A rejected start used to close this tab and leave the error beneath the
+    // Expert Pool's long list. Keep the exact reason visible in the tab too.
+    try {
+      if (tab && !tab.closed && tab.location.href === "about:blank") {
+        tab.document.title = "Could not open DevelopmentAid login";
+        tab.document.body.style.whiteSpace = "pre-wrap";
+        tab.document.body.textContent = "Could not open DevelopmentAid login.\n\n"
+          + (e instanceof Error ? e.message : "Connection failed.")
+          + "\n\nReturn to the dashboard after resolving this message, then click Connect again.";
+      }
+    } catch { /* A navigated viewer displays its own status. */ }
     throw e;
   }
 }

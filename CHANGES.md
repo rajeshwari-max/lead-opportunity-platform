@@ -5,6 +5,34 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-02 - Recover leftover DevelopmentAid profile locks conservatively
+
+- Connect previously rejected any lock entry, including a stale entry after
+  the VNC Chrome process had exited. It now checks exact-profile browser
+  arguments through Linux process data and, for SingletonLock, the recorded
+  hostname and PID before removing only stale lock entries.
+- Live Chrome, a live recorded PID, a foreign/unknown owner, unreadable process
+  data or a lock changed during inspection prevents removal. No cookies,
+  session backup, connected marker or browser profile directories are deleted.
+- Tests cover live/stale locks, uncertain inspection, a browser appearing
+  during the check, singleton owner states and exact profile argument matching.
+
+---
+
+## 2026-11-02 - Keep Connect startup errors visible
+
+- A refused login-start request previously closed the reserved blank tab.
+  Expert Pool displayed the reason only below its entire list of counts,
+  making a failed Reconnect look like an unexplained return to the dashboard.
+- The reserved tab now stays open with the server's exact reason in plain
+  text. Expert Pool also shows the error immediately beneath Connect/Reconnect.
+  Configuration-check failures retain the server message as well.
+- Frontend regression scenarios cover busy scrapes, a locked profile and an
+  expired dashboard login. This improves diagnosis; it does not remove browser
+  profile locks or bypass the server's access/scrape checks.
+
+---
+
 ## 2026-11-02 - Match Connect's Chrome launch to the working TigerVNC method
 
 - The human login browser now starts with the ordinary `google-chrome`
