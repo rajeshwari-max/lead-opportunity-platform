@@ -16,8 +16,12 @@ no API key, nothing leaves the server) turns text into a vector that encodes
 MEANING, so two texts about the same thing land close together even when they
 share no words. Each label gets a "meaning profile": the brand teams' own
 keyword inventories (services/brand_keywords.py) plus a short description and
-phrases from ml_models/semantic_profiles.json. A lead's score for a label is
-its closest cosine similarity to that label's profile.
+phrases from ml_models/semantic_profiles.json (for brands, taken from the
+brand teams' Brand Classification Input Forms). A lead's score for a label is
+its closest cosine similarity to that label's profile. The same file's
+"exclude" entries ("hospital infrastructure tenders" for a public-health
+brand) describe look-alikes: a lead closer to one of those than to the
+profile itself does not get the label.
 
 How it is used — see ml_hierarchy.py
 ------------------------------------
@@ -77,6 +81,9 @@ class SemanticResult:
     selected: dict[str, list[str]]               # group -> labels over threshold
     nearest: dict[str, str] = field(default_factory=dict)   # label -> closest anchor
     version: str = ""
+    # label -> the "words to exclude" entry the lead resembled MORE than the
+    # label's own profile; such a label is pushed below the threshold.
+    excluded: dict[str, str] = field(default_factory=dict)
 
     def as_evidence(self) -> dict:
         return {
@@ -85,6 +92,7 @@ class SemanticResult:
             "suggested": self.selected,
             "scores": {g: {k: round(v, 4) for k, v in s.items()} for g, s in self.scores.items()},
             "nearest_profile": self.nearest,
+            **({"excluded_by": self.excluded} if self.excluded else {}),
         }
 
 
@@ -133,6 +141,28 @@ def build_profiles(path: Path | None = None) -> dict[tuple[str, str], list[str]]
                 anchors[(group, label)].insert(0, f"{label}: {description}")
             anchors[(group, label)] += _chunks(label, entry.get("phrases") or [])
     return {key: value for key, value in anchors.items() if value}
+
+
+def build_exclusions(path: Path | None = None) -> dict[tuple[str, str], list[str]]:
+    """(group, label) -> "words to exclude" from the brand/vertical forms.
+
+    Each entry describes a kind of opportunity that LOOKS like the label but is
+    not one ("hospital infrastructure tenders" for a public-health brand). A
+    lead closer in meaning to an exclusion than to the label's own profile
+    does not get the label."""
+    source = path or _profiles_path()
+    try:
+        data = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out: dict[tuple[str, str], list[str]] = {}
+    for group, labels in LABELS.items():
+        for label in labels:
+            entry = (data.get(group) or {}).get(label) or {}
+            phrases = [str(p).strip() for p in entry.get("exclude") or [] if str(p).strip()]
+            if phrases:
+                out[(group, label)] = phrases
+    return out
 
 
 # ------------------------------------------------------------------- engine
@@ -193,12 +223,12 @@ def _load() -> tuple | None:
             if _engine is None:
                 _engine = _FastEmbed(settings.semantic_model, _cache_dir(),
                                      settings.semantic_threads)
-            profiles = build_profiles()
             keys, texts = [], []
-            for key, anchors in profiles.items():
-                for anchor in anchors:
-                    keys.append(key)
-                    texts.append(anchor)
+            for polarity, built in ((1, build_profiles()), (-1, build_exclusions())):
+                for (group, label), anchors in built.items():
+                    for anchor in anchors:
+                        keys.append((group, label, polarity))
+                        texts.append(anchor)
             matrix = _normalise(_engine.embed(texts))
             digest = hashlib.sha256(json.dumps(
                 [_engine.name, texts, settings.semantic_min_similarity],
@@ -273,15 +303,28 @@ def score_texts(texts: list[str],
     for row in similarity:
         scores: dict[str, dict[str, float]] = {g: {} for g in GROUPS}
         nearest: dict[str, str] = {}
-        for index, (group, label) in enumerate(keys):
+        against: dict[str, tuple[float, str]] = {}
+        for index, (group, label, polarity) in enumerate(keys):
             value = float(row[index])
-            if value > scores[group].get(label, -1.0):
+            if polarity < 0:
+                if value > against.get(label, (-1.0, ""))[0]:
+                    against[label] = (value, anchor_texts[index][:160])
+            elif value > scores[group].get(label, -1.0):
                 scores[group][label] = value
                 nearest[label] = anchor_texts[index][:160]
+        excluded: dict[str, str] = {}
+        for group in GROUPS:
+            for label, value in list(scores[group].items()):
+                negative, text = against.get(label, (-1.0, ""))
+                if negative > value:
+                    # Penalise by the margin, so the evidence still shows how
+                    # close the call was rather than a flat zero.
+                    scores[group][label] = value - (negative - value)
+                    excluded[label] = text
         selected = {}
         for group in GROUPS:
             ranked = sorted(scores[group].items(), key=lambda kv: kv[1], reverse=True)
             selected[group] = [label for label, value in ranked if value >= cut][:_MAX_PER_GROUP]
         results.append(SemanticResult(scores=scores, selected=selected,
-                                      nearest=nearest, version=ver))
+                                      nearest=nearest, version=ver, excluded=excluded))
     return results

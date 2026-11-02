@@ -1,29 +1,135 @@
 {
-  "_how_to_edit": "Meaning profiles for the semantic classifier (services/semantic_classifier.py). For each label, 'description' is one or two plain sentences saying what work the brand or vertical does and for whom; 'phrases' are extra ways funders describe that work. Brand keyword inventories from services/brand_keywords.py are added automatically, so do not repeat them here. Write the kind of sentence a call for proposals would contain, not internal jargon. After editing, run scripts/semantic_eval.py to see whether it helped.",
+  "_how_to_edit": "Meaning profiles for the semantic classifier (services/semantic_classifier.py). For each label: 'description' is one or two plain sentences saying what work it does and for whom; 'phrases' are themes, services and keywords funders would use; 'exclude' lists kinds of opportunity that look similar but must NOT get the label. Brand keyword inventories from services/brand_keywords.py are added automatically. Brand entries marked 'source' come from the brand teams' Brand Classification Input Forms. After editing, run scripts/semantic_eval.py to see whether it helped.",
   "brands": {
     "Swasti": {
-      "description": "",
-      "phrases": []
+      "source": "Brand Classification Input Form, July 2026",
+      "description": "Swasti is Catalyst's health catalyst — a not-for-profit society working to achieve public health outcomes for marginalised communities through research, community systems strengthening and direct delivery. It works with marginalised communities, informal workers, women, key populations, factory and gig workers, government health systems.",
+      "phrases": [
+        "Primary health",
+        "WASH",
+        "sexual and reproductive health",
+        "gender and equity",
+        "community and health systems strengthening",
+        "workforce wellbeing",
+        "social protection",
+        "one health",
+        "global health security",
+        "climate and health",
+        "Programme design and implementation",
+        "community-led monitoring",
+        "health systems strengthening",
+        "research and evidence generation",
+        "training and capacity building",
+        "policy advocacy",
+        "digital health (WellTech) tools",
+        "Public health",
+        "community health",
+        "pandemic preparedness"
+      ],
+      "exclude": [
+        "Clinical or hospital infrastructure tenders",
+        "pharma procurement with no public health programming component"
+      ]
     },
     "Vrutti": {
-      "description": "",
-      "phrases": []
+      "source": "Brand Classification Input Form, July 2026",
+      "description": "Vrutti is Catalyst's livelihood catalyst — a not-for-profit society that works with small producers and Farmer Producer Organisations to build income, market access and resilience. It works with smallholder and marginal farmers, FPOs/FPCs, rural women entrepreneurs, tribal communities, non-farm MSMEs.",
+      "phrases": [
+        "Livelihoods",
+        "regenerative and sustainable agriculture",
+        "agri and climate finance",
+        "entrepreneurship",
+        "FPO/FPC development",
+        "value chain strengthening",
+        "women's economic empowerment",
+        "FPO incubation and strengthening",
+        "market linkages",
+        "blended and agri-finance facilitation",
+        "capacity building",
+        "value chain studies",
+        "Livelihood",
+        "climate finance",
+        "social entrepreneurship",
+        "regenerative agriculture",
+        "blended financing",
+        "agri financing",
+        "restoration",
+        "sustainable agriculture",
+        "farm and non-farm MSME",
+        "FPO",
+        "FPCs",
+        "women entrepreneurship",
+        "farmer livelihoods",
+        "livestock",
+        "fisheries",
+        "smallholder agriculture"
+      ],
+      "exclude": [
+        "Urban livelihoods with no agriculture link",
+        "pure microfinance/BFSI opportunities with no farmer or producer angle"
+      ]
     },
     "Upfront": {
-      "description": "",
-      "phrases": []
+      "source": "Brand Classification Input Form, July 2026",
+      "description": "Upfront is Catalyst's workforce wellbeing catalyst, working with formal and informal workers to improve health, financial security, safety and agency through systems-change partnerships. It works with formal and informal workers — factory workers, fish and street vendors, construction workers, farmers, health workers — with a strong focus on women workers.",
+      "phrases": [
+        "Workforce wellbeing",
+        "health and wellbeing at work",
+        "gender equality and GBV prevention",
+        "financial and digital inclusion",
+        "social protection",
+        "labour rights",
+        "Workplace wellbeing programme design",
+        "GBV prevention and redressal systems",
+        "financial literacy training",
+        "social protection mapping and helpdesks",
+        "employer and systems partnerships",
+        "informal workers",
+        "factory workers",
+        "gender-based violence",
+        "financial inclusion",
+        "worker safety",
+        "women workers"
+      ],
+      "exclude": [
+        "General corporate HR or wellness opportunities with no vulnerable-worker focus"
+      ]
     },
     "Green Foundation": {
-      "description": "",
-      "phrases": []
+      "source": "Brand Classification Input Form, July 2026",
+      "description": "GREEN Foundation is Catalyst's agro-biodiversity organisation, working since 1994 to conserve indigenous seed varieties and support regenerative, sustainable farming. It works with small-scale and marginal farmers, rural farming communities.",
+      "phrases": [
+        "Agro-biodiversity conservation",
+        "regenerative and organic agriculture",
+        "seed conservation",
+        "climate resilience in farming",
+        "PGS organic certification",
+        "Seed conservation programmes",
+        "organic certification facilitation through the Participatory Guarantee System",
+        "farmer training",
+        "research and communication on sustainable agriculture",
+        "Agro-biodiversity",
+        "indigenous seeds",
+        "organic farming",
+        "regenerative agriculture",
+        "PGS certification",
+        "sustainable agriculture",
+        "climate resilience"
+      ],
+      "exclude": [
+        "Commercial seed or agri-input business opportunities",
+        "large-scale industrial agriculture tenders"
+      ]
     },
     "Community Action Collab": {
       "description": "",
-      "phrases": []
+      "phrases": [],
+      "exclude": []
     },
     "Setu": {
       "description": "",
-      "phrases": []
+      "phrases": [],
+      "exclude": []
     }
   },
   "archetypes": {
