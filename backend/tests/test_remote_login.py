@@ -257,12 +257,15 @@ def test_hard_deadline_cancels_worker_and_runs_cleanup(monkeypatch):
     (3, "finish", "unverified"), (0, "cancel", "cancelled")])
 def test_native_login_closes_chrome_before_separate_verification(monkeypatch, tmp_path, result, action, expected):
     events = []
+    processes = {}
     class Process:
         returncode = None
         stdout = None
         def __init__(self, name):
             self.name = name
             self.stdout = self
+            self.pid = 1000 + len(processes)
+            processes[self.pid] = self
         async def readline(self): return b"91\n"
         def terminate(self):
             self.returncode = 0
@@ -290,6 +293,11 @@ def test_native_login_closes_chrome_before_separate_verification(monkeypatch, tm
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
     monkeypatch.setattr(asyncio, "open_connection", connect)
     monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    # On Linux final cleanup addresses Chrome's owned process group instead of
+    # only its parent process. Make that platform-specific path observable to
+    # this fake process just as terminate() is on Windows.
+    monkeypatch.setattr(remote.os, "killpg",
+                        lambda pid, _sig: processes[pid].terminate(), raising=False)
     monkeypatch.setattr(devaid_auth, "PROFILE_DIR", tmp_path)
     s = remote.Desktop(owner="a", deadline=time.monotonic() + 900)
     getattr(s, action).set()

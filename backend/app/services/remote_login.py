@@ -114,7 +114,9 @@ def _profile_processes(profile: Path, proc_root: Path = Path("/proc")) -> list[i
     except (OSError, AttributeError) as exc:
         raise RuntimeError("Could not check whether Chrome owns the profile. "
                            "Its lock files were kept; check the server processes.") from exc
-    return owners
+    # /proc iteration order is filesystem-dependent. Stable PID ordering keeps
+    # diagnostics and the Linux deployment test deterministic.
+    return sorted(owners)
 
 
 def _recover_profile_locks(profile: Path) -> None:
