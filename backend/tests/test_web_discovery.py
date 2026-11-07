@@ -52,10 +52,17 @@ def test_queries_cover_india_then_south_asia_then_global(monkeypatch):
 
 
 def test_default_coverage_uses_the_complete_query_matrix():
-    assert settings.web_discovery_max_queries == 72
-    assert settings.web_discovery_max_pages_per_query == 10
-    assert settings.web_discovery_request_budget_per_run >= 720
-    assert settings.web_discovery_freshness == ""
+    # The CODE defaults, not the live settings: an operator may lower these in
+    # backend/.env (EC2 sets LOP_WEB_DISCOVERY_MAX_QUERIES), and that is a
+    # deliberate choice, not a regression. Reading field defaults also keeps a
+    # failure from printing the whole Settings object, secrets included.
+    from app.core.config import Settings
+
+    default = {name: field.default for name, field in Settings.model_fields.items()}
+    assert default["web_discovery_max_queries"] == 72
+    assert default["web_discovery_max_pages_per_query"] == 10
+    assert default["web_discovery_request_budget_per_run"] >= 720
+    assert default["web_discovery_freshness"] == ""
 
 
 def test_operator_queries_get_first_claim_on_the_budget(monkeypatch):

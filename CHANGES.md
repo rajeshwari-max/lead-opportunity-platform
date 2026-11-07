@@ -5,6 +5,17 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-07 — Deploy test no longer fails on an operator's .env override
+
+`tests/test_web_discovery.py::test_default_coverage_uses_the_complete_query_matrix`
+read the LIVE settings, so EC2's `LOP_WEB_DISCOVERY_MAX_QUERIES=18` in
+`backend/.env` failed the deploy (`assert 18 == 72`), and the assertion message
+printed the whole Settings object, secrets included, to the terminal. It now
+checks the code defaults (`Settings.model_fields`), so a deliberate override
+passes and a failure prints only the value. No runtime change.
+
+---
+
 ## 2026-11-07 — English-only intake (English editions, no machine translation)
 
 **Only English leads are stored.** Every scraped row's language is checked
