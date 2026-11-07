@@ -73,6 +73,67 @@ def test_keyword_edits_feed_rules_without_restarting(context):
     assert client.post("/api/directories/keyword", json={"name": "testterm", "scope": "Wrong vertical"}).status_code == 422
 
 
+def test_directory_duplicates_are_explained_and_not_inserted(context):
+    client, db, _, _ = context
+
+    keyword = client.post(
+        "/api/directories/keyword",
+        json={"name": "Community resilience", "scope": "Health"},
+    )
+    assert keyword.status_code == 201, keyword.text
+    repeated_keyword = client.post(
+        "/api/directories/keyword",
+        json={"name": "  community   RESILIENCE ", "scope": "Livelihood"},
+    )
+    assert repeated_keyword.status_code == 409
+    assert "already in the directory under Health" in repeated_keyword.json()["detail"]
+    core_keyword = client.post(
+        "/api/directories/keyword",
+        json={"name": "  DIGITAL health ", "scope": "Health"},
+    )
+    assert core_keyword.status_code == 409
+    assert "already included in the core keyword list under Health" in core_keyword.json()["detail"]
+
+    website = client.post(
+        "/api/directories/website",
+        json={"name": "Example Grants", "url": "https://www.example.org/funding/"},
+    )
+    assert website.status_code == 201, website.text
+    repeated_website = client.post(
+        "/api/directories/website",
+        json={"name": "Different display name", "url": "http://example.org/funding"},
+    )
+    assert repeated_website.status_code == 409
+    assert "same website URL" in repeated_website.json()["detail"]
+
+    organisation = client.post(
+        "/api/directories/organisation",
+        json={"name": "Example Foundation", "role": "whitelist"},
+    )
+    assert organisation.status_code == 201, organisation.text
+    repeated_organisation = client.post(
+        "/api/directories/organisation",
+        json={"name": " example   FOUNDATION ", "role": "resource"},
+    )
+    assert repeated_organisation.status_code == 409
+    assert "already in the directory as whitelist" in repeated_organisation.json()["detail"]
+
+    assert db.scalar(select(func.count()).select_from(DirectoryEntry)) == 3
+
+
+def test_existing_directory_entry_can_be_edited_without_false_duplicate(context):
+    client, _, _, _ = context
+    first = client.post(
+        "/api/directories/website",
+        json={"name": "Existing source", "url": "https://example.org/calls"},
+    ).json()
+    updated = client.put(
+        f"/api/directories/website/{first['id']}",
+        json={"name": "Existing source", "url": "https://example.org/calls", "notes": "Checked"},
+    )
+    assert updated.status_code == 200, updated.text
+
+
 def test_directory_authentication_and_read_only(context, monkeypatch):
     client, _, login, bob = context
     login(bob)

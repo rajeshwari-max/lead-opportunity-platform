@@ -1,6 +1,7 @@
 """Team-readable directories; mutations require an administrator."""
 from datetime import date, datetime, timezone
 from typing import Literal
+from urllib.parse import parse_qsl, urlencode, urlsplit
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
@@ -58,6 +59,27 @@ def validate_entry(kind, body, db, current=None):
         raise HTTPException(422, "Choose whitelist or resource organisation")
     if body.status == "dropped" and not body.notes.strip():
         raise HTTPException(422, "Record the review reason before dropping an entry")
+    if kind == "keyword" and (current is None or _name_key(body.name) != _name_key(current.name)):
+        from app.services.keyword_inventory import VERTICAL_KEYWORDS
+        existing_scopes = [vertical for vertical, terms in VERTICAL_KEYWORDS.items()
+                           if any(_name_key(term) == _name_key(body.name) for term in terms)]
+        if existing_scopes:
+            raise HTTPException(
+                409,
+                f'Keyword “{body.name.strip()}” is already included in the core keyword list '
+                f'under {", ".join(existing_scopes)}. It does not need to be added again.',
+            )
+    duplicate, reason = find_duplicate(kind, body, db, current)
+    if duplicate:
+        label = {"keyword": "Keyword", "website": "Source website", "organisation": "Organisation"}[kind]
+        detail = f'{label} “{duplicate.name}” is already in the directory'
+        if kind == "keyword" and duplicate.scope:
+            detail += f" under {duplicate.scope}"
+        if kind == "organisation" and duplicate.role:
+            detail += f" as {duplicate.role.replace('_', ' ')}"
+        if reason == "url":
+            detail += " with the same website URL"
+        raise HTTPException(409, detail + ". Open the existing entry instead of adding it again.")
     if kind == "website" and body.scope:
         from app.scrapers.registry import SCRAPER_REGISTRY
         if body.scope not in SCRAPER_REGISTRY:
@@ -67,6 +89,54 @@ def validate_entry(kind, body, db, current=None):
             raise HTTPException(409, "This scraper already has a directory entry")
     if kind == "website" and current and current.scope and body.scope != current.scope:
         raise HTTPException(422, "The installed scraper key is fixed; add another website entry for a different source")
+
+
+def _name_key(value: str) -> str:
+    return " ".join((value or "").casefold().split())
+
+
+def _url_key(value: str) -> str:
+    """Compare harmless URL variants without merging genuinely different pages."""
+    if not value:
+        return ""
+    try:
+        parts = urlsplit(value.strip())
+    except ValueError:
+        return ""
+    host = (parts.hostname or "").casefold().removeprefix("www.")
+    if not host:
+        return ""
+    port = parts.port
+    if port and not ((parts.scheme == "http" and port == 80) or (parts.scheme == "https" and port == 443)):
+        host += f":{port}"
+    path = "/" + "/".join(segment for segment in parts.path.split("/") if segment)
+    if path == "/":
+        path = ""
+    query = urlencode(sorted(parse_qsl(parts.query, keep_blank_values=True)))
+    return host + path.casefold() + ("?" + query if query else "")
+
+
+def find_duplicate(kind, body, db, current=None):
+    """Return an existing logical duplicate and the matched field.
+
+    Database hashes remain the final race-condition guard. This readable check
+    catches case/spacing variants and website URLs entered under another name.
+    Existing legacy duplicates can still be edited when their identifying
+    name/URL has not changed.
+    """
+    rows = db.scalars(select(DirectoryEntry).where(DirectoryEntry.kind == kind)).all()
+    name = _name_key(body.name)
+    url = _url_key(body.url) if kind == "website" else ""
+    name_changed = current is None or name != _name_key(current.name)
+    url_changed = current is None or url != _url_key(current.url)
+    for row in rows:
+        if current is not None and row.id == current.id:
+            continue
+        if name_changed and name and _name_key(row.name) == name:
+            return row, "name"
+        if kind == "website" and url_changed and url and _url_key(row.url) == url:
+            return row, "url"
+    return None, ""
 
 
 @router.get("/{kind}")
