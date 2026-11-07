@@ -173,13 +173,17 @@ async function poll() {
     const r = await fetch(base + '/status', {cache:'no-store'});
     if(!r.ok) throw new Error('Login access ended. Return to the dashboard.');
     const s = await r.json(); message.textContent = s.message;
+    // A failed scrape-shaped check can reopen the visible browser for a
+    // security/MFA step. Re-enable Done and reconnect VNC for that new round.
+    if(s.state === 'ready') saving = false;
     done.disabled = saving || s.state !== 'ready';
     if(s.state === 'ready' && !rfb) {
       const url = new URL(base + '/socket', location.origin);
       url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      rfb = new RFB(document.querySelector('#screen'), url.href);
-      rfb.scaleViewport = true; rfb.resizeSession = false;
-      rfb.addEventListener('disconnect', () => {
+      const connection = new RFB(document.querySelector('#screen'), url.href);
+      rfb = connection; connection.scaleViewport = true; connection.resizeSession = false;
+      connection.addEventListener('disconnect', () => {
+        if(rfb === connection) rfb = null;
         if(!stopped && !saving) message.textContent = 'Viewer disconnected. Refresh this tab to reconnect.';
       });
     }

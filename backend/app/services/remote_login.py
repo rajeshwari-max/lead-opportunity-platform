@@ -22,6 +22,14 @@ from zoneinfo import ZoneInfo
 from app.core.config import settings
 
 NOVNC = Path("/usr/share/novnc")
+PROFILE_SETTLE_SECONDS = 2
+
+# The verifier is a separate process so it can open the same profile only after
+# the visible Chrome window has released it. Its exit code tells the visible
+# login flow what the site actually showed.
+VERIFY_SIGNED_OUT = 3
+VERIFY_CHALLENGE = 4
+VERIFY_UNCLEAR = 5
 
 
 def available() -> bool:
@@ -259,13 +267,6 @@ async def _run_desktop(s: Desktop):
             "-nopw", "-forever", "-shared", "-quiet",
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         devaid_auth.PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-        # Match the working TigerVNC command. No Playwright driver, debugging
-        # port, injected scripts or extra browser flags during human sign-in.
-        chrome = await asyncio.create_subprocess_exec(
-            "google-chrome", f"--user-data-dir={devaid_auth.PROFILE_DIR}",
-            "--no-first-run", devaid_auth.LOGIN_URL,
-            env={**os.environ, "DISPLAY": f":{number}"}, start_new_session=True,
-            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         for _ in range(50):
             if vnc.returncode is not None:
                 raise RuntimeError("The remote viewer could not start.")
@@ -278,30 +279,48 @@ async def _run_desktop(s: Desktop):
                 await asyncio.sleep(0.1)
         else:
             raise RuntimeError("The remote viewer did not become ready.")
-        s.state, s.message = "ready", "Sign in, then click Done to save the session."
-        while not s.finish.is_set() and not s.cancel.is_set() and time.monotonic() < s.deadline:
-            if xvfb.returncode is not None or vnc.returncode is not None:
-                raise RuntimeError("The temporary desktop stopped unexpectedly.")
-            if chrome.returncode is not None:
-                if chrome.returncode != 0:
-                    raise RuntimeError("Chrome exited before login could be saved.")
-                s.finish.set()  # Native window closed: verify, never assume login.
-                break
-            await asyncio.sleep(0.25)
-        if s.cancel.is_set():
-            s.state, s.message = "cancelled", "Login cancelled."
-        elif not s.finish.is_set():
-            s.state, s.message = "expired", "The login window ended. Click Connect to try again."
-        else:
-            s.state, s.message = "saving", "Checking and saving your login."
-            # Close Chrome before reading the same profile. SIGTERM first;
-            # forced group cleanup is reserved for an unresponsive process.
-            await _stop_process(chrome, group=True, graceful=True)
+        prompt = "Sign in fully, wait until your account page appears, then click Done."
+        checks = 0
+        while not s.cancel.is_set() and time.monotonic() < s.deadline:
+            s.finish.clear()
+            # Match the working TigerVNC command. No Playwright driver, debugging
+            # port, injected scripts or extra browser flags during human sign-in.
+            chrome = await asyncio.create_subprocess_exec(
+                "google-chrome", f"--user-data-dir={devaid_auth.PROFILE_DIR}",
+                "--no-first-run", devaid_auth.LOGIN_URL,
+                env={**os.environ, "DISPLAY": f":{number}"}, start_new_session=True,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            s.state, s.message = "ready", prompt
+
+            while (not s.finish.is_set() and not s.cancel.is_set()
+                   and time.monotonic() < s.deadline):
+                if xvfb.returncode is not None or vnc.returncode is not None:
+                    raise RuntimeError("The temporary desktop stopped unexpectedly.")
+                if chrome.returncode is not None:
+                    if chrome.returncode != 0:
+                        raise RuntimeError("Chrome exited before login could be saved.")
+                    s.finish.set()  # Native window closed: verify, never assume login.
+                    break
+                await asyncio.sleep(0.25)
+
             if s.cancel.is_set():
                 s.state, s.message = "cancelled", "Login cancelled."
-                return
-            # Separate process: the API keeps its scrape reservation throughout
-            # verification, and cancellation can also stop Playwright children.
+                break
+            if not s.finish.is_set():
+                s.state, s.message = "expired", "The login window ended. Click Connect to try again."
+                break
+
+            checks += 1
+            s.state, s.message = "saving", "Waiting for Chrome to save, then checking the signed-in session…"
+            await _stop_process(chrome, group=True, graceful=True)
+            chrome = None
+            if s.cancel.is_set():
+                s.state, s.message = "cancelled", "Login cancelled."
+                break
+            # Chrome writes cookies and preferences asynchronously even after
+            # its window disappears. Let those writes settle before verification.
+            await asyncio.sleep(PROFILE_SETTLE_SECONDS)
+
             verifier = await asyncio.create_subprocess_exec(
                 sys.executable, "-m", "app.services.remote_login", "--verify",
                 cwd=str(devaid_auth.PROFILE_DIR.parent.parent),
@@ -311,13 +330,27 @@ async def _run_desktop(s: Desktop):
                 await asyncio.sleep(0.25)
             if s.cancel.is_set():
                 s.state, s.message = "cancelled", "Login cancelled."
-            elif verifier.returncode == 0:
-                s.state, s.message = "connected", "DevelopmentAid connected. You can close this tab."
+                break
+            result = verifier.returncode
+            await _stop_process(verifier, group=True)
+            verifier = None
+            if result == 0:
+                s.state, s.message = "connected", (
+                    "DevelopmentAid sign-in was verified and saved. The scraper can now use it.")
+                break
+
+            # Reopen the same visible profile for security/MFA/sign-in pages.
+            # A person completes those controls; the app never bypasses them.
+            if result == VERIFY_CHALLENGE:
+                prompt = (f"Security verification appeared during check {checks}. Complete it in "
+                          "DevelopmentAid, wait for the signed-in account page, then click Done again.")
+            elif result == VERIFY_SIGNED_OUT:
+                prompt = (f"DevelopmentAid still showed Sign in after check {checks}. Finish the "
+                          "email/password and any verification step, wait for your account page, "
+                          "then click Done again.")
             else:
-                s.state, s.message = "unverified", (
-                    "Chrome saved its profile, but the scrape-session check could not confirm sign-in. "
-                    "A security check can prevent verification even after a successful login. "
-                    "Your profile has been kept; check the scraper log for details.")
+                prompt = (f"Check {checks} could not confirm the page. Wait for DevelopmentAid to "
+                          "finish loading or complete any verification shown, then click Done again.")
     except asyncio.CancelledError:
         s.state, s.message = "cancelled", "Login closed."
         raise
@@ -344,6 +377,11 @@ if __name__ == "__main__":
     if sys.argv[1:] != ["--verify"]:
         raise SystemExit(2)
     from app.core.logging_config import setup_logging
-    from app.scrapers.devaid_auth import verify_session
+    from app.scrapers.devaid_auth import LAST_VERIFY, verify_session
     setup_logging()
-    raise SystemExit(0 if verify_session(dedicated_profile=True, save=True) else 3)
+    if verify_session(dedicated_profile=True, save=True):
+        raise SystemExit(0)
+    reason = LAST_VERIFY.get("reason")
+    raise SystemExit({"guest": VERIFY_SIGNED_OUT,
+                      "challenge": VERIFY_CHALLENGE,
+                      "blank": VERIFY_UNCLEAR}.get(reason, VERIFY_UNCLEAR))

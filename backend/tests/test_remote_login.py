@@ -253,11 +253,14 @@ def test_hard_deadline_cancels_worker_and_runs_cleanup(monkeypatch):
     assert s.state == "expired" and cleaned == [True]
 
 
-@pytest.mark.parametrize("result,action,expected", [(0, "finish", "connected"),
-    (3, "finish", "unverified"), (0, "cancel", "cancelled")])
-def test_native_login_closes_chrome_before_separate_verification(monkeypatch, tmp_path, result, action, expected):
+@pytest.mark.parametrize("results,action,expected", [([0], "finish", "connected"),
+    ([remote.VERIFY_CHALLENGE, 0], "finish", "connected"),
+    ([], "cancel", "cancelled")])
+def test_native_login_closes_chrome_before_separate_verification(monkeypatch, tmp_path, results, action, expected):
     events = []
     processes = {}
+    verification_results = iter(results)
+    s = remote.Desktop(owner="a", deadline=time.monotonic() + 900)
     class Process:
         returncode = None
         stdout = None
@@ -279,11 +282,12 @@ def test_native_login_closes_chrome_before_separate_verification(monkeypatch, tm
                             "--no-first-run", devaid_auth.LOGIN_URL)
             assert kwargs["env"]["DISPLAY"] == ":91"
             assert kwargs["start_new_session"] is True
+            getattr(s, action).set()
         elif "--verify" in args:
             assert "google-chrome closed" in events
             assert args[1:] == ("-m", "app.services.remote_login", "--verify")
             assert kwargs["start_new_session"] is True
-            proc.returncode = result
+            proc.returncode = next(verification_results)
         return proc
     class Writer:
         def close(self): pass
@@ -299,13 +303,14 @@ def test_native_login_closes_chrome_before_separate_verification(monkeypatch, tm
     monkeypatch.setattr(remote.os, "killpg",
                         lambda pid, _sig: processes[pid].terminate(), raising=False)
     monkeypatch.setattr(devaid_auth, "PROFILE_DIR", tmp_path)
-    s = remote.Desktop(owner="a", deadline=time.monotonic() + 900)
-    getattr(s, action).set()
     asyncio.run(remote._run(s))
     assert s.state == expected
     assert "google-chrome closed" in events
     assert "Xvfb closed" in events and "x11vnc closed" in events
-    assert any(isinstance(e, tuple) and "--verify" in e for e in events) == (action == "finish")
+    verifier_calls = [e for e in events if isinstance(e, tuple) and "--verify" in e]
+    assert len(verifier_calls) == len(results)
+    chrome_calls = [e for e in events if isinstance(e, tuple) and e[0] == "google-chrome"]
+    assert len(chrome_calls) == (len(results) if action == "finish" else 1)
     vnc = next(e for e in events if isinstance(e, tuple) and e[0] == "x11vnc")
     assert "-localhost" in vnc
 
