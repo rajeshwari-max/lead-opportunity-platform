@@ -77,7 +77,10 @@ _OPPORTUNITY_WORDS = re.compile(
     r"challenges?|competitions?|accelerators?|incubators?|"
     # application language
     r"applications?\s+(are\s+)?(open|invited|welcome)|apply\s+(now|by|for)|"
-    r"proposals?\s+(are\s+)?(invited|sought|welcome)|open\s+calls?"
+    r"proposals?\s+(are\s+)?(invited|sought|welcome)|open\s+calls?|"
+    # "Proposals due: 12 January 2027" — a call with a date on it (J-PAL's
+    # initiative cards say exactly this and nothing else).
+    r"(proposals?|applications?|submissions?)\s+(are\s+)?due"
     r")\b",
     re.IGNORECASE,
 )
@@ -111,12 +114,22 @@ _DIRECT_CALL_WORDS = re.compile(
 _NOT_AN_OPPORTUNITY_HREF = re.compile(
     r"/(news|blog|blogs|press|press-releases?|media|stories|story|article|"
     r"articles|events?|webinars?|podcasts?|videos?|publications?|reports?|"
-    r"annual-reports?|research|insights?|resources?|library|about|about-us|"
+    r"annual-reports?|insights?|resources?|library|about|about-us|"
     r"team|people|staff|board|careers?|jobs?|vacanc\w*|contact|privacy|terms|"
     r"cookies?|sitemap|search|tag|tags|category|categories|author|feed|"
     r"grantees?|our-grantees?|past-grants?|awarded|portfolio|case-stud\w*|"
     r"impact|annual-review|newsletter|subscribe|donate|login|signin|register)"
-    r"(?=[-/?#._]|$)",
+    r"(?=[-/?#._]|$)"
+    # "research" on its own segment is a publications section, but
+    # /research-grants/ and /research-funding/ are where funders keep their
+    # CALLS. Matching them as research pages dropped every ISTI scheme
+    # (/funding-opportunities/research-grants/<scheme>) and every Wellcome
+    # scheme (/research-funding/schemes/<scheme>) as "page type is never an
+    # opportunity" — the November 2026 report's "every row rejected" sources.
+    # Only "research" gets this exemption: /news-grants-2025 is still news.
+    r"|/research(?=[-/?#._]|$)"
+    r"(?!-(?:grants?|funding|funds?|calls?|fellowships?|proposals?|"
+    r"opportunit\w*|schemes?|awards?|programmes?)(?=[-/?#._]|$))",
     re.IGNORECASE,
 )
 

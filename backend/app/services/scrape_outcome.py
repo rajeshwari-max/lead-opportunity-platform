@@ -126,7 +126,12 @@ class ErrorCode(str, Enum):
 _EMPTY_PHRASES = re.compile(
     r"\b("
     r"no\s+(current|open|active|available|matching)\s+"
-    r"(opportunit\w+|tenders?|notices?|calls?|grants?|results?|vacanc\w+)|"
+    r"(opportunit\w+|tenders?|notices?|calls?|grants?|results?|vacanc\w+|rfps?)|"
+    # Wordings seen on flagged sources in November 2026 (AFD, Tawingo, SVCF):
+    r"no\s+calls?\s+for\s+(projects?|proposals?)\s+(were\s+)?found|"
+    r"aucun\s+appels?\s+(à|a)\s+projets?\s+trouv\w*|"
+    r"currently\s+not\s+accepting\s+(applications?|proposals?)|"
+    r"(\d{4}\s+)?applications?\s+(has|have|is|are)\s+(now\s+)?closed|"
     r"there\s+are\s+(currently\s+)?no\s+\w+|"
     r"no\s+(calls?|rfps?|applications?)\s+(are\s+)?currently\s+open|"
     r"(the\s+)?open\s+call\s+window\s+is\s+(now\s+)?closed|"
@@ -143,6 +148,8 @@ _CHALLENGE_MARKERS = (
     "just a moment", "attention required", "checking your browser",
     "cf-chl", "challenge-platform", "turnstile", "cf_chl_opt",
     "sorry, you have been blocked", "enable javascript and cookies",
+    # NIHR's AWS WAF page and Cloudflare's newer interstitial wording:
+    "confirm you are human", "performing security verification",
 )
 
 

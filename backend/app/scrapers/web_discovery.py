@@ -18,7 +18,7 @@ import logging
 import re
 from collections import Counter
 from collections.abc import AsyncIterator
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
@@ -28,7 +28,12 @@ from bs4 import BeautifulSoup
 from app.core.config import settings
 from app.database.models import Category
 from app.schemas.opportunity import RawOpportunity
-from app.scrapers.base_scraper import BaseScraper, ProgressCallback
+from app.scrapers.base_scraper import (
+    BaseScraper,
+    PageRequest,
+    ProgressCallback,
+    _playwright_available,
+)
 from app.scrapers.registry import register
 from app.services.deadline_parser import DeadlineParser
 from app.services.opportunity_gate import is_opportunity
@@ -166,9 +171,32 @@ def build_queries(today: date | None = None) -> list[str]:
         '("South Asia" OR Bangladesh OR Nepal OR Bhutan OR "Sri Lanka" OR Maldives OR Pakistan)',
         '(global OR international)',
     )
-    suffix = f"({today.year} OR {today.year + 1}) -jobs -careers -awarded -closed"
-    built = [f"{call_terms} {theme} {geo} {suffix}"
+    # A year term looked precise but hid rolling calls and pages whose title
+    # did not repeat their deadline year. Freshness and the detail-page
+    # deadline gate are safer controls.
+    suffix = '("open" OR deadline OR "apply by") -jobs -careers -awarded -closed -expired'
+    broad = [f"{call_terms} {theme} {geo} {suffix}"
              for geo in geographies for theme in themes]
+    families = (
+        '(grant OR "funding opportunity" OR "call for applications")',
+        '("request for proposals" OR RFP OR RFQ OR tender OR procurement)',
+        '("call for proposals" OR "expression of interest" OR EOI OR fellowship OR challenge)',
+    )
+    # Add one narrower, rotated category family for every theme/geography.
+    # Rotation avoids spending the whole request budget on one opportunity
+    # type or geography before the others receive coverage.
+    focused = [
+        f"{families[(theme_index + geo_index) % len(families)]} {theme} {geo} {suffix}"
+        for geo_index, geo in enumerate(geographies)
+        for theme_index, theme in enumerate(themes)
+    ]
+    # If an operator raises max_queries beyond 36, expose the remaining
+    # category-family combinations in a deterministic, balanced order.
+    expanded = [
+        f"{family} {theme} {geo} {suffix}"
+        for family in families for geo in geographies for theme in themes
+    ]
+    built = [*broad, *focused, *expanded]
     extras = [q.strip() for q in settings.web_discovery_extra_queries.split("|") if q.strip()]
     # Explicit operator-provided searches get first claim on the configured
     # budget; built-ins fill the remainder and keep deterministic order.
@@ -180,6 +208,10 @@ def build_queries(today: date | None = None) -> list[str]:
             seen.add(key)
             unique.append(query)
     return unique[:max(1, settings.web_discovery_max_queries)]
+
+
+class SearchBudgetExhausted(RuntimeError):
+    """The configured per-run or calendar-month Search API cap was reached."""
 
 
 class WebDiscoveryScraper(BaseScraper):
@@ -196,8 +228,11 @@ class WebDiscoveryScraper(BaseScraper):
         super().__init__()
         self._fetch_limit = asyncio.Semaphore(
             max(1, min(12, settings.web_discovery_fetch_concurrency)))
+        self._js_render_lock = asyncio.Semaphore(1)
+        self._run_search_requests = 0
+        self._js_rendered = 0
         self.last_probe: dict = {
-            "fetch_mode": "search_api+http",
+            "fetch_mode": "search_api+http+bounded_playwright",
             "attempts": 0,
             "final_url": _API_URL,
             "response_bytes": 0,
@@ -208,13 +243,50 @@ class WebDiscoveryScraper(BaseScraper):
         """Unused: discovery has a JSON search stage followed by detail pages."""
         return []
 
-    async def _search(self, client: httpx.AsyncClient, query: str) -> list[dict]:
+    @property
+    def _usage_path(self) -> Path:
+        return Path(settings.log_dir).parent / "data" / "web_discovery_usage.json"
+
+    def _read_usage(self) -> dict:
+        month = date.today().strftime("%Y-%m")
+        try:
+            data = json.loads(self._usage_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            data = {}
+        if data.get("month") != month:
+            data = {"month": month, "requests": 0}
+        data["requests"] = max(0, int(data.get("requests") or 0))
+        return data
+
+    def _reserve_search_request(self) -> dict:
+        """Count every HTTP attempt before it is sent, including retries."""
+        if self._run_search_requests >= max(1, settings.web_discovery_request_budget_per_run):
+            raise SearchBudgetExhausted("per-run Search API request budget reached")
+        usage = self._read_usage()
+        if usage["requests"] >= max(1, settings.web_discovery_monthly_request_limit):
+            raise SearchBudgetExhausted("monthly Search API request budget reached")
+        self._run_search_requests += 1
+        usage["requests"] += 1
+        usage["updated_at"] = datetime.now(timezone.utc).isoformat()
+        path = self._usage_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(usage, indent=2), encoding="utf-8")
+        temporary.replace(path)
+        return usage
+
+    async def _search(
+        self, client: httpx.AsyncClient, query: str, offset: int = 0,
+    ) -> tuple[list[dict], bool]:
         params = {
             "q": query,
             "count": max(1, min(20, settings.web_discovery_results_per_query)),
+            "offset": max(0, min(9, offset)),
             "search_lang": "en",
             "safesearch": "strict",
             "spellcheck": "true",
+            "result_filter": "web",
+            "extra_snippets": "true",
         }
         freshness = settings.web_discovery_freshness.strip()
         if freshness:
@@ -226,6 +298,7 @@ class WebDiscoveryScraper(BaseScraper):
         }
         last_error: Exception | None = None
         for attempt in range(1, settings.max_retries + 1):
+            self._reserve_search_request()
             self.last_probe["attempts"] += 1
             try:
                 response = await client.get(_API_URL, params=params, headers=headers)
@@ -235,7 +308,9 @@ class WebDiscoveryScraper(BaseScraper):
                 self.last_probe["response_bytes"] += len(response.content)
                 response.raise_for_status()
                 data = response.json()
-                return list((data.get("web") or {}).get("results") or [])
+                results = list((data.get("web") or {}).get("results") or [])
+                more = bool((data.get("query") or {}).get("more_results_available"))
+                return results, more
             except (httpx.HTTPError, ValueError) as exc:
                 last_error = exc
                 status = getattr(getattr(exc, "response", None), "status_code", None)
@@ -370,6 +445,40 @@ class WebDiscoveryScraper(BaseScraper):
             html, search_title, search_description)
         combined = _clean(" ".join((title, search_description, meta_summary, page_text)), 90_000)
         deadline_raw, parsed_deadline, rolling = self._deadline(combined)
+        # Some public pages return only an empty JavaScript shell to an HTTP
+        # client. Render a small, strictly bounded number in Chromium, one at a
+        # time, and re-run the same page/deadline gates on the rendered DOM.
+        if (
+            settings.web_discovery_js_render_enabled
+            and parsed_deadline is None
+            and not rolling
+            and self._js_rendered < max(0, settings.web_discovery_js_render_limit_per_run)
+            and _playwright_available()
+        ):
+            async with self._js_render_lock:
+                if self._js_rendered < max(0, settings.web_discovery_js_render_limit_per_run):
+                    self._js_rendered += 1
+                    counters["js_render_attempted"] += 1
+                    rendered = await self._fetch_rendered(PageRequest(url))
+                    if rendered:
+                        rendered_title, rendered_summary, rendered_text, rendered_site = (
+                            self._page_parts(rendered, title, meta_summary)
+                        )
+                        title = rendered_title or title
+                        meta_summary = rendered_summary or meta_summary
+                        page_text = rendered_text or page_text
+                        site_name = rendered_site or site_name
+                        combined = _clean(
+                            " ".join((title, search_description, meta_summary, page_text)),
+                            90_000,
+                        )
+                        deadline_raw, parsed_deadline, rolling = self._deadline(combined)
+                        if parsed_deadline is not None or rolling:
+                            counters["js_render_recovered"] += 1
+                        else:
+                            counters["js_render_no_deadline"] += 1
+                    else:
+                        counters["js_render_failed"] += 1
         if settings.web_discovery_require_deadline and parsed_deadline is None and not rolling:
             counters["no_readable_active_deadline"] += 1
             return None
@@ -427,64 +536,121 @@ class WebDiscoveryScraper(BaseScraper):
                 "Whole Web Discovery is enabled but LOP_BRAVE_SEARCH_API_KEY is empty"
             )
 
+        # Scraper objects are registered once and reused, so per-run counters
+        # must be reset here rather than only in __init__.
+        self._run_search_requests = 0
+        self._js_rendered = 0
         queries = build_queries()
         seen_urls: set[str] = set()
         counters: Counter = Counter()
         report = {"queries": queries, "counts": {}, "query_results": []}
+        request_page = 0
+        budget_exhausted = ""
+        max_pages = max(1, min(10, settings.web_discovery_max_pages_per_query))
+        planned_requests = min(
+            len(queries) * max_pages,
+            max(1, settings.web_discovery_request_budget_per_run),
+        )
+        log.info(
+            "[%s] high-coverage run: %s complementary queries, up to %s pages "
+            "each (%s API requests planned); full public index=%s",
+            self.name, len(queries), max_pages, planned_requests,
+            not bool(settings.web_discovery_freshness.strip()),
+        )
+        report["coverage_plan"] = {
+            "query_count": len(queries),
+            "max_pages_per_query": max_pages,
+            "planned_request_ceiling": planned_requests,
+            "freshness": settings.web_discovery_freshness.strip() or "full_index",
+        }
         async with httpx.AsyncClient(timeout=settings.request_timeout) as client:
-            for page_number, query in enumerate(queries, start=1):
+            for query_index, query in enumerate(queries, start=1):
                 if stop_event.is_set():
                     break
-                await pause_event.wait()
-                await progress("page_start", {
-                    "source": self.name, "page": page_number, "url": _API_URL,
-                })
-                try:
-                    results = await self._search(client, query)
-                except RuntimeError:
-                    await progress("page_error", {"source": self.name, "page": page_number})
-                    raise
-                counters["search_results"] += len(results)
-                fresh_results: list[dict] = []
-                for result in results:
-                    url = _normalise_url(result.get("url") or "")
-                    if not url or url in seen_urls:
-                        counters["duplicate_search_url"] += 1
-                        continue
-                    seen_urls.add(url)
-                    fresh_results.append(result)
+                for offset in range(max_pages):
+                    if stop_event.is_set():
+                        break
+                    await pause_event.wait()
+                    request_page += 1
+                    await progress("page_start", {
+                        "source": self.name, "page": request_page, "url": _API_URL,
+                    })
+                    try:
+                        results, more_available = await self._search(client, query, offset)
+                    except SearchBudgetExhausted as exc:
+                        budget_exhausted = str(exc)
+                        counters["budget_exhausted"] += 1
+                        log.info("[%s] %s; discovery stopped cleanly", self.name, exc)
+                        await progress("page_done", {
+                            "source": self.name, "page": request_page, "found": 0,
+                        })
+                        break
+                    except RuntimeError:
+                        await progress("page_error", {"source": self.name, "page": request_page})
+                        raise
+                    counters["search_results"] += len(results)
+                    fresh_results: list[dict] = []
+                    for result in results:
+                        url = _normalise_url(result.get("url") or "")
+                        if not url or url in seen_urls:
+                            counters["duplicate_search_url"] += 1
+                            continue
+                        seen_urls.add(url)
+                        fresh_results.append(result)
 
-                resolved = await asyncio.gather(
-                    *(self._candidate(client, result, counters) for result in fresh_results),
-                    return_exceptions=True,
-                )
-                items: list[RawOpportunity] = []
-                for candidate in resolved:
-                    if isinstance(candidate, Exception):
-                        counters["candidate_parse_failed"] += 1
-                        log.warning("[%s] candidate failed: %s", self.name, candidate)
-                    elif candidate is not None:
-                        items.append(candidate)
-                counters["yielded_candidates"] += len(items)
-                report["query_results"].append({
-                    "query": query,
-                    "returned": len(results),
-                    "new_urls": len(fresh_results),
-                    "accepted": len(items),
-                })
-                log.info("[%s] query %s/%s: %s results, %s new URLs, %s active opportunities",
-                         self.name, page_number, len(queries), len(results), len(fresh_results), len(items))
-                if items:
-                    sample = " | ".join(item.title[:120] for item in items[:5])
-                    self.last_probe["body_sample"] = _clean(
-                        f"{self.last_probe.get('body_sample', '')} {sample}", 4000)
-                    yield items
-                await progress("page_done", {
-                    "source": self.name, "page": page_number, "found": len(items),
-                })
+                    resolved = await asyncio.gather(
+                        *(self._candidate(client, result, counters) for result in fresh_results),
+                        return_exceptions=True,
+                    )
+                    items: list[RawOpportunity] = []
+                    for candidate in resolved:
+                        if isinstance(candidate, Exception):
+                            counters["candidate_parse_failed"] += 1
+                            log.warning("[%s] candidate failed: %s", self.name, candidate)
+                        elif candidate is not None:
+                            items.append(candidate)
+                    counters["yielded_candidates"] += len(items)
+                    report["query_results"].append({
+                        "query": query,
+                        "query_index": query_index,
+                        "offset": offset,
+                        "returned": len(results),
+                        "new_urls": len(fresh_results),
+                        "accepted": len(items),
+                        "more_results_available": more_available,
+                    })
+                    log.info(
+                        "[%s] query %s/%s offset %s: %s results, %s new URLs, "
+                        "%s active opportunities",
+                        self.name, query_index, len(queries), offset, len(results),
+                        len(fresh_results), len(items),
+                    )
+                    if items:
+                        sample = " | ".join(item.title[:120] for item in items[:5])
+                        self.last_probe["body_sample"] = _clean(
+                            f"{self.last_probe.get('body_sample', '')} {sample}", 4000)
+                        yield items
+                    await progress("page_done", {
+                        "source": self.name, "page": request_page, "found": len(items),
+                    })
+                    if not results or not more_available:
+                        break
+                if budget_exhausted:
+                    break
 
-        if queries:
-            await progress("pages_end", {"source": self.name, "page": len(queries)})
+        if request_page:
+            await progress("pages_end", {"source": self.name, "page": request_page})
+        usage = self._read_usage()
+        counters["api_requests"] = self._run_search_requests
+        counters["js_rendered"] = self._js_rendered
+        report["budget"] = {
+            "per_run_limit": settings.web_discovery_request_budget_per_run,
+            "monthly_limit": settings.web_discovery_monthly_request_limit,
+            "run_requests": self._run_search_requests,
+            "month": usage["month"],
+            "monthly_requests": usage["requests"],
+            "stopped_reason": budget_exhausted,
+        }
         report["counts"] = dict(sorted(counters.items()))
         self._write_report(report)
         log.info("[%s] discovery summary: %s", self.name, dict(counters))

@@ -105,6 +105,11 @@ class BaseScraper(ABC):
     # Raise or zero it for large archives where already-seen pages sit in front
     # of pages that still hold listings the database has never seen.
     stale_page_streak_override: int | None = None
+    # Same idea, but it ALSO applies when settings.full_source_scan is on, for
+    # sources whose deep pages are only ever older posts already stored: stop
+    # after this many consecutive pages that stored nothing new. None = follow
+    # the full-scan policy like every other source.
+    incremental_stale_pages: int | None = None
     # Visit a listing's own page to fill a missing amount/organisation. Costs one
     # request per gap, so it's opt-in per source and only enabled where the
     # detail page is plain HTML and actually carries the missing fields.
@@ -565,7 +570,9 @@ class BaseScraper(ABC):
                 # same ownership split. Creating an explicit context keeps one
                 # teardown path for both branches instead of two that drift.
                 browser = pw.chromium.launch(headless=True)
-                context = browser.new_context(user_agent=settings.user_agent)
+                context = browser.new_context(
+                    user_agent=settings.user_agent, locale="en-US",
+                    extra_http_headers={"Accept-Language": "en-US,en;q=0.9"})
                 page = context.new_page()
             try:
                 page.goto(url, timeout=int(settings.request_timeout * 1000))

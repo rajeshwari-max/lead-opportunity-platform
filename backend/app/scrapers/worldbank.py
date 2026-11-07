@@ -401,7 +401,9 @@ class WorldBankScraper(BaseScraper):
         try:
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(headless=True)
-                context = browser.new_context(user_agent=settings.user_agent)
+                context = browser.new_context(
+                    user_agent=settings.user_agent, locale="en-US",
+                    extra_http_headers={"Accept-Language": "en-US,en;q=0.9"})
                 page = context.new_page()
                 observed: list[str] = []
                 page.on("request", lambda request: observed.append(request.url))

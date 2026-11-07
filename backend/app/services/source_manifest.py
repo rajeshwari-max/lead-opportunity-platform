@@ -436,7 +436,9 @@ MANIFESTS: dict[str, SourceContract] = {
     ),
     "clean_air_fund": _c(
         key="clean_air_fund", display_name="Clean Air Fund",
-        listing_url="https://www.cleanairfund.org/what-we-do/our-grants/",
+        # Was /what-we-do/our-grants/ — the portfolio described below. Moved
+        # on 2026-11-03 to the page that lists open consultancy RFPs.
+        listing_url="https://www.cleanairfund.org/about-us/jobs/consultancy-rfps",
         expected_types=(RecordType.GRANT, RecordType.CALL_FOR_PROPOSALS),
         # This is the whole reason this source needed a manifest. The page is
         # titled "Our grants" and most of what it lists is money ALREADY GIVEN

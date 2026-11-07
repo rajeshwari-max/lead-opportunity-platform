@@ -18,6 +18,7 @@ from app.scrapers.funders_misc import (
 from app.scrapers.fundsforngos import FundsForNGOsScraper
 from app.scrapers.grantwatch import GrantWatchScraper
 from app.scrapers.indevjobs import IndevJobsScraper
+from app.scrapers.kbs_frb import KingBaudouinScraper
 from app.scrapers.ngobox import NGOBoxScraper
 from app.scrapers.nih import NIHOpportunitiesScraper
 from app.scrapers.phf import PHFScraper

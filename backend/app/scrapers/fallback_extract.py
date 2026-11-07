@@ -45,7 +45,8 @@ _CHALLENGE = (
     "just a moment", "attention required", "checking your browser",
     "cf-chl", "challenge-platform", "turnstile", "cf_chl_opt",
     "sorry, you have been blocked", "enable javascript and cookies",
-    "verify you are human", "access denied", "request blocked",
+    "verify you are human", "confirm you are human",
+    "performing security verification", "access denied", "request blocked",
     "incapsula", "ddos protection by", "are you a robot",
 )
 _JS_SHELL = re.compile(

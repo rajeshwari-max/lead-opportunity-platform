@@ -108,3 +108,53 @@ def test_duplicate_pages_do_not_end_full_scan(monkeypatch):
     asyncio.run(manager._run_source(Source()))
     assert manager.progress['test']['pages'] == 8
     assert manager.progress['test']['duplicates'] == 8
+
+
+def _stale_harness(monkeypatch, attrs, pages=8):
+    monkeypatch.setattr(mod.settings, 'full_source_scan', True)
+    manager = mod.ScraperManager()
+    manager.progress = {'test': dict(status='queued', pages=0, found=0, saved=0,
+        skipped_expired=0, duplicates=0, spam=0, errors=0)}
+    monkeypatch.setattr(manager, '_open_run', lambda *args: 1)
+    monkeypatch.setattr(manager, '_close_run', lambda *args: None)
+    monkeypatch.setattr(manager, '_last_good_signature', lambda *args: '')
+    # Every page: nothing new saved, one duplicate.
+    monkeypatch.setattr(manager, '_ingest', lambda *args: (0, 0, 1, 0, 0))
+    walked = []
+
+    class Source:
+        name = display_name = 'test'
+        stale_page_streak_override = 0
+        curated = True
+        requires_js = False
+
+        async def crawl(self, stop, pause, progress):
+            for page in range(1, pages + 1):
+                if stop.is_set():
+                    return
+                walked.append(page)
+                await progress('page_done', {'page': page, 'found': 1})
+                yield [object()]
+
+    for key, value in attrs.items():
+        setattr(Source, key, value)
+    asyncio.run(manager._run_source(Source()))
+    return walked
+
+
+def test_new_posts_only_source_stops_on_known_pages_even_in_full_scan(monkeypatch):
+    """FundsForNGOs ran most of the night re-reading posts it had stored long
+    ago. A source that opts in stops after N pages with nothing new."""
+    assert _stale_harness(monkeypatch, {'incremental_stale_pages': 2}) == [1, 2]
+
+
+def test_other_sources_still_walk_every_page_in_full_scan(monkeypatch):
+    assert _stale_harness(monkeypatch, {}) == list(range(1, 9))
+
+
+def test_fundsforngos_opts_in_and_zero_restores_the_full_walk(monkeypatch):
+    from app.scrapers.fundsforngos import FundsForNGOsScraper
+
+    assert FundsForNGOsScraper().incremental_stale_pages == 2
+    monkeypatch.setattr(mod.settings, 'fundsforngos_stale_pages', 0)
+    assert FundsForNGOsScraper().incremental_stale_pages is None

@@ -128,8 +128,9 @@
   {
     "name": "clean_air_fund",
     "display_name": "Clean Air Fund",
-    "url": "https://www.cleanairfund.org/what-we-do/our-grants/",
-    "website": "https://cleanairfund.org"
+    "url": "https://www.cleanairfund.org/about-us/jobs/consultancy-rfps",
+    "website": "https://cleanairfund.org",
+    "_url_note": "Repointed 2026-11-03 from /what-we-do/our-grants/, which is a portfolio of grants already made (every row rejected or closed). This page is where Clean Air Fund lists its open consultancy RFPs and calls for expressions of interest; on 2026-11-03 it listed one open call (black-carbon exposure research, due 23 Oct 2026). Each RFP links to its own page at the site root."
   },
   {
     "name": "mcknight_foundation",
@@ -140,8 +141,9 @@
   {
     "name": "rockefeller_foundation",
     "display_name": "Rockefeller Foundation",
-    "url": "https://www.rockefellerfoundation.org/our-grants/",
-    "website": "https://rockefellerfoundation.org"
+    "url": "https://www.rockefellerfoundation.org/rfps/",
+    "website": "https://rockefellerfoundation.org",
+    "_url_note": "/our-grants/ is grants already made, and the foundation does not accept unsolicited proposals (checked in a browser on 2026-11-07). /rfps/ is where it posts RFPs; it said 'There are no open RFPs at this time.'"
   },
   {
     "name": "ea_funds",
@@ -152,8 +154,9 @@
   {
     "name": "tawingo_fund",
     "display_name": "Tawingo Fund",
-    "url": "https://www.tawingofund.org/grantees",
-    "website": "https://tawingofund.org"
+    "url": "https://www.tawingofund.org/apply",
+    "website": "https://tawingofund.org",
+    "_url_note": "/grantees lists grants already made (checked in a browser on 2026-11-07). /apply says 'We are currently not accepting applications', now recognised as confirmed empty."
   },
   {
     "name": "grantmakers_community_project",
@@ -182,8 +185,9 @@
   {
     "name": "silicon_valley_community_foundation",
     "display_name": "Silicon Valley Community Foundation",
-    "url": "https://www.svcf.org/search/results?q=grants",
-    "website": "https://svcf.org"
+    "url": "https://www.svcf.org/nonprofits/grants",
+    "website": "https://svcf.org",
+    "_url_note": "Was a site-search page (checked in a browser on 2026-11-07). /nonprofits/grants carries the annual Community Action Grants RFP; it said 'Our 2026 application has closed' (Bay Area only)."
   },
   {
     "name": "national_institutes_of_health",
@@ -201,13 +205,28 @@
     "name": "pfizer_foundation",
     "display_name": "Pfizer Foundation",
     "url": "https://www.pfizer.com/about/programs-policies/grants/competitive-grants",
-    "website": "https://pfizer.com"
+    "website": "https://pfizer.com",
+    "allowed_link_hosts": [
+      "cdn.pfizer.com"
+    ],
+    "title_selector": "a:-soup-contains(\"View RFP\")",
+    "row_title_selector": ".compound-name",
+    "deadline_selector": "td.views-field-field-rfp-loi-due-date time",
+    "curated": true,
+    "require_funding_signal": false,
+    "requires_js": false,
+    "_url_note": "Same page (checked in a browser on 2026-11-07): a table of RFPs, but every call is a PDF on cdn.pfizer.com behind 'View RFP (PDF)', so every row was dropped as an off-site link. Title from .compound-name, due date from its own column. Every row is a published RFP, hence curated."
   },
   {
     "name": "the_agency_fund",
     "display_name": "The Agency Fund",
-    "url": "https://www.agency.fund/apply",
-    "website": "https://agency.fund"
+    "url": "https://www.agency.fund/past-calls",
+    "website": "https://agency.fund",
+    "allowed_link_hosts": [
+      "cdn.prod.website-files.com",
+      "assets-global.website-files.com"
+    ],
+    "_url_note": "Repointed from /apply (checked in a browser on 2026-11-07). /past-calls lists every call newest first; each call links to its PDF on the Webflow CDN, which the parser used to drop as an off-site link. Spring 2026 call closed 26 Apr 2026; no open call that day."
   },
   {
     "name": "audacious_project",
@@ -249,14 +268,16 @@
   {
     "name": "gadfly_project",
     "display_name": "Gadfly Project",
-    "url": "http://www.thegadflyproject.org/grants.html",
-    "website": "https://thegadflyproject.org"
+    "url": "https://www.thegadflyproject.org/grants.html",
+    "website": "https://thegadflyproject.org",
+    "_url_note": "Was http://; the site answers on https (checked in a browser on 2026-11-07). It lists two 2023 in-kind software grants only."
   },
   {
     "name": "afd",
     "display_name": "AFD",
-    "url": "https://www.afd.fr/fr/appels-a-projets/liste?",
-    "website": "https://afd.fr"
+    "url": "https://www.afd.fr/en/calls-for-projects/list",
+    "website": "https://afd.fr",
+    "_url_note": "English list (checked in a browser on 2026-11-07). It said 'No calls for projects found' that day; that wording is now recognised as confirmed empty rather than a parser failure."
   },
   {
     "name": "we4f",
@@ -309,8 +330,10 @@
   {
     "name": "j_pal",
     "display_name": "J-PAL",
-    "url": "https://www.povertyactionlab.org/",
-    "website": "https://povertyactionlab.org"
+    "url": "https://www.povertyactionlab.org/initiatives",
+    "website": "https://povertyactionlab.org",
+    "_url_note": "Repointed 2026-11-03 from the homepage, which has no calls on it. J-PAL has no single RFP index; its initiatives page shows each initiative with either 'No active RFP cycles' or 'Proposals Due: <date>' (four were open on 2026-11-03). Initiatives with no active cycle carry no deadline and stay off the dashboard under the strict Active rule.",
+    "requires_js": false
   },
   {
     "name": "foundation_for_food_agriculture_research",
@@ -339,8 +362,9 @@
   {
     "name": "gupta_family_foundation",
     "display_name": "Gupta Family Foundation",
-    "url": "https://www.guptafamilyfoundation.org/grant-application-2025/",
-    "website": "https://guptafamilyfoundation.org"
+    "url": "https://www.guptafamilyfoundation.org/",
+    "website": "https://guptafamilyfoundation.org",
+    "_url_note": "Repointed 2026-11-03 from /grant-application-2025/, a page named after one year's round that goes stale every year. The homepage links to the current round's application page, which the parser picks up as the row."
   },
   {
     "name": "hlfppt",
@@ -363,8 +387,9 @@
   {
     "name": "bosch_stiftung",
     "display_name": "Bosch Stiftung",
-    "url": "https://www.bosch-stiftung.de/en/news/open-calls",
-    "website": "https://bosch-stiftung.de"
+    "url": "https://www.bosch-stiftung.de/en/funding",
+    "website": "https://bosch-stiftung.de",
+    "_url_note": "/en/news/open-calls now returns 404 (checked in a browser on 2026-11-07). Calls are announced on /en/funding, which said 'There are currently no calls for proposals.'"
   },
   {
     "name": "ospreys",
@@ -375,8 +400,9 @@
   {
     "name": "gatesfoundation",
     "display_name": "Gatesfoundation",
-    "url": "https://www.gatesfoundation.org/about/committed-grants",
-    "website": "https://gatesfoundation.org"
+    "url": "https://submit.gatesfoundation.org/",
+    "website": "https://gatesfoundation.org",
+    "_url_note": "Repointed 2026-11-03 from /about/committed-grants (grants already made). The foundation's own 'Grant opportunities' page sends public RFPs to this portal (and Grand Challenges to gcgh.grandchallenges.org, which is the separate bmgf_grand_challenges source). The portal renders its list with JavaScript, so the browser fetch is needed — verify with scripts/check_scraper.py gatesfoundation."
   },
   {
     "name": "idrc",
@@ -387,10 +413,14 @@
   {
     "name": "globaltenders",
     "display_name": "Globaltenders",
-    "url": "https://www.globaltenders.com/global-tenders-search",
+    "url": "https://www.globaltenders.com/india-consultancy-tenders",
     "website": "https://globaltenders.com",
     "curated": true,
-    "_curated_note": "A dedicated notice board: every row is a published tender or procurement notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py."
+    "_curated_note": "A dedicated notice board: every row is a published tender or procurement notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
+    "requires_js": false,
+    "row_title_selector": ".title-wrap [itemprop=name]",
+    "deadline_selector": "[itemprop=endDate]",
+    "_url_note": "Was the advanced-search FORM, which lists nothing (checked in a browser on 2026-11-07). India consultancy tenders: 20 public rows per page (deeper pages need a paid login). Each row's link only says 'View Detail', so the title is read from [itemprop=name] and the deadline from [itemprop=endDate]."
   },
   {
     "name": "kbs_frb",
@@ -407,14 +437,18 @@
   {
     "name": "gulbenkian",
     "display_name": "Gulbenkian",
-    "url": "https://www.gulbenkian.pt/en/grants/",
-    "website": "https://gulbenkian.pt"
+    "url": "https://gulbenkian.pt/en/bolsas-lista/",
+    "website": "https://gulbenkian.pt",
+    "row_title_selector": "h3.fcg-card__title",
+    "deadline_selector": "footer time",
+    "_url_note": "/en/grants/ is a news list (checked in a browser on 2026-11-07). /en/bolsas-lista/ is the grants and scholarships board: one card per call with an 'Open call' badge and 'closes <date>'."
   },
   {
     "name": "nippon_foundation",
     "display_name": "Nippon Foundation",
-    "url": "https://www.nippon-foundation.or.jp/en/grant",
-    "website": "https://nippon-foundation.or.jp"
+    "url": "https://en.nippon-foundation.or.jp/involved/grant",
+    "website": "https://nippon-foundation.or.jp",
+    "_url_note": "The old /en/grant now redirects to a 404 on en.nippon-foundation.or.jp (checked in a browser on 2026-11-07). The grants page describes priority areas and a year-round inquiry form; there is no list of calls on it."
   },
   {
     "name": "openphilanthropy",
@@ -436,8 +470,9 @@
   {
     "name": "wfp_innovation",
     "display_name": "WFP Innovation Accelerator",
-    "url": "https://innovation.wfp.org/relief-and-resilience",
-    "website": "https://innovation.wfp.org"
+    "url": "https://innovation.wfp.org/apply",
+    "website": "https://innovation.wfp.org",
+    "_url_note": "The Relief & Resilience page is archived ('Closed - this page is archived', checked in a browser on 2026-11-07). /apply lists the active calls (Hiper and rolling applications)."
   },
   {
     "name": "ifad_moonshots",

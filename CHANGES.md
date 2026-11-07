@@ -5,6 +5,119 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-07 — English-only intake (English editions, no machine translation)
+
+**Only English leads are stored.** Every scraped row's language is checked
+locally before classification (`services/english_only.py`: stop-word counts
+and a script check, confirmed by `langdetect`; unsure = English, so short
+titles such as "2027 Prince Albert Fund" are never dropped).
+
+- **Available in English, scraped in another language** (a `/fr/` path,
+  `?lang=es`, a `fr.` subdomain, or an `hreflang="en"` alternate on the
+  page): the source's own English edition of the same page is stored
+  instead, with its English title, description and URL.
+- **Published only in another language:** not translated and not stored;
+  the run log says "Rejected because: not English, no English version".
+- Fast: English rows (nearly all) cost no network. A non-English row first
+  reuses an English edition already in the database; otherwise at most two
+  8-second requests, cached, capped at `LOP_ENGLISH_LOOKUP_MAX_PER_RUN`
+  (150) per run. Closed non-English rows are never looked up.
+- Browser-rendered pages (generic and World Bank) now open with
+  `locale="en-US"` and `Accept-Language: en`, so sites that pick a language
+  from the visitor no longer serve EC2 a non-English page.
+- Switch: `LOP_ENGLISH_ONLY=false` restores the old behaviour.
+- Existing rows: `scripts/english_only_audit.py` reports non-English Active
+  rows; `--apply --backup <file>` switches those with an English edition;
+  `--archive-rest` marks the others Expired (never deleted).
+- New dependency `langdetect` (pure Python). Tests: `tests/test_english_only.py`;
+  the suite default turns the switch off (`tests/conftest.py`).
+
+Verify: `pytest tests/test_english_only.py`; after a run, search the scrape
+log for "stored the English edition".
+
+---
+
+## 2026-11-07 — Failing sources re-read in a browser; FundsForNGOs stops at known posts
+
+**FundsForNGOs no longer runs all night.** In full-scan mode it walked the
+whole archive (up to 400 pages of 50 posts) every night. It now stops after
+`LOP_FUNDSFORNGOS_STALE_PAGES` consecutive pages that stored nothing new
+(default 2 = 100 known posts); a night with nothing new ends after two pages.
+`0` restores the full walk for a one-off backfill. Generic mechanism:
+`BaseScraper.incremental_stale_pages`, honoured even when `full_source_scan`
+is on; no other source changes behaviour.
+
+**Each failing source was opened in a real browser and its current structure
+recorded** (`_url_note` in `sources.json`):
+
+- King Baudouin Foundation: the call list is a Vue app; new bespoke
+  `scrapers/kbs_frb.py` reads the site's own JSON search API filtered to open
+  calls (8 open that day) with ISO deadlines.
+- Pfizer Foundation: every RFP is a PDF on `cdn.pfizer.com` (was dropped as
+  off-site); title from `.compound-name`, due date from its own column.
+- Globaltenders: was the search FORM; now India consultancy tenders, title
+  from `[itemprop=name]`, deadline from `[itemprop=endDate]`.
+- Gulbenkian: `/en/grants/` is news; now `/en/bolsas-lista/` cards.
+- Agency Fund: `/past-calls`, PDFs on the Webflow CDN now allowed.
+- Repointed: Bosch (old URL 404 → `/en/funding`), AFD (English list),
+  Tawingo (`/apply`), SVCF (`/nonprofits/grants`), Rockefeller (`/rfps/`),
+  WFP Innovation (`/apply`), Nippon (moved domain), Gadfly (https).
+- J-PAL: plain HTTP (the list is server-rendered).
+
+**Generic parser** (`generic_listing.py`): `row_title_selector`,
+`allowed_link_hosts`; deadline cells read `datetime`, `content`, `title` or
+text, whichever holds a date; card `<header>/<footer>` inside an `<article>`
+is kept; WordPress `/wp-content/uploads/*.pdf` call documents are no longer
+treated as navigation; "fellowships"/"scholarships" count as funding words.
+
+**Outcomes**: "No calls for projects found", "aucun appel à projets trouvé",
+"currently not accepting applications", "<year> application has closed" and
+"no open RFPs" are confirmed-empty; "confirm you are human" and "performing
+security verification" are bot checks (NIHR, Triple Funds).
+
+Not fixable or not relevant, recommended for pausing in the dashboard: Triple
+Funds and NIHR (bot checks), Veddis, DOEN (NL/E-Africa/SWANA only), Ospreys
+(stopped grantmaking Jan 2026), Hewlett (grants database only), Merck Family
+Foundation (invitation only), CJRF, grantmakers.io (research database), SNF,
+WE4F (MENA only), Audacious (rolling idea form), Laudes, Woodcock, Fidelity,
+SDG Impact Finance, DonorDatabase, Google.org AI Fund, IFAD Moonshots.
+
+Tests: `tests/test_source_structure_2026_11_07.py` (5 new fixtures, declared
+in `tests/fixtures/README.md`) and `tests/test_full_scan_policy.py`.
+
+---
+
+## 2026-11-03 — Source-health follow-up: rejected ISTI/Wellcome rows and four wrong URLs
+
+- **Opportunity filter bug (`backend/app/services/opportunity_gate.py`).**
+  The "page type is never an opportunity" rule treated any path segment
+  starting with `research-` as a publications page, so every ISTI scheme
+  (`/funding-opportunities/research-grants/<scheme>`) and every Wellcome
+  scheme (`/research-funding/schemes/<scheme>`) was rejected. That is the
+  cause of "every row rejected" for ISTI Individual (19/19), Institutional
+  (19/19), International (11/11) and Wellcome (6/7). `/research-grants/`,
+  `/research-funding/` and similar are now exempt; `/research/`,
+  `/research-reports/`, news and stories are still rejected.
+- "Proposals due / applications due / submissions due" now counts as
+  evidence of a call (J-PAL's initiative cards say only that).
+- **Repointed in `sources.json`** (each with a `_url_note`):
+  - Clean Air Fund → `/about-us/jobs/consultancy-rfps` (open RFPs; the old
+    `/what-we-do/our-grants/` is a portfolio of past grants). Manifest updated.
+  - J-PAL → `/initiatives` (shows "Proposals Due" per initiative; the
+    homepage had no calls).
+  - Gates Foundation → `https://submit.gatesfoundation.org/` (the RFP portal
+    the foundation's own Grant opportunities page links to; the old page was
+    committed grants). JavaScript-rendered — verify with check_scraper.
+  - Gupta Family Foundation → homepage (the old URL named the 2025 round).
+- Not changed, recommended to pause from the dashboard (no public open-call
+  page): Laudes (invitation only — "Please don't submit a proposal until you
+  have spoken to us"), Woodcock, Fidelity Charitable, SDG Impact Finance,
+  DonorDatabase, Audacious, Rockefeller, Google.org AI Opportunity Fund,
+  IFAD Moonshots (winners of a finished challenge), CJRF.
+- Tests: `tests/test_source_health_fixes_2026_11.py`.
+
+---
+
 ## 2026-11-02 - Recover leftover DevelopmentAid profile locks conservatively
 
 - Connect previously rejected any lock entry, including a stale entry after

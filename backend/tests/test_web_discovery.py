@@ -7,8 +7,10 @@ from datetime import date
 import httpx
 import pytest
 
+from app.core.config import settings
 from app.database.models import Category
 from app.scrapers.web_discovery import (
+    SearchBudgetExhausted,
     WebDiscoveryScraper,
     _category_hint,
     _normalise_url,
@@ -17,22 +19,43 @@ from app.scrapers.web_discovery import (
 )
 
 
+class _FakeAsyncClient:
+    """Small deterministic HTTP stand-in; avoids network/proxy event-loop noise."""
+
+    def __init__(self, handler):
+        self.handler = handler
+
+    async def get(self, url, *, params=None, **_kwargs):
+        request = httpx.Request("GET", url, params=params)
+        return self.handler(request)
+
+
 def test_queries_cover_india_then_south_asia_then_global(monkeypatch):
-    monkeypatch.setattr("app.scrapers.web_discovery.settings.web_discovery_max_queries", 18)
+    monkeypatch.setattr("app.scrapers.web_discovery.settings.web_discovery_max_queries", 72)
     monkeypatch.setattr("app.scrapers.web_discovery.settings.web_discovery_extra_queries", "")
 
     queries = build_queries(date(2026, 10, 4))
 
-    assert len(queries) == 18
+    assert len(queries) == 72
     assert all("India" in query for query in queries[:6])
     assert all("South Asia" in query for query in queries[6:12])
-    assert all("global OR international" in query for query in queries[12:])
-    assert all("2026 OR 2027" in query for query in queries)
+    assert all("global OR international" in query for query in queries[12:18])
+    assert all("deadline" in query for query in queries)
+    assert not any("2026 OR 2027" in query for query in queries)
     joined = " ".join(queries)
     for required in ("health", "agriculture", "climate", "evaluation",
                      "worker wellbeing", "social protection",
                      "innovative finance", "social business", "resilience"):
         assert required in joined
+    for opportunity_type in ("funding opportunity", "procurement", "expression of interest"):
+        assert opportunity_type in joined
+
+
+def test_default_coverage_uses_the_complete_query_matrix():
+    assert settings.web_discovery_max_queries == 72
+    assert settings.web_discovery_max_pages_per_query == 10
+    assert settings.web_discovery_request_budget_per_run >= 720
+    assert settings.web_discovery_freshness == ""
 
 
 def test_operator_queries_get_first_claim_on_the_budget(monkeypatch):
@@ -114,10 +137,10 @@ def test_candidate_redirect_cannot_reach_ec2_metadata():
         )
 
     async def exercise():
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            with pytest.raises(ValueError, match="unsafe redirect"):
-                await WebDiscoveryScraper._fetch_public_page(
-                    client, "https://example.org/redirect")
+        client = _FakeAsyncClient(handler)
+        with pytest.raises(ValueError, match="unsafe redirect"):
+            await WebDiscoveryScraper._fetch_public_page(
+                client, "https://example.org/redirect")
 
     asyncio.run(exercise())
     assert requested == ["https://example.org/redirect"]
@@ -126,6 +149,8 @@ def test_candidate_redirect_cannot_reach_ec2_metadata():
 def test_candidate_page_becomes_a_normal_raw_opportunity(monkeypatch):
     monkeypatch.setattr(
         "app.scrapers.web_discovery.settings.web_discovery_require_deadline", True)
+    monkeypatch.setattr(
+        "app.scrapers.web_discovery.settings.web_discovery_js_render_enabled", False)
     html = """
     <html><head>
       <meta property="og:site_name" content="Example Foundation">
@@ -143,12 +168,12 @@ def test_candidate_page_becomes_a_normal_raw_opportunity(monkeypatch):
     async def exercise():
         scraper = WebDiscoveryScraper()
         counters = Counter()
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            item = await scraper._candidate(client, {
-                "title": "Open Grant for Community Health Systems in India",
-                "url": "https://example.org/funding/health-2099?utm_source=search",
-                "description": "Applications are invited for a public health grant.",
-            }, counters)
+        client = _FakeAsyncClient(handler)
+        item = await scraper._candidate(client, {
+            "title": "Open Grant for Community Health Systems in India",
+            "url": "https://example.org/funding/health-2099?utm_source=search",
+            "description": "Applications are invited for a public health grant.",
+        }, counters)
         return item
 
     item = asyncio.run(exercise())
@@ -166,6 +191,8 @@ def test_candidate_page_becomes_a_normal_raw_opportunity(monkeypatch):
 def test_undated_search_hit_is_not_admitted(monkeypatch):
     monkeypatch.setattr(
         "app.scrapers.web_discovery.settings.web_discovery_require_deadline", True)
+    monkeypatch.setattr(
+        "app.scrapers.web_discovery.settings.web_discovery_js_render_enabled", False)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -178,15 +205,101 @@ def test_undated_search_hit_is_not_admitted(monkeypatch):
     async def exercise():
         scraper = WebDiscoveryScraper()
         counters = Counter()
-        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-            item = await scraper._candidate(client, {
-                "title": "Grant programme overview",
-                "url": "https://example.org/grants/programme",
-                "description": "Information about our historic grant programme.",
-            }, counters)
+        client = _FakeAsyncClient(handler)
+        item = await scraper._candidate(client, {
+            "title": "Grant programme overview",
+            "url": "https://example.org/grants/programme",
+            "description": "Information about our historic grant programme.",
+        }, counters)
         return item, counters
 
     item, counters = asyncio.run(exercise())
 
     assert item is None
     assert counters["no_readable_active_deadline"] == 1
+
+
+def test_search_pagination_sends_brave_offset_and_reads_more_flag(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.scrapers.web_discovery.settings.log_dir", tmp_path / "logs")
+    monkeypatch.setattr(
+        "app.scrapers.web_discovery.settings.web_discovery_request_budget_per_run", 10)
+    monkeypatch.setattr(
+        "app.scrapers.web_discovery.settings.web_discovery_monthly_request_limit", 10)
+    monkeypatch.setattr("app.scrapers.web_discovery.settings.max_retries", 1)
+    seen_offsets: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        offset = int(request.url.params.get("offset", "0"))
+        seen_offsets.append(offset)
+        return httpx.Response(200, json={
+            "query": {"more_results_available": offset == 0},
+            "web": {"results": [{"url": f"https://example.org/{offset}"}]},
+        }, request=request)
+
+    async def exercise():
+        scraper = WebDiscoveryScraper()
+        client = _FakeAsyncClient(handler)
+        first = await scraper._search(client, "open grants India", 0)
+        second = await scraper._search(client, "open grants India", 1)
+        return first, second, scraper
+
+    first, second, scraper = asyncio.run(exercise())
+    assert seen_offsets == [0, 1]
+    assert first[1] is True
+    assert second[1] is False
+    assert scraper._run_search_requests == 2
+
+
+def test_monthly_request_budget_is_a_hard_stop(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.scrapers.web_discovery.settings.log_dir", tmp_path / "logs")
+    monkeypatch.setattr(
+        "app.scrapers.web_discovery.settings.web_discovery_request_budget_per_run", 10)
+    monkeypatch.setattr(
+        "app.scrapers.web_discovery.settings.web_discovery_monthly_request_limit", 2)
+    scraper = WebDiscoveryScraper()
+    scraper._reserve_search_request()
+    scraper._reserve_search_request()
+    with pytest.raises(SearchBudgetExhausted, match="monthly"):
+        scraper._reserve_search_request()
+
+
+def test_javascript_shell_can_be_recovered_by_bounded_renderer(monkeypatch):
+    monkeypatch.setattr(
+        "app.scrapers.web_discovery.settings.web_discovery_require_deadline", True)
+    monkeypatch.setattr(
+        "app.scrapers.web_discovery.settings.web_discovery_js_render_enabled", True)
+    monkeypatch.setattr(
+        "app.scrapers.web_discovery.settings.web_discovery_js_render_limit_per_run", 1)
+    monkeypatch.setattr("app.scrapers.web_discovery._playwright_available", lambda: True)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, text="<html><body><div id='app'></div></body></html>",
+            headers={"content-type": "text/html"}, request=request,
+        )
+
+    async def exercise():
+        scraper = WebDiscoveryScraper()
+        counters = Counter()
+
+        async def rendered(_request):
+            return """
+            <html><head><meta property='og:site_name' content='Rendered Foundation'></head>
+            <body><h1>Open Grant for Health Systems</h1>
+            <p>Applications are open. Closing date: 31 December 2099.</p></body></html>
+            """
+
+        monkeypatch.setattr(scraper, "_fetch_rendered", rendered)
+        client = _FakeAsyncClient(handler)
+        item = await scraper._candidate(client, {
+            "title": "Open Grant for Health Systems",
+            "url": "https://example.org/rendered-grant",
+            "description": "Applications are invited for a health grant.",
+        }, counters)
+        return item, counters
+
+    item, counters = asyncio.run(exercise())
+    assert item is not None
+    assert item.deadline_raw == "31 December 2099"
+    assert counters["js_render_attempted"] == 1
+    assert counters["js_render_recovered"] == 1

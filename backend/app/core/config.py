@@ -69,28 +69,46 @@ class Settings(BaseSettings):
     # job to scheduled/all-source runs.
     web_discovery_enabled: bool = False
     brave_search_api_key: str = ""
-    # A run is bounded in both dimensions. With the defaults the absolute
-    # ceiling is 18 * 20 = 360 search results before URL deduplication and the
-    # strict page/deadline gates.
-    web_discovery_max_queries: int = 18
+    # Discovery is bounded by requests rather than pretending one result page
+    # is the whole web.  The default query set contains broad coverage across
+    # every geography/theme plus narrower category searches.  Each query is
+    # paginated, but both the per-run and monthly request budgets below are
+    # hard stops, including retries and admin-triggered daytime runs.
+    # 72 is the complete built-in matrix: 6 Catalyst themes x 3 geographies,
+    # first as broad searches and then across the three opportunity families.
+    web_discovery_max_queries: int = 72
     web_discovery_results_per_query: int = 20
+    # Brave supports result offsets 0..9. Walk all ten pages when the API says
+    # more results exist; most queries naturally stop earlier.
+    web_discovery_max_pages_per_query: int = 10
+    web_discovery_request_budget_per_run: int = 720
+    web_discovery_monthly_request_limit: int = 10000
     web_discovery_fetch_concurrency: int = 4
     # Whole-web search is metered separately from ordinary website scraping.
     # Automatic runs include it only after this many calendar days; all other
     # registered sources retain their normal daily cadence.
     web_discovery_interval_days: int = 3
     # Brave freshness code: pd (day), pw (week), pm (31 days), py (year), or a
-    # supported custom date range. pm is right for scheduled discovery; use py
-    # deliberately for a one-off initial backfill.
-    web_discovery_freshness: str = "pm"
-    # Pipe-separated extra searches. They are appended to the built-in
-    # category/theme/geography searches and still obey max_queries.
+    # supported custom date range. Blank searches the full index; source-page
+    # deadline validation, rather than publication age, decides what is live.
+    # Blank means the full public index. A recent-month filter omitted calls
+    # published earlier whose deadlines are still open; the source-page
+    # deadline gate below is the authoritative freshness check.
+    web_discovery_freshness: str = ""
+    # Pipe-separated extra searches. They receive first claim on the query
+    # budget, then built-in category/theme/geography searches fill the rest.
     web_discovery_extra_queries: str = ""
     # A search result is not admitted merely because its title says "grant".
     # Its own page must expose a readable, non-past deadline, or explicitly say
     # that applications are rolling/open-ended. Keeping this true prevents
     # undated news/programme pages from becoming permanent Active rows.
     web_discovery_require_deadline: bool = True
+    # A public opportunity page can be an empty JavaScript shell over plain
+    # HTTP.  Retry only candidates that fail the deadline/page gate, render at
+    # most this many in one run, and serialize Chromium launches.  This reuses
+    # BaseScraper's Playwright teardown so browser processes cannot accumulate.
+    web_discovery_js_render_enabled: bool = True
+    web_discovery_js_render_limit_per_run: int = 30
     # How long an undated ("Ongoing") listing may go unseen by a scrape before it
     # is retired. These rows carry no deadline, so nothing else can ever close
     # them — without this they stay in the live view permanently, which is why
@@ -167,6 +185,17 @@ class Settings(BaseSettings):
     # blend: ML labels kept, a label whose meaning score clears
     # semantic_min_similarity is added. Measure with scripts/semantic_eval.py
     # before switching to blend.
+    # FundsForNGOs: stop after this many consecutive pages (50 posts each) with
+    # nothing new, even in full-scan mode. 0 = walk the whole archive.
+    fundsforngos_stale_pages: int = 2
+    # English-only intake (services/english_only.py). A non-English row is
+    # replaced by the source's own English edition of the same page when one
+    # exists (a /fr/ path, ?lang=es, an hreflang alternate); otherwise it is
+    # not stored. Nothing is machine-translated.
+    english_only: bool = True
+    # Network lookups for English editions per scrape run, and their timeout.
+    english_lookup_max_per_run: int = 150
+    english_lookup_timeout_s: float = 8.0
     semantic_mode: str = "shadow"
     semantic_model: str = "BAAI/bge-small-en-v1.5"
     semantic_cache_dir: str = ""          # default backend/data/models
@@ -392,9 +421,9 @@ class Settings(BaseSettings):
     # than expected because a filter silently stopped applying. Whichever binds
     # first, the run ends cleanly and reports partial coverage honestly rather
     # than being killed by a timeout with its record half-written.
-    devaid_max_slices: int = 600            # search partitions per section
-    devaid_max_duration_s: int = 1800       # 30 minutes per section
-    devaid_max_records: int = 20000         # rows handed off per section
+    devaid_max_slices: int = 1000           # search partitions per section
+    devaid_max_duration_s: int = 3600       # 60 minutes per section
+    devaid_max_records: int = 50000         # rows handed off per section
     # Signed-in detail pages carry descriptions and official attachments that
     # are not always present in search results. Bound their per-run enrichment
     # so an explicitly enabled historical archive cannot open tens of thousands
@@ -430,10 +459,11 @@ class Settings(BaseSettings):
     # found 106 runs stuck in "running". These turn "never finishes" into
     # "finishes, badly, and says so".
     #
-    # 45 min per source: DevelopmentAid's own section cap is 30 min and it has
-    # several sections, so this is deliberately above the largest legitimate
-    # source rather than tuned to the average.
-    source_timeout_s: int = 2700
+    # 150 min per source: DevelopmentAid can spend up to 60 minutes in each of
+    # its two principal sections, plus brand searches and detail enrichment.
+    # This remains below the whole-run cap so another stuck source cannot keep
+    # the scheduler lease indefinitely.
+    source_timeout_s: int = 9000
     # The whole run. Per-source limits alone do not bound it — 85 sources
     # times 45 minutes is days — and the scheduler skips a run while the
     # previous one is still going. 5.5 hours, so the 07:00 run has ended before 13:00. At 6 hours the 07:00

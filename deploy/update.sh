@@ -67,6 +67,13 @@ cd "$REPO/backend"
 # a second deployment workflow; already-satisfied packages are a no-op.
 "$PYTHON" -m pip install --quiet -r requirements.txt
 
+# Public-web discovery uses a small Playwright fallback for pages that return
+# only an empty JavaScript shell to HTTP clients. This is idempotent: when the
+# matching Chromium build is already cached, Playwright performs no download.
+# Keeping it inside the existing one-command workflow prevents a deploy from
+# silently publishing the feature without its browser runtime.
+"$PYTHON" -m playwright install chromium
+
 # Fail before touching the live frontend or restarting the API if the model
 # artifact is missing/incompatible. Runtime inference still has a rule fallback
 # for unexpected failures, but deployment of an intended ML release should not

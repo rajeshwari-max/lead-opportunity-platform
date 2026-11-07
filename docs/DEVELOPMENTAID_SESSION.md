@@ -188,9 +188,9 @@ The archive walk is the setting that produced 779,856 records found against
 | Setting | Default | Meaning |
 |---|---|---|
 | `LOP_DEVAID_INCLUDE_ARCHIVE` | `false` | Walk the historical archive. One-off backfills only, never on a schedule. |
-| `LOP_DEVAID_MAX_SLICES` | `600` | Search partitions per section |
-| `LOP_DEVAID_MAX_DURATION_S` | `1800` | 30 min per section |
-| `LOP_DEVAID_MAX_RECORDS` | `20000` | Rows handed off per section |
+| `LOP_DEVAID_MAX_SLICES` | `1000` | Search partitions per section |
+| `LOP_DEVAID_MAX_DURATION_S` | `3600` | 60 min per section |
+| `LOP_DEVAID_MAX_RECORDS` | `50000` | Rows handed off per section |
 
 All three caps are one object (`services/walk_budget.py`) and the run reports
 which one it hit. A run that stopped at a cap is bounded, not broken — but a

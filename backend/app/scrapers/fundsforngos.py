@@ -74,6 +74,18 @@ class FundsForNGOsScraper(BaseScraper):
     # re-run quit inside the already-seen prefix and never reached deeper posts —
     # it had never gone past page 36 in 15 runs.
     stale_page_streak_override = 0
+
+    # The nightly full scan used to walk this whole archive — up to 400 pages
+    # of 50 posts plus a detail visit per gap — and it ran most of the night
+    # for posts stored long ago. Posts are newest-first, the archive has been
+    # walked completely on earlier runs, and FundsForNGOs only ever adds at
+    # the top. So: stop after LOP_FUNDSFORNGOS_STALE_PAGES consecutive pages
+    # that stored nothing new (default 2 = 100 posts already known). On a
+    # night with nothing new the source ends after two pages. 0 restores the
+    # full archive walk, e.g. for a one-off backfill.
+    @property
+    def incremental_stale_pages(self) -> int | None:
+        return settings.fundsforngos_stale_pages or None
     website = "https://www2.fundsforngos.org"
     # per_page=50 keeps each API response ~2.5MB instead of ~5MB — the larger
     # payload intermittently hit the 30s timeout / rate limiter on repeat runs.

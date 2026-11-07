@@ -47,6 +47,7 @@ from app.services.source_manifest import (
 from app.services.deadline_audit import is_sentinel
 from app.services.site_chrome import is_site_chrome_document
 from app.services.spam import is_spam
+from app.services import english_only
 from app.services.organization import extract_organization, tidy_organization
 from app.services.verticals import VERTICALS as ALL_VERTICALS
 from app.services.verticals import VERTICAL_SOCIAL_BUSINESS, verticals_to_str
@@ -240,6 +241,8 @@ class ScraperManager:
 
     # ------------------------------------------------------------- execution
     async def _run(self, scrapers: list[BaseScraper]) -> None:
+        from app.services import english_only
+        english_only.reset_run_budget()
         # Cap how many sources run at once. With ~80 configured sources, starting
         # them all together opened hundreds of simultaneous requests and browser
         # threads, which starved the event loop — /progress stopped responding and
@@ -498,7 +501,18 @@ class ScraperManager:
         # of pagination). `or` would have treated 0 as "unset", so test for None.
         override = scraper.stale_page_streak_override
         stale_limit = 0 if settings.full_source_scan else (settings.stale_page_streak if override is None else override)
-        if stale_limit == 0:
+        # A few archive-style sources (FundsForNGOs: newest-first, thousands of
+        # posts, most of a night to walk) stop once they reach posts already
+        # stored, even in full-scan mode. Nothing new on the first pages means
+        # nothing new deeper down.
+        incremental = getattr(scraper, "incremental_stale_pages", None)
+        if incremental:
+            stale_limit = int(incremental)
+            self._log(
+                f"[{scraper.display_name}] new-posts-only mode — stops after "
+                f"{stale_limit} page(s) in a row with nothing new"
+            )
+        elif stale_limit == 0:
             self._log(
                 f"[{scraper.display_name}] full-archive mode — walking every page "
                 f"(already-seen pages don't stop the crawl; this takes a while)"
@@ -798,6 +812,23 @@ class ScraperManager:
                 # the dashboard's Active view is unchanged but nothing is lost.
                 if not settings.keep_expired:
                     continue
+
+            # English only. A row scraped in another language is swapped for
+            # the source's English edition of the same page when there is one
+            # (see services/english_only.py); otherwise it is not stored.
+            # Runs before classification, which reads English.
+            verdict = english_only.ensure_english(raw, expired=is_expired)
+            if not verdict.keep:
+                if not is_expired:          # closed rows are already counted
+                    rejected += 1
+                    self._note_rejection(source_key, "not English, no English version")
+                log.debug("[%s] %s: %s", raw.source_website, verdict.reason,
+                          (raw.title or "")[:60])
+                continue
+            if verdict.switched:
+                log.info("[%s] stored the English edition instead of %s: %s",
+                         raw.source_website, verdict.lang, verdict.raw.title[:60])
+                raw = verdict.raw
 
             # Prefer the source's structured notice type over a scraper's
             # broad page-level hint.  A page can be called "grants" and

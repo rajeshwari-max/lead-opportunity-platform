@@ -16,6 +16,9 @@ joblib==1.6.0
 # Meaning-based second opinion on brands/verticals (services/semantic_classifier.py):
 # a small ONNX sentence-embedding model on CPU. No torch, no GPU, no API key.
 fastembed>=0.7,<1.0
+# English-only intake (services/english_only.py): confirms a non-English
+# guess locally. Pure Python, no network.
+langdetect>=1.0.9
 # Optional: only needed for JS-rendered sources (BaseScraper.requires_js)
 playwright>=1.45
 # Generated opportunity briefs are the honest fallback when a source publishes

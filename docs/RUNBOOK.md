@@ -55,11 +55,11 @@ Set in `backend/.env`. Defaults are the safe values.
 |---|---|---|
 | `LOP_SCHEDULER_CATCHUP_ON_RESTART` | `false` | Run a missed scrape on boot. Off: a restart must never start a scrape. |
 | `LOP_DEVAID_INCLUDE_ARCHIVE` | `false` | Walk DevelopmentAid's historical archive. **This is the setting that made runs find 779,856 records to save 55,013.** One-off backfills only. |
-| `LOP_DEVAID_MAX_SLICES` | `600` | Search partitions per section. |
-| `LOP_DEVAID_MAX_DURATION_S` | `1800` | 30 min per section. |
-| `LOP_DEVAID_MAX_RECORDS` | `20000` | Rows handed off per section. |
-| `LOP_SOURCE_TIMEOUT_S` | `2700` | 45 min per source. Above the largest legitimate source, not near the average. |
-| `LOP_RUN_TIMEOUT_S` | `21600` | 6 h for the whole run. |
+| `LOP_DEVAID_MAX_SLICES` | `1000` | Search partitions per section. |
+| `LOP_DEVAID_MAX_DURATION_S` | `3600` | 60 min per section. |
+| `LOP_DEVAID_MAX_RECORDS` | `50000` | Rows handed off per section. |
+| `LOP_SOURCE_TIMEOUT_S` | `9000` | 150 min per source, allowing both DevelopmentAid sections and enrichment. |
+| `LOP_RUN_TIMEOUT_S` | `19800` | 5.5 h for the whole run. |
 | `LOP_HEALTH_FAILURE_STREAK` | `3` | Consecutive unhealthy runs before a source is called failing. |
 | `LOP_HEALTH_STALE_DAYS` | `21` | Days without a saved row before a source is stale. |
 | `LOP_VERTICAL_SPAN_SCORING` | `false` | Score verticals by distinct matched text. Re-tags a large share of the database — measure with `reclassify_preview.py --compare-scoring` first. |

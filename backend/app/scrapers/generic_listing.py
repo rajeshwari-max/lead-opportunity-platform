@@ -81,7 +81,10 @@ _SECTION_TITLE = re.compile(
 _NAV_HREF = re.compile(
     r"/(about|contact|privacy|terms|cookie|login|signin|register|subscribe|careers?|"
     r"jobs?|press|media|team|faq|sitemap|accessibility|donate|newsletter|tag|category|"
-    r"author|feed)(?=[-/?#.]|$)|/wp-|#$", re.IGNORECASE)
+    r"author|feed)(?=[-/?#.]|$)|/wp-(?!content/uploads/[^?#]*\.pdf)|#$", re.IGNORECASE)
+# (/wp-content/uploads/…pdf is allowed through: WordPress funders publish the
+# call itself as an uploaded PDF — EREF's "Strategic Priorities RFP", WE4F's
+# "Full Call" — and the funding-signal and furniture tests still apply.)
 
 # /page/2/, ?page=2, ?paged=2, ?p=2 — the number is group(2) so it can be bumped.
 _PAGE_IN_URL = re.compile(r"(/page/|[?&](?:page|paged|pg|p)=)(\d+)", re.IGNORECASE)
@@ -193,7 +196,7 @@ def _says_rolling(block_text: str) -> bool:
 #
 # A page of pure navigation supplies none of them.
 _FUNDING_WORDS = re.compile(
-    r"\b(grant|grants|funding|fund|fellowship|scholarship|bursary|prize|award|"
+    r"\b(grant|grants|funding|fund|fellowships?|scholarships?|bursary|prize|award|"
     r"call\s+for|request\s+for|rfp|rfq|rfa|eoi|expression\s+of\s+interest|"
     r"tender|bid|proposal|solicitation|programme|program|scheme|"
     r"applications?\s+(open|invited|are)|apply\s+(now|for|by)|"
@@ -271,12 +274,47 @@ class GenericListingScraper(BaseScraper):
     _prev_signature: str = ""
 
     # Per-source CSS overrides (optional, from sources.json):
-    #   item_selector  — container for each listing
-    #   title_selector — title/link within the container
+    #   item_selector      — container for each listing
+    #   title_selector     — title/link within the container
+    #   row_title_selector — where the row's TITLE text lives when the link
+    #                        itself only says "View Detail" / "View RFP (PDF)"
+    #                        (Globaltenders, Pfizer) or wraps a whole card
+    #                        (Gulbenkian). The nearest ancestor of the link that
+    #                        contains it is the row; its text is the title, and
+    #                        the row is where the deadline is looked for.
+    #   allowed_link_hosts — extra hosts a row may link to, for funders that
+    #                        host the call document elsewhere (Pfizer's
+    #                        cdn.pfizer.com, Agency Fund's Webflow CDN)
+    def _row_for(self, anchor, selector: str):
+        """(row, title_element) — the nearest ancestor holding the title."""
+        node = anchor
+        for _ in range(8):
+            if node is None:
+                return None, None
+            hit = node.select_one(selector) if hasattr(node, "select_one") else None
+            if hit is not None:
+                if getattr(node, "name", "") == "td":
+                    node = node.find_parent("tr") or node
+                return node, hit
+            node = node.parent
+        return None, None
+
+    def _host_allowed(self, url: str) -> bool:
+        host = urlparse(url).netloc.replace("www.", "")
+        if host in urlparse(self.website).netloc.replace("www.", ""):
+            return True
+        return any(host == h or host.endswith("." + h)
+                   for h in self.config.get("allowed_link_hosts") or [])
+
     def parse_listing(self, html: str, page_url: str) -> list[RawOpportunity]:
         soup = BeautifulSoup(html, "lxml")
         for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
+            # A card's own <header>/<footer> (Gulbenkian puts the closing date
+            # in the card footer) is part of the listing, not page chrome.
+            if tag.name in ("header", "footer") and tag.find_parent("article"):
+                continue
             tag.decompose()
+        row_title_sel = self.config.get("row_title_selector")
 
         items: list[RawOpportunity] = []
         seen: set[str] = set()
@@ -298,8 +336,16 @@ class GenericListingScraper(BaseScraper):
                 href = a.get("href") or ""
                 if not href:
                     continue
-                title = strip_field_label(clean_title(a.get_text(" ", strip=True)))
-                if not _looks_like_opportunity(title, href):
+                row = None
+                if row_title_sel:
+                    row, title_el = self._row_for(a, row_title_sel)
+                    if title_el is None:
+                        continue
+                    title = strip_field_label(clean_title(
+                        title_el.get_text(" ", strip=True)))
+                else:
+                    title = strip_field_label(clean_title(a.get_text(" ", strip=True)))
+                if row is None and not _looks_like_opportunity(title, href):
                     # Very common card layout: the title lives in a heading and
                     # the link is a separate "Learn More" / image anchor, so the
                     # anchor's own text is useless. Fall back to the nearest
@@ -308,9 +354,10 @@ class GenericListingScraper(BaseScraper):
                     title = strip_field_label(clean_title(self._heading_title(a)))
                     if not title or _NAV_HREF.search(href):
                         continue
+                if row is not None and not _looks_like_opportunity(title, href):
+                    continue
                 url = urljoin(page_url, href)
-                if urlparse(url).netloc.replace("www.", "") not in \
-                        urlparse(self.website).netloc.replace("www.", ""):
+                if not self._host_allowed(url):
                     continue          # off-site link (social, partner, funder logo)
                 # A link back to the page we are parsing is not a link to one
                 # opportunity — it is the "back to listings" / pagination /
@@ -326,7 +373,8 @@ class GenericListingScraper(BaseScraper):
                 seen.add(url)
 
                 # Deadline, if the surrounding block mentions one.
-                block = a.find_parent(["article", "li", "div", "tr"]) or a
+                block = row if row is not None else (
+                    a.find_parent(["article", "li", "div", "tr"]) or a)
                 text = block.get_text(" ", strip=True)[:1200]
                 m = _DEADLINE.search(text)
 
@@ -342,10 +390,16 @@ class GenericListingScraper(BaseScraper):
                 if dl_sel:
                     cell = block.select_one(dl_sel)
                     if cell is not None:
-                        raw = (cell.get("datetime") or cell.get("title")
-                               or cell.get_text(" ", strip=True) or "").strip()
-                        if raw:
-                            m = _DATE_ONLY.search(raw) or m
+                        # The first of these that actually holds a date: a
+                        # title attribute often just says "Deadline"
+                        # (Globaltenders), and schema.org rows keep the date in
+                        # `content`.
+                        for raw in (cell.get("datetime"), cell.get("content"),
+                                    cell.get("title"), cell.get_text(" ", strip=True)):
+                            hit = _DATE_ONLY.search((raw or "").strip())
+                            if hit:
+                                m = hit
+                                break
 
                 # Still nothing, and this row is a table row: look for a cell
                 # that holds a date and NOTHING else.
