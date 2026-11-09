@@ -95,17 +95,26 @@ def _hhmm(value: str) -> tuple[int, int] | None:
 def _alert(subject: str, verdict: str, report: dict) -> None:
     """Email the scrape-window verdict to the alert address. Never raises."""
     counts = ", ".join(f"{n} {s}" for s, n in sorted(report["statuses"].items()))
-    lines = [
-        verdict, "",
+    active = report.get("state") in ("running", "paused")
+    timing = (
         f"Running for {report['elapsed_min']:.0f} min; last page finished "
-        f"{report['idle_min']} min ago.",
-        f"Sources ({report['total']}): {counts}.",
-        f"New opportunities saved so far: {report['saved']}.",
-    ]
+        f"{report['idle_min']} min ago."
+        if active else f"Run duration: {report['elapsed_min']:.0f} min."
+    )
+    lines = [verdict, "", timing,
+             f"Sources ({report['total']}): {counts or 'no source results recorded'}.",
+             f"New opportunities saved: {report['saved']}."]
     if report["running"]:
         lines += ["", "In progress:"]
         lines += [f"  - {r['source']}: page {r['pages']}, {r['saved']} saved, "
                   f"idle {r['idle_min']} min" for r in report["running"]]
+    if report.get("problems"):
+        lines += ["", "Sources needing attention:"]
+        lines += [
+            f"  - {p['source']}: {p['status']}"
+            + (f" — {p['detail']}" if p.get("detail") else "")
+            for p in report["problems"]
+        ]
     try:
         from app.services import email_service
         email_service.send_alert(subject=subject, body="\n".join(lines))
@@ -158,6 +167,7 @@ class ScrapeScheduler:
         self.current: ScheduleRequest = ScheduleRequest(mode="manual")
         # Run history (persisted): ISO timestamps + last outcome.
         self.last_run: datetime | None = None
+        self.last_finished: datetime | None = None
         self.last_status: str | None = None
         self.last_success: datetime | None = None
         # API searches are billable even if none of their results survive the
@@ -302,11 +312,37 @@ class ScrapeScheduler:
         )
 
     async def _window_health_check(self) -> None:
-        """Still scraping at the health-check time: carry on if it is making
-        progress, stop it now if it is stuck. An email says which."""
+        """Send the daily overnight-run report and stop a genuinely stuck run.
+
+        The report is deliberately sent even when the batch finished before
+        06:00. A fast run must not look like a missing run merely because there
+        was nothing left running at the old health-check time.
+        """
         if manager.state not in ("running", "paused"):
-            log.info("Scrape health check: no scrape running (last outcome: %s)",
-                     self.last_status)
+            report = manager.health_report(
+                stall_s=settings.scrape_stall_minutes * 60
+            )
+            if self.last_run and self.last_finished:
+                report["elapsed_min"] = round(
+                    (self.last_finished - self.last_run).total_seconds() / 60, 1
+                )
+            report["idle_min"] = 0
+            report["running"] = []
+            last_at = (
+                self.last_run.strftime("%Y-%m-%d %H:%M UTC")
+                if self.last_run else "not recorded"
+            )
+            verdict = (
+                f"Nightly scrape is not currently running. Latest run: {last_at}; "
+                f"outcome: {self.last_status or 'not recorded'}."
+            )
+            log.info("Scrape health report: %s", verdict)
+            await asyncio.to_thread(
+                _alert,
+                f"Nightly scrape report: {self.last_status or 'no run recorded'}",
+                verdict,
+                report,
+            )
             return
         report = manager.health_report(stall_s=settings.scrape_stall_minutes * 60)
         stop_at = settings.scrape_hard_stop_at or "the next manual stop"
@@ -507,8 +543,9 @@ class ScrapeScheduler:
             while manager.state != "idle":
                 await asyncio.sleep(2)
             self.last_status = scrape_outcome(manager.progress)
+            self.last_finished = datetime.now(timezone.utc).replace(tzinfo=None)
             if self.last_status == "success":
-                self.last_success = datetime.now(timezone.utc).replace(tzinfo=None)
+                self.last_success = self.last_finished
             log.info("Scheduled scrape finished: %s", self.last_status)
         except Exception:
             log.exception("Scheduled scrape monitoring failed")
@@ -524,6 +561,10 @@ class ScrapeScheduler:
                     {
                         "config": self.current.model_dump(),
                         "last_run": self.last_run.isoformat() if self.last_run else None,
+                        "last_finished": (
+                            self.last_finished.isoformat()
+                            if self.last_finished else None
+                        ),
                         "last_status": self.last_status,
                         "last_success": self.last_success.isoformat() if self.last_success else None,
                         "web_discovery_last_run": (
@@ -544,7 +585,7 @@ class ScrapeScheduler:
         try:
             data = json.loads(_STATE_FILE.read_text(encoding="utf-8"))
             self.current = ScheduleRequest(**data.get("config", {}))
-            for attr in ("last_run", "last_success"):
+            for attr in ("last_run", "last_finished", "last_success"):
                 raw = data.get(attr)
                 setattr(self, attr, datetime.fromisoformat(raw) if raw else None)
             raw_discovery = data.get("web_discovery_last_run")

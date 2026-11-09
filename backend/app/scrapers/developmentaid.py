@@ -374,6 +374,17 @@ class DevelopmentAidScraper(BaseScraper):
                     log.error("[%s] browser walk failed: %s: %s",
                               self.name, type(payload).__name__, payload)
                     raise payload
+                if kind == "heartbeat":
+                    # Verification can legitimately take minutes. Report
+                    # liveness without pretending a listing page completed so
+                    # the per-source watchdog does not kill a browser that is
+                    # actively rechecking the challenge.
+                    await progress("heartbeat", {
+                        "source": self.name,
+                        "stage": "verification",
+                        "detail": payload,
+                    })
+                    continue
 
                 slug, page_nr, body = payload
                 page_number += 1
@@ -409,6 +420,12 @@ class DevelopmentAidScraper(BaseScraper):
     def _walk_sections(self, out_queue, stop_flag) -> None:
         """Browser-side walk. Pushes ('page', (slug, page_nr, cards)) per page."""
         self._active_url: dict[str, str] = {}
+        self._run_stop_flag = stop_flag
+        self._challenge_heartbeat = (
+            lambda slug, elapsed: out_queue.put(
+                ("heartbeat", f"{slug}: waiting {elapsed}s for verification")
+            )
+        )
         from playwright.sync_api import sync_playwright
 
         from app.scrapers.devaid_auth import open_persistent
@@ -566,9 +583,20 @@ class DevelopmentAidScraper(BaseScraper):
                             log.info("[developmentaid] %s: HTTP %s on arrival — "
                                      "waiting for the interstitial to clear",
                                      slug, resp.status)
-                            if self._wait_out_challenge(page, slug):
+                            if self._wait_out_challenge(
+                                page, slug, stop_flag=stop_flag
+                            ):
                                 log.info("[developmentaid] %s: challenge cleared "
                                          "on its own", slug)
+                        elif self._is_challenge_title(page.title()):
+                            log.info(
+                                "[developmentaid] %s: verification page returned "
+                                "HTTP 200 — waiting for it to clear",
+                                slug,
+                            )
+                            self._wait_out_challenge(
+                                page, slug, stop_flag=stop_flag
+                            )
                     except Exception as exc:
                         log.warning(
                             "[developmentaid] %s: failed to load section start page "
@@ -616,6 +644,10 @@ class DevelopmentAidScraper(BaseScraper):
                             page.reload(timeout=90_000, wait_until="domcontentloaded")
                         except Exception:
                             pass
+                        if self._is_challenge_title(page.title()):
+                            self._wait_out_challenge(
+                                page, slug, stop_flag=stop_flag
+                            )
                         rendered = _cards_rendered(60_000)
 
                     if not rendered:
@@ -917,24 +949,75 @@ class DevelopmentAidScraper(BaseScraper):
             "checking your browser", "verifying you are human",
         ))
 
-    def _wait_out_challenge(self, page, slug: str, timeout_ms: int = 45_000) -> bool:
+    def _wait_out_challenge(
+        self,
+        page,
+        slug: str,
+        timeout_ms: int | None = None,
+        stop_flag=None,
+    ) -> bool:
         """Wait for Cloudflare's non-interactive check to pass itself.
 
         It clears by navigating the page, so the signal is the title changing —
         polling for that is both faster when it passes and honest when it never
         does. Returns True if the page is no longer a challenge.
         """
+        timeout_ms = timeout_ms or max(
+            1, int(settings.devaid_challenge_wait_s)
+        ) * 1000
+        stop_flag = stop_flag or getattr(self, "_run_stop_flag", None)
+        reload_ms = max(10, int(settings.devaid_challenge_reload_s)) * 1000
         waited = 0
+        next_reload = reload_ms
+        next_log = 60_000
         while waited < timeout_ms:
+            if stop_flag is not None and stop_flag.is_set():
+                log.info(
+                    "[developmentaid] %s: verification wait cancelled by stop request",
+                    slug,
+                )
+                return False
             try:
                 if not self._is_challenge_title(page.title()):
                     return True
             except Exception:
                 pass                       # mid-navigation — try again shortly
-            page.wait_for_timeout(1_500)
-            waited += 1_500
-        log.info("[developmentaid] %s: the interstitial did not clear in %ss",
-                 slug, timeout_ms // 1000)
+            if waited >= next_reload:
+                try:
+                    log.info(
+                        "[developmentaid] %s: verification still present after "
+                        "%ss — refreshing and continuing to wait",
+                        slug, waited // 1000,
+                    )
+                    page.reload(timeout=90_000, wait_until="domcontentloaded")
+                except Exception:
+                    log.debug(
+                        "[developmentaid] %s: verification refresh did not finish",
+                        slug, exc_info=True,
+                    )
+                next_reload += reload_ms
+            if waited >= next_log:
+                log.info(
+                    "[developmentaid] %s: waiting for verification (%ss/%ss)",
+                    slug, waited // 1000, timeout_ms // 1000,
+                )
+                heartbeat = getattr(self, "_challenge_heartbeat", None)
+                if heartbeat is not None:
+                    try:
+                        heartbeat(slug, waited // 1000)
+                    except Exception:
+                        log.debug(
+                            "[developmentaid] could not emit verification heartbeat",
+                            exc_info=True,
+                        )
+                next_log += 60_000
+            page.wait_for_timeout(2_000)
+            waited += 2_000
+        log.warning(
+            "[developmentaid] %s: verification did not clear after %ss; "
+            "the nightly run will record this source as blocked",
+            slug, timeout_ms // 1000,
+        )
         return False
 
     @staticmethod
@@ -1302,7 +1385,7 @@ class DevelopmentAidScraper(BaseScraper):
                     # is why every detail page was "skipped" and no lead got a
                     # document. Wait it out like the search walk does.
                     if status in (403, 503) or self._is_challenge_title(detail.title()):
-                        if not self._wait_out_challenge(detail, "detail", 45_000):
+                        if not self._wait_out_challenge(detail, "detail"):
                             self._detail_skip_reasons[url] = (
                                 f"HTTP {status}: security check did not clear")
                             continue

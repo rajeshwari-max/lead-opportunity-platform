@@ -116,12 +116,26 @@ def test_health_check_stops_a_stuck_scrape(sched, monkeypatch, alerts):
     assert "STUCK" in alerts[0][1]
 
 
-def test_health_check_is_silent_when_the_scrape_already_finished(sched, monkeypatch, alerts):
+def test_health_check_reports_when_the_scrape_already_finished(sched, monkeypatch, alerts):
     from app.services import scheduler as mod
     fake = _FakeManager("idle", idle_s=0)
     monkeypatch.setattr(mod, "manager", fake)
+    sched.last_status = "partial_success"
+    sched.last_run = datetime(2026, 11, 8, 16, 30)
+    sched.last_finished = datetime(2026, 11, 8, 19, 0)
     asyncio.run(sched._window_health_check())
-    assert not fake.stopped and alerts == []
+    assert not fake.stopped and len(alerts) == 1
+    assert "partial_success" in alerts[0][0]
+    assert "Run duration: 150 min" in alerts[0][1]
+
+
+def test_web_discovery_defaults_to_daily():
+    from app.core.config import Settings
+    cfg = Settings(_env_file=None)
+    assert cfg.web_discovery_interval_days == 1
+    assert cfg.web_discovery_monthly_request_limit >= (
+        cfg.web_discovery_request_budget_per_run * 31
+    )
 
 
 def test_hard_stop_stops_a_running_scrape(sched, monkeypatch, alerts):

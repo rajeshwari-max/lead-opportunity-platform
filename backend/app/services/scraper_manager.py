@@ -1284,13 +1284,20 @@ class ScraperManager:
         for p in self.progress.values():
             statuses[p.get("status", "?")] = statuses.get(p.get("status", "?"), 0) + 1
         running = []
+        problems = []
         for name, p in self.progress.items():
             if p.get("status") != "running":
-                continue
-            seen = self.source_activity.get(name, self.started_at or now)
-            running.append({"source": p.get("display_name", name),
-                            "pages": p.get("pages", 0), "saved": p.get("saved", 0),
-                            "idle_min": round((now - seen) / 60, 1)})
+                if p.get("status") not in ("completed", "queued"):
+                    problems.append({
+                        "source": p.get("display_name", name),
+                        "status": p.get("status", "unknown"),
+                        "detail": p.get("error") or p.get("message") or "",
+                    })
+            else:
+                seen = self.source_activity.get(name, self.started_at or now)
+                running.append({"source": p.get("display_name", name),
+                                "pages": p.get("pages", 0), "saved": p.get("saved", 0),
+                                "idle_min": round((now - seen) / 60, 1)})
         idle_s = now - (self.last_activity or self.started_at or now)
         return {
             "state": self.state,
@@ -1301,6 +1308,7 @@ class ScraperManager:
             "total": len(self.progress),
             "saved": sum(p.get("saved", 0) for p in self.progress.values()),
             "running": running,
+            "problems": problems,
         }
 
     def _log(self, message: str) -> None:

@@ -82,12 +82,15 @@ class Settings(BaseSettings):
     # more results exist; most queries naturally stop earlier.
     web_discovery_max_pages_per_query: int = 10
     web_discovery_request_budget_per_run: int = 720
-    web_discovery_monthly_request_limit: int = 10000
+    # 720 requests/day needs up to 22,320 in a 31-day month. Keep a small
+    # margin so the new daily schedule does not exhaust its own software cap.
+    web_discovery_monthly_request_limit: int = 25000
     web_discovery_fetch_concurrency: int = 4
     # Whole-web search is metered separately from ordinary website scraping.
     # Automatic runs include it only after this many calendar days; all other
-    # registered sources retain their normal daily cadence.
-    web_discovery_interval_days: int = 3
+    # registered sources retain their normal daily cadence. Daily is the
+    # production default; request/monthly budgets remain the cost guardrails.
+    web_discovery_interval_days: int = 1
     # Brave freshness code: pd (day), pw (week), pm (31 days), py (year), or a
     # supported custom date range. Blank searches the full index; source-page
     # deadline validation, rather than publication age, decides what is live.
@@ -403,6 +406,12 @@ class Settings(BaseSettings):
     #   true  -> visible window (desktop only, best chance of working)
     #   false -> headless (required on EC2)
     devaid_headless: bool = True
+    # A Cloudflare verification page is transient state, not an empty source.
+    # Keep the signed-in browser alive and recheck/reload it for the full
+    # overnight window. The manager stop flag and 08:00 hard stop still win, so
+    # this cannot keep an automatic scrape alive past its operating window.
+    devaid_challenge_wait_s: int = 36000
+    devaid_challenge_reload_s: int = 60
     # DevelopmentAid limits how deep a single search can be paged (~100 records),
     # so coverage comes from running many narrowed searches and merging them.
     # This caps how many of those slices one run performs.
