@@ -81,6 +81,36 @@ def test_maintenance_idempotent_preserves_decisions_and_never_reactivates(tmp_pa
                 assert all(r.deadline >= application_today() for r in results.items)
 
 
+def test_merge_keeps_most_recent_explicit_deadline(tmp_path):
+    path = tmp_path / 'deadline-merge.db'
+    engine = setup_db(path)
+    url = 'https://example.org/notices/one'
+    key = make_unique_id('One opportunity', 'Org', None, url, 'Official Board')
+    with Session(engine) as db:
+        older = row(
+            key, title='One opportunity', opportunity_url=url,
+            source_website='Official Board', deadline=date(2026, 12, 1),
+            deadline_raw='01-Dec-26', deadline_confidence='parsed',
+            deadline_checked_at=datetime(2026, 10, 1),
+            last_seen=datetime(2026, 10, 1),
+        )
+        newer = row(
+            'legacy-deadline-key', title='One opportunity', opportunity_url=url,
+            source_website='Official Board', deadline=date(2027, 1, 15),
+            deadline_raw='15-Jan-27', deadline_confidence='parsed',
+            deadline_checked_at=datetime(2026, 11, 1),
+            last_seen=datetime(2026, 11, 1),
+        )
+        db.add_all([older, newer])
+        db.commit()
+    stats = maintain_database(path)
+    assert stats['merged'] == 1
+    with Session(engine) as db:
+        keeper = db.scalar(select(Opportunity).where(Opportunity.unique_id == key))
+        assert keeper.deadline == date(2027, 1, 15)
+        assert keeper.deadline_raw == '15-Jan-27'
+
+
 def test_import_recalculates_identity_and_repeat_is_noop(tmp_path, monkeypatch):
     from app.core.config import settings
     from scripts.merge_db import main

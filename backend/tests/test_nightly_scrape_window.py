@@ -88,6 +88,17 @@ def test_monthly_health_report_is_admin_job_on_first_day(sched):
     assert "hour='9'" in str(trigger) and "minute='30'" in str(trigger)
 
 
+def test_weekly_usage_report_runs_monday_evening_india_time(sched, monkeypatch):
+    from app.services import scheduler as mod
+    # The address lives in backend/.env on the server, not in the code.
+    monkeypatch.setattr(mod.settings, "weekly_usage_report_recipient", "lead@example.org")
+    sched.start()
+    _, trigger = sched._scheduler.jobs["weekly-lead-gen-usage-report"]
+    assert str(trigger.timezone) == "Asia/Kolkata"
+    assert "day_of_week='mon'" in str(trigger)
+    assert "hour='18'" in str(trigger) and "minute='0'" in str(trigger)
+
+
 def test_blank_time_turns_a_window_job_off(sched, monkeypatch):
     from app.services import scheduler as mod
     monkeypatch.setattr(mod.settings, "scrape_health_check_at", "")
@@ -339,3 +350,10 @@ def test_a_source_ended_by_the_watchdog_stays_failed(monkeypatch):
     asyncio.run(asyncio.wait_for(m._run([Source()]), 5))
     assert m.progress["hangs"]["stalled"] is True
     assert m.progress["hangs"]["status"] == "failed"
+
+
+def test_weekly_usage_report_is_off_until_a_recipient_is_set(sched, monkeypatch):
+    from app.services import scheduler as mod
+    monkeypatch.setattr(mod.settings, "weekly_usage_report_recipient", "")
+    sched.start()
+    assert "weekly-lead-gen-usage-report" not in sched._scheduler.jobs

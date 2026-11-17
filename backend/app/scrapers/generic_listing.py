@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import copy
 import re
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -285,6 +286,76 @@ class GenericListingScraper(BaseScraper):
     #   allowed_link_hosts — extra hosts a row may link to, for funders that
     #                        host the call document elsewhere (Pfizer's
     #                        cdn.pfizer.com, Agency Fund's Webflow CDN)
+    _BLOCK_TAGS = ("div", "p", "td", "li", "article", "section",
+                   "h1", "h2", "h3", "h4", "h5", "h6", "dl", "table")
+
+    @classmethod
+    def _is_card_anchor(cls, anchor) -> bool:
+        """The link wraps the whole row or card, so the row IS the link.
+
+        UNDP Procurement prints each notice as
+        ``<a class="vacanciesTable__row"><div>Title…</div><div>Deadline…</div></a>``.
+        """
+        return anchor.find(cls._BLOCK_TAGS) is not None
+
+    def _listing_links(self, soup) -> dict[int, set[str]]:
+        """For every element, the distinct listing-like links beneath it.
+
+        Used to tell a ROW (one link) from a LIST (many). Built once per page.
+        """
+        under: dict[int, set[str]] = {}
+        for a in soup.find_all("a", href=True):
+            href = a.get("href") or ""
+            if len(a.get_text(" ", strip=True)) < _MIN_TITLE or _NAV_HREF.search(href):
+                continue
+            node = a.parent
+            for _ in range(8):
+                if node is None:
+                    break
+                under.setdefault(id(node), set()).add(href)
+                node = node.parent
+        return under
+
+    def _block_for(self, anchor, under: dict[int, set[str]]):
+        """The part of the page that belongs to this one link.
+
+        The text of this block is where the deadline and the summary are read,
+        so it must never be a container shared with other rows. It used to be
+        "the nearest article/li/div/tr above the link", and on a board whose
+        rows are links sitting directly in one big container that is the WHOLE
+        LIST: every row then received the first row's deadline and the first
+        row's summary. On 2026-11-17 all 515 UNDP notices carried the closing
+        date of the notice at the top of the page.
+        """
+        if self._is_card_anchor(anchor):
+            return anchor
+        nearest = anchor.find_parent(["article", "li", "div", "tr"])
+        if nearest is None:
+            return anchor
+        if nearest.name == "tr" or len(under.get(id(nearest), ())) < 3:
+            return nearest
+        # A shared container. Take this link's own wrapper and what follows it
+        # up to the next row's link: a missing date is safer than a neighbour's.
+        child = anchor
+        while child.parent is not None and child.parent is not nearest:
+            child = child.parent
+        piece = BeautifulSoup("<div></div>", "lxml").div
+        piece.append(copy.copy(child))
+        taken = 0
+        for sibling in child.next_siblings:
+            if getattr(sibling, "name", None) is None:
+                text = str(sibling).strip()
+                if text:
+                    piece.append(text + " ")
+                continue
+            if sibling.name == "a" or under.get(id(sibling)):
+                break                      # the next row starts here
+            piece.append(copy.copy(sibling))
+            taken += 1
+            if taken >= 6:
+                break
+        return piece
+
     def _row_for(self, anchor, selector: str):
         """(row, title_element) — the nearest ancestor holding the title."""
         node = anchor
@@ -303,8 +374,13 @@ class GenericListingScraper(BaseScraper):
         host = urlparse(url).netloc.replace("www.", "")
         if host in urlparse(self.website).netloc.replace("www.", ""):
             return True
-        return any(host == h or host.endswith("." + h)
-                   for h in self.config.get("allowed_link_hosts") or [])
+        allowed = self.config.get("allowed_link_hosts") or []
+        # "*" is for a board whose rows are picked by title_selector and link
+        # wherever the funder hosts the call (Grand Challenges: hubs.la today,
+        # a partner's site tomorrow). Never use it without title_selector.
+        if "*" in allowed:
+            return urlparse(url).scheme in ("http", "https")
+        return any(host == h or host.endswith("." + h) for h in allowed)
 
     def parse_listing(self, html: str, page_url: str) -> list[RawOpportunity]:
         soup = BeautifulSoup(html, "lxml")
@@ -313,8 +389,17 @@ class GenericListingScraper(BaseScraper):
             # in the card footer) is part of the listing, not page chrome.
             if tag.name in ("header", "footer") and tag.find_parent("article"):
                 continue
+            # A card's title bar: a <header> holding a heading and no links.
+            # The site's own header always carries navigation links. Grand
+            # Challenges puts each call's title in <header><h3>…</h3></header>
+            # inside a plain <div> card, so removing it left a "Learn More"
+            # button with no title and the call was never read.
+            if tag.name == "header" and tag.find(["h2", "h3", "h4", "h5"]) \
+                    and not tag.find(["a", "nav"]):
+                continue
             tag.decompose()
         row_title_sel = self.config.get("row_title_selector")
+        listing_links = self._listing_links(soup)
 
         items: list[RawOpportunity] = []
         seen: set[str] = set()
@@ -344,7 +429,16 @@ class GenericListingScraper(BaseScraper):
                     title = strip_field_label(clean_title(
                         title_el.get_text(" ", strip=True)))
                 else:
-                    title = strip_field_label(clean_title(a.get_text(" ", strip=True)))
+                    title_src = a
+                    if self._is_card_anchor(a):
+                        # A link that wraps a whole card: the card's heading is
+                        # its title, not every field in it run together.
+                        # With no heading, the first cell is the title
+                        # (UNDP: "Title <name>", label stripped below).
+                        title_src = (a.find(["h1", "h2", "h3", "h4", "h5"])
+                                     or a.find(self._BLOCK_TAGS) or a)
+                    title = strip_field_label(clean_title(
+                        title_src.get_text(" ", strip=True)))
                 if row is None and not _looks_like_opportunity(title, href):
                     # Very common card layout: the title lives in a heading and
                     # the link is a separate "Learn More" / image anchor, so the
@@ -373,8 +467,7 @@ class GenericListingScraper(BaseScraper):
                 seen.add(url)
 
                 # Deadline, if the surrounding block mentions one.
-                block = row if row is not None else (
-                    a.find_parent(["article", "li", "div", "tr"]) or a)
+                block = row if row is not None else self._block_for(a, listing_links)
                 text = block.get_text(" ", strip=True)[:1200]
                 m = _DEADLINE.search(text)
 
@@ -386,6 +479,17 @@ class GenericListingScraper(BaseScraper):
                 # with no deadline becomes a permanently-open "Ongoing" that
                 # nothing can ever expire. Point "deadline_selector" at the cell
                 # in sources.json and the date is read directly.
+                # "deadline_regex": the closing date is in prose the generic
+                # pattern would misread. Grand Challenges prints "Applications
+                # Open  Aug 18, 2026 to Jan 20, 2027": the LAST date closes the
+                # call, and the description mentions earlier ones. Group 1 is
+                # the date.
+                dl_rx = self.config.get("deadline_regex")
+                if dl_rx:
+                    hit = re.search(dl_rx, text, re.IGNORECASE | re.DOTALL)
+                    if hit:
+                        m = hit
+
                 dl_sel = self.config.get("deadline_selector")
                 if dl_sel:
                     cell = block.select_one(dl_sel)

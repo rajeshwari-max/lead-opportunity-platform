@@ -55,6 +55,17 @@ class Settings(BaseSettings):
     source_health_report_at: str = "09:30"
     source_health_report_timezone: str = "Asia/Kolkata"
 
+    # Weekly adoption report for the lead-generation owner.  This is separate
+    # from the daily opportunity digest: it reports platform usage, not leads.
+    # Keep the recipient configurable so a staffing change does not require a
+    # code deployment.  Monday evening means 18:00 in the configured timezone.
+    weekly_usage_report_enabled: bool = True
+    # Set LOP_WEEKLY_USAGE_REPORT_RECIPIENT in backend/.env on the server.
+    # No address is kept in the code: the repository is public. Blank = off.
+    weekly_usage_report_recipient: str = ""
+    weekly_usage_report_at: str = "18:00"
+    weekly_usage_report_timezone: str = "Asia/Kolkata"
+
     # Public-web opportunity discovery ------------------------------------
     #
     # This does not try to crawl the whole internet from EC2. A general web
@@ -199,6 +210,11 @@ class Settings(BaseSettings):
     # Network lookups for English editions per scrape run, and their timeout.
     english_lookup_max_per_run: int = 150
     english_lookup_timeout_s: float = 8.0
+    # After this many lookups in a row with no English edition, a source is
+    # not asked again in that run (its other non-English rows are skipped).
+    english_lookup_misses_per_source: int = 3
+    # API requests slower than this are written to logs/performance.log.
+    slow_request_seconds: float = 2.0
     semantic_mode: str = "shadow"
     semantic_model: str = "BAAI/bge-small-en-v1.5"
     semantic_cache_dir: str = ""          # default backend/data/models

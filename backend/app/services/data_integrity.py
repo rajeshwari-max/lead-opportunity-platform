@@ -85,6 +85,35 @@ def maintain_database(path=None):
                     continue
                 full = [dict(db.execute('SELECT * FROM opportunities WHERE id=?', (r['id'],)).fetchone())
                         for r in rows]
+                # A corrected/extended deadline used to be the field most
+                # likely to differ between duplicates. Keep the most recently
+                # checked explicit date, not whichever row happened to become
+                # the identity keeper. This prevents a merge from resurrecting
+                # an obsolete closing date after ingestion already learned the
+                # source's newer value.
+                dated = [r for r in full if r.get('deadline') and
+                         r.get('deadline_confidence') in {'human', 'parsed'}]
+                if dated:
+                    best = max(
+                        dated,
+                        key=lambda r: (
+                            r.get('deadline_checked_at') or
+                            r.get('last_seen') or
+                            r.get('date_scraped') or '',
+                            r['id'],
+                        ),
+                    )
+                    status = 'Expired' if best['deadline'] < today else 'Active'
+                    db.execute(
+                        'UPDATE opportunities SET deadline=?, deadline_state=?, '
+                        'deadline_raw=?, deadline_confidence=?, '
+                        'deadline_convention=?, deadline_checked_at=?, status=? '
+                        'WHERE id=?',
+                        (best['deadline'], best.get('deadline_state') or 'dated',
+                         best.get('deadline_raw'), best.get('deadline_confidence'),
+                         best.get('deadline_convention'),
+                         best.get('deadline_checked_at'), status, keeper['id'])
+                    )
                 # Carry human decisions with their attribution and timestamps.
                 approved = [r for r in full if r.get('approved')]
                 if approved:

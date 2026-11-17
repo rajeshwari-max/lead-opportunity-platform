@@ -412,6 +412,28 @@ class LeadActivity(Base):
     source_opened_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
+class UserActivityEvent(Base):
+    """Append-only, server-recorded evidence of user engagement.
+
+    LeadActivity deliberately stores one latest timestamp per user/opportunity.
+    This ledger preserves every future action so adoption reports have an
+    auditable event source instead of inferring repeat usage from snapshots.
+    """
+
+    __tablename__ = "user_activity_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    actor: Mapped[str] = mapped_column(String(320), index=True)
+    event_type: Mapped[str] = mapped_column(String(48), index=True)
+    opportunity_id: Mapped[int | None] = mapped_column(index=True)
+    journey_id: Mapped[int | None] = mapped_column(index=True)
+    source: Mapped[str] = mapped_column(String(64), default="server_api")
+    details: Mapped[str] = mapped_column(Text, default="{}")
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+
 class DashboardPreferences(Base):
     __tablename__ = "dashboard_preferences"
     owner: Mapped[str] = mapped_column(String(320), primary_key=True)

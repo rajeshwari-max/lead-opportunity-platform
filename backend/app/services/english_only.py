@@ -18,6 +18,8 @@ Speed rules, because this runs inside the nightly scrape:
     edition of this page is already stored. If it is, that row is reused.
   * At most two short HTTP requests per non-English row, results cached in
     memory (negative ones too), and a per-run cap.
+  * A source whose first few lookups in a run find no English edition is not
+    asked again that run: its remaining non-English rows are skipped at once.
   * Closed (expired) non-English rows are never looked up.
 """
 from __future__ import annotations
@@ -188,11 +190,18 @@ _cache: dict[str, tuple[float, tuple[str, str, str] | None]] = {}
 _cache_lock = threading.Lock()
 _CACHE_TTL = 7 * 24 * 3600
 _lookups_this_run = 0
+# Lookups in a row that found no English edition, per source. A source that
+# publishes none (UNDP's notices are French, Spanish or English, one language
+# each) would otherwise cost a request for every non-English row, all inside
+# one page's ingest: on a 526-row page that is the whole per-run budget and
+# several minutes with no page finishing.
+_misses_in_a_row: dict[str, int] = {}
 
 
 def reset_run_budget() -> None:
     global _lookups_this_run
     _lookups_this_run = 0
+    _misses_in_a_row.clear()
 
 
 def _stored_english(urls: list[str], source_website: str):
@@ -275,9 +284,13 @@ def ensure_english(raw, *, expired: bool = False) -> Verdict:
             hit = _cache.get(url)
         if hit and now - hit[0] < _CACHE_TTL:
             found = hit[1]
-        elif _lookups_this_run < settings.english_lookup_max_per_run:
+        elif (_lookups_this_run < settings.english_lookup_max_per_run
+              and _misses_in_a_row.get(raw.source_website, 0)
+              < settings.english_lookup_misses_per_source):
             _lookups_this_run += 1
             found = _fetch_english(url, settings.english_lookup_timeout_s)
+            _misses_in_a_row[raw.source_website] = (
+                0 if found else _misses_in_a_row.get(raw.source_website, 0) + 1)
             with _cache_lock:
                 if len(_cache) > 5000:
                     _cache.clear()

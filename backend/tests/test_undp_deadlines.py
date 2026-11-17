@@ -154,3 +154,40 @@ def test_navigation_is_still_rejected_on_the_curated_board():
             '</tr></table>')
     rows = scraper().parse_listing(html, "https://procurement-notices.undp.org/?lang=en")
     assert rows == [] or all("Skip to main" not in r.title for r in rows)
+
+
+
+# ------------------------------- the board as served on 2026-11-17
+
+LIVE = Path(__file__).parent / "fixtures" / "undp_procurement_notices.html"
+
+
+def _live_rows():
+    return scraper().parse_listing(LIVE.read_text(encoding="utf-8"),
+                                   "https://procurement-notices.undp.org/?lang=en")
+
+
+def test_each_notice_gets_its_own_closing_date_not_the_first_rows():
+    """Every notice used to carry the closing date of the notice at the top
+    of the page, because the whole list was read as each row's block."""
+    rows = _live_rows()
+    assert len(rows) >= 5
+    by_id = {r.opportunity_url.rsplit("=", 1)[-1]: r.deadline_raw for r in rows}
+    assert by_id["51769"] == "01-Dec-26"
+    assert by_id["51755"] == "02-Dec-26"
+    assert by_id["51789"] == "15-Dec-26"
+    assert by_id["51701"] == "25-Nov-26"
+    assert len({r.deadline_raw for r in rows}) > 1
+
+
+def test_the_title_is_the_title_cell_not_all_six_cells_run_together():
+    titles = [r.title for r in _live_rows()]
+    assert "RFP-114-IND-2026-Urban Social Protection Programme for Safai Mitras" in titles
+    assert not any("Ref No" in t or "Deadline" in t or t.startswith("Title ")
+                   for t in titles), titles
+
+
+def test_a_notice_summary_is_its_own_row():
+    rows = _live_rows()
+    for r in rows:
+        assert r.title[:30] in r.summary, (r.title, r.summary[:120])

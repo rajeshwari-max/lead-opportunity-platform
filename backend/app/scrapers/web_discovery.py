@@ -210,6 +210,33 @@ def build_queries(today: date | None = None) -> list[str]:
     return unique[:max(1, settings.web_discovery_max_queries)]
 
 
+# Brave's documented limits for q: 400 characters and 50 words. Six of the 72
+# built-in searches were 52-53 words long.
+_MAX_QUERY_CHARS = 400
+_MAX_QUERY_WORDS = 50
+# Parameters the search works without. Dropped for the rest of a run after
+# Brave answers 422 (request not acceptable as written).
+_OPTIONAL_SEARCH_PARAMS = ("extra_snippets", "spellcheck", "result_filter", "safesearch")
+_EXCLUSIONS = re.compile(r"(\s+-\w+)+\s*$")
+
+
+def _fit_query(query: str) -> str:
+    """The query, within Brave's length limits.
+
+    Trailing exclusions (-jobs -careers ...) go first, one at a time: they
+    only tidy the results, and the source page's own deadline check rejects
+    closed or irrelevant pages anyway. Whole words are cut last.
+    """
+    q = " ".join(query.split())
+    while (len(q) > _MAX_QUERY_CHARS or len(q.split()) > _MAX_QUERY_WORDS) \
+            and _EXCLUSIONS.search(q):
+        q = q.rsplit(" -", 1)[0].rstrip()
+    words = q.split()
+    if len(words) > _MAX_QUERY_WORDS:
+        q = " ".join(words[:_MAX_QUERY_WORDS])
+    return q[:_MAX_QUERY_CHARS].rstrip()
+
+
 class SearchBudgetExhausted(RuntimeError):
     """The configured per-run or calendar-month Search API cap was reached."""
 
@@ -230,6 +257,7 @@ class WebDiscoveryScraper(BaseScraper):
             max(1, min(12, settings.web_discovery_fetch_concurrency)))
         self._js_render_lock = asyncio.Semaphore(1)
         self._run_search_requests = 0
+        self._plain_search = False
         self._js_rendered = 0
         self.last_probe: dict = {
             "fetch_mode": "search_api+http+bounded_playwright",
@@ -279,7 +307,7 @@ class WebDiscoveryScraper(BaseScraper):
         self, client: httpx.AsyncClient, query: str, offset: int = 0,
     ) -> tuple[list[dict], bool]:
         params = {
-            "q": query,
+            "q": _fit_query(query),
             "count": max(1, min(20, settings.web_discovery_results_per_query)),
             "offset": max(0, min(9, offset)),
             "search_lang": "en",
@@ -288,6 +316,9 @@ class WebDiscoveryScraper(BaseScraper):
             "result_filter": "web",
             "extra_snippets": "true",
         }
+        if self._plain_search:
+            for optional in _OPTIONAL_SEARCH_PARAMS:
+                params.pop(optional, None)
         freshness = settings.web_discovery_freshness.strip()
         if freshness:
             params["freshness"] = freshness
@@ -306,6 +337,28 @@ class WebDiscoveryScraper(BaseScraper):
                 self.last_probe.setdefault("first_http_status", status)
                 self.last_probe["last_http_status"] = status
                 self.last_probe["response_bytes"] += len(response.content)
+                if status == 422:
+                    # Brave refused the REQUEST as written, so sending it again
+                    # unchanged cannot work. On 2026-11-15 every nightly run
+                    # crashed here on its first search. Say what Brave objected
+                    # to (its reply names the parameter, and holds no secret),
+                    # then retry once with only the required parameters: some
+                    # options, extra_snippets among them, depend on the plan.
+                    detail = _clean(response.text, 300)
+                    if not self._plain_search:
+                        log.warning(
+                            "[%s] Brave rejected the request (422: %s) — "
+                            "retrying with required parameters only",
+                            self.name, detail)
+                        self._plain_search = True
+                        for optional in _OPTIONAL_SEARCH_PARAMS:
+                            params.pop(optional, None)
+                        continue
+                    log.warning("[%s] Brave rejected this query (422: %s) — "
+                                "skipping it", self.name, detail)
+                    self.last_probe["rejected_queries"] = (
+                        int(self.last_probe.get("rejected_queries", 0)) + 1)
+                    return [], False
                 response.raise_for_status()
                 data = response.json()
                 results = list((data.get("web") or {}).get("results") or [])
@@ -540,6 +593,7 @@ class WebDiscoveryScraper(BaseScraper):
         # must be reset here rather than only in __init__.
         self._run_search_requests = 0
         self._js_rendered = 0
+        self._plain_search = False
         queries = build_queries()
         seen_urls: set[str] = set()
         counters: Counter = Counter()

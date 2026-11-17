@@ -300,6 +300,14 @@ MANIFESTS: dict[str, SourceContract] = {
         curated=True,
         requires_login=True,
         scope_status=ScopeStatus.CONFIRMED,
+        production_enabled=False,
+        known_defect=(
+            "Taken out of the nightly scrape on 2026-11-16 at the owner's "
+            "request: the site answers the EC2 browser with a Cloudflare "
+            "verification page, so the run sat on page 0 with nothing saved "
+            "until the 08:00 hard stop. It still runs when an admin starts it "
+            "by name."
+        ),
         owner_note=(
             "Grants and tenders/RFPs, current and open by DEFAULT. The historical "
             "archive is a separate, explicitly invoked maintenance operation — a "
@@ -339,12 +347,12 @@ MANIFESTS: dict[str, SourceContract] = {
         deadline_format="dayfirst",
         scope_status=ScopeStatus.CONFIRMED,
         owner_note=(
-            "Procurement notices and open opportunities only. Currently served by "
-            "the GENERIC heuristic scraper — whether that is reliable enough or "
-            "needs a documented API scraper is an open question, not a settled one."
+            "Procurement notices and open opportunities only. The public notice "
+            "table is read with UNDP-specific link and deadline selectors; paging "
+            "follows the board's own Next/numbered links until the list ends."
         ),
         known_defect=(
-            "THE OPEN QUESTION ABOVE IS NOW ANSWERED, AND THE ANSWER IS NO. The "
+            "The original generic extraction was not reliable enough. The "
             "2026-08-30 verification run took 568 rows off a single page and "
             "0.4% of them carried a deadline string — two rows out of 568, of "
             "which one parsed. This is a procurement notice board: essentially "
@@ -353,8 +361,9 @@ MANIFESTS: dict[str, SourceContract] = {
             "table cell, so the date is never seen. 562 of those rows would "
             "have been stored, every one of them deadline-less and therefore in "
             "the UNKNOWN state, which never expires on its own. 1,274 rows are "
-            "already stored under this source. It needs a bespoke scraper that "
-            "reads the notice table by column, not a wider heuristic."
+            "already stored under this source. The source now restricts links to "
+            "UNDP notice/negotiation records and reads the deadline column directly; "
+            "the verification contract still requires measured page coverage."
         ),
     ),
     "devex": _c(
@@ -533,6 +542,60 @@ DEFAULT_CONTRACT_NOTE = (
     "output is judged only by the generic opportunity gate — which reads titles "
     "and URLs, not the source's own type or status fields."
 )
+
+
+# ------------------------------------------------- paused on 2026-11-16
+# Each page was opened in a real browser that day. None can produce a lead in
+# its current form, so each failed every night and filled the morning report.
+# Held out of scheduled runs only: naming a source explicitly still runs it,
+# and nothing stored under these sources is touched. To bring one back, point
+# it at a page that lists open calls and delete its line here.
+_PAUSED_2026_11_16: dict[str, tuple[str, str]] = {
+    # --- the site refuses automated access; that is not worked around
+    "triple_funds": (
+        "Triple Funds",
+        "Cloudflare security verification (HTTP 403) on every visit."),
+    "national_institute_of_health_and_care_re": (
+        "National Institute of Health and Care Research",
+        "Human-verification page (HTTP 405) before any content."),
+    "eu_funding_portal_social": (
+        "EU Funding Portal \u2014 Social Entrepreneurship",
+        "\"I am not a robot\" security check (HTTP 403); automated access is "
+        "not permitted by the site."),
+    # --- the page is not a list of open calls
+    "stavros_niarchos_foundation_snf": (
+        "Stavros Niarchos Foundation (SNF)",
+        "A search-results page that renders no results; SNF has no public "
+        "list of open calls."),
+    "doen_foundation": (
+        "Doen Foundation",
+        "A standing 'how to apply' page with no dated calls."),
+    "merck_family_foundation": (
+        "Merck Family Foundation",
+        "Applications are by invitation only since 1 January 2023."),
+    "cjrf": (
+        "CJRF",
+        "'Our Grants' describes grants already made, not open calls."),
+    "grantmakers_community_project": (
+        "Grantmakers Community Project",
+        "grantmakers.io is a search tool over US foundation tax filings, not "
+        "a list of opportunities."),
+    "veddis_foundation": (
+        "Veddis Foundation",
+        "A standing programme description with no dated call."),
+    "gadfly_project": (
+        "Gadfly Project",
+        "Lists two 2023 in-kind software grants only."),
+    "ifad_moonshots": (
+        "IFAD Moonshots for Development",
+        "A page about an event held on 9 May 2024 (challenge winners)."),
+}
+for _key, (_name, _why) in _PAUSED_2026_11_16.items():
+    MANIFESTS[_key] = _c(
+        key=_key, display_name=_name, production_enabled=False,
+        known_defect=f"Paused 2026-11-16 after a browser check: {_why}",
+        owner_note="Re-enable only with a page that lists currently open calls.",
+    )
 
 
 # Registry key -> manifest key, where the two were written differently.

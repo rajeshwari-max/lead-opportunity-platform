@@ -216,7 +216,7 @@ def test_crawl_yields_recovered_rows_once_and_records_the_strategy(no_browser,
     async def fake_fetch(client, req):
         return LD_PAGE
 
-    async def no_enrich(items, client, budget):
+    async def no_enrich(items, client, budget, progress=None):
         return None
 
     monkeypatch.setattr(s, "_fetch", fake_fetch)

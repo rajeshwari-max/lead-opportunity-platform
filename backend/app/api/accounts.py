@@ -17,6 +17,7 @@ from app.core.auth import (COOKIE_NAME, SESSION_DAYS, current_user, hash_passwor
 from app.core.config import settings
 from app.database.db import get_db
 from app.database.models import TeamMember, WorkspaceCredential
+from app.services.user_activity import record_user_event
 
 router = APIRouter()
 _attempts = {}
@@ -60,7 +61,9 @@ class Login(Input):
     password: str = Field(min_length=1, max_length=200)
 
 
-def sign_in(response, request, member, credential):
+def sign_in(response, request, member, credential, db):
+    record_user_event(db, member.email, "login_success", source="account_auth")
+    db.commit()
     response.set_cookie(COOKIE_NAME, make_session_token(member.email.lower(), member.name, credential.is_admin, password_version(credential.password_hash)),
         httponly=True, secure=request.url.scheme == "https", samesite="lax", path="/", max_age=SESSION_DAYS*86400)
     response.delete_cookie("lop_workspace", path="/api/workspace")
@@ -107,7 +110,7 @@ def login(body: Login, request: Request, response: Response, db: Session = Depen
             "provided by the administrator or choose Forgot password. New users "
             "should choose Register.",
         )
-    return sign_in(response, request, member, credential)
+    return sign_in(response, request, member, credential, db)
 
 
 class Accept(Input):
@@ -133,7 +136,7 @@ def activate(body: Accept, request: Request, response: Response, db: Session = D
     credential.invitation_hash = None
     credential.invitation_expires = None
     db.commit()
-    return sign_in(response, request, member, credential)
+    return sign_in(response, request, member, credential, db)
 
 
 class Invite(Input):
@@ -167,7 +170,7 @@ def change_password(body: ChangePassword, request: Request, response: Response, 
     credential.invitation_expires = None
     db.commit()
     member = db.scalar(select(TeamMember).where(func.lower(TeamMember.email) == user["email"]))
-    return sign_in(response, request, member, credential)
+    return sign_in(response, request, member, credential, db)
 
 
 def send_account_link(email: str, token: str, registration: bool, *, dashboard_base: str = ""):
@@ -278,7 +281,7 @@ def register(body: Register, request: Request, response: Response, db: Session =
         credential.invitation_expires = None
         db.add(credential)
         db.commit()
-        return sign_in(response, request, member, credential)
+        return sign_in(response, request, member, credential, db)
     if member or credential:
         db.rollback()
         raise HTTPException(
@@ -291,7 +294,7 @@ def register(body: Register, request: Request, response: Response, db: Session =
     credential = WorkspaceCredential(owner=email, password_hash=encoded, is_admin=False)
     db.add_all([member, credential])
     db.commit()
-    return sign_in(response, request, member, credential)
+    return sign_in(response, request, member, credential, db)
 
 
 @router.post("/login/forgot-password")

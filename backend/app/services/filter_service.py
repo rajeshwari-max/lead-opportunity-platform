@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date
 from math import ceil
 
-from sqlalchemy import Select, func, or_, select, text
+from sqlalchemy import Select, case, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -409,39 +409,53 @@ class FilterService:
             ).all()
             return {(k.value if hasattr(k, "value") else str(k)): v for k, v in rows}
 
-        def vertical_counts() -> dict[str, int]:
-            """Counts per canonical vertical (multi-label — one row can count in
-            several verticals, like the classification itself)."""
-            counts: dict[str, int] = {}
-            for s in VERTICALS:
-                n = self.db.execute(
-                    select(func.count()).select_from(active).where(
-                        active.c.verticals.like(f"%{s}%")
-                    )
-                ).scalar_one()
-                if n:
-                    counts[s] = n
-            return counts
-
-        brand_counts = {"CMS": self.db.execute(select(func.count()).select_from(active).where(
-            or_(active.c.archetypes.like("%Social Business%"),
-                *(active.c.verticals.like(f"%{v}%") for v in VERTICALS))
-        )).scalar_one()}
-        for brand in ("Green Foundation", "Vrutti", "Swasti", "Setu", "Upfront", "Community Action Collab"):
-            brand_counts[brand] = self.db.execute(
-                select(func.count()).select_from(active).where(
-                    ("," + func.replace(func.coalesce(active.c.brands, ""), ", ", ",") + ",").like(f"%,{brand},%")
-                )
-            ).scalar_one()
-
-        total = self.db.execute(select(func.count()).select_from(active)).scalar_one()
         day_start, day_end = new_leads_window_utc()
-        todays = self.db.execute(
-            select(func.count()).select_from(active).where(
-                active.c.date_scraped >= day_start,
-                active.c.date_scraped < day_end,
-            )
-        ).scalar_one()
+        brand_names = (
+            "Green Foundation", "Vrutti", "Swasti", "Setu", "Upfront",
+            "Community Action Collab",
+        )
+        cms_condition = or_(
+            active.c.archetypes.like("%Social Business%"),
+            *(active.c.verticals.like(f"%{v}%") for v in VERTICALS),
+        )
+        delimited_brands = (
+            "," + func.replace(func.coalesce(active.c.brands, ""), ", ", ",") + ","
+        )
+        # One aggregate scan replaces 16 full scans (six verticals, seven
+        # brands, total and today). On SQLite those scans ran serially on every
+        # filter change and were the main cause of lead-dashboard slowdown.
+        aggregate_columns = [
+            func.count().label("total"),
+            func.sum(case((
+                (active.c.date_scraped >= day_start)
+                & (active.c.date_scraped < day_end), 1), else_=0)).label("today"),
+            *[
+                func.sum(case((active.c.verticals.like(f"%{name}%"), 1), else_=0))
+                .label(f"vertical_{index}")
+                for index, name in enumerate(VERTICALS)
+            ],
+            func.sum(case((cms_condition, 1), else_=0)).label("brand_cms"),
+            *[
+                func.sum(case((delimited_brands.like(f"%,{name},%"), 1), else_=0))
+                .label(f"brand_{index}")
+                for index, name in enumerate(brand_names)
+            ],
+        ]
+        metrics = self.db.execute(
+            select(*aggregate_columns).select_from(active)
+        ).one()._mapping
+        total = int(metrics["total"] or 0)
+        todays = int(metrics["today"] or 0)
+        vertical_counts = {
+            name: int(metrics[f"vertical_{index}"] or 0)
+            for index, name in enumerate(VERTICALS)
+            if metrics[f"vertical_{index}"]
+        }
+        brand_counts = {"CMS": int(metrics["brand_cms"] or 0)}
+        brand_counts.update({
+            name: int(metrics[f"brand_{index}"] or 0)
+            for index, name in enumerate(brand_names)
+        })
         upcoming_ids = select(active.c.id).where(
             active.c.deadline >= application_today()
         )
@@ -462,7 +476,7 @@ class FilterService:
                 if k in settings.enabled_categories
             },
             by_region=group_count("region"),
-            by_vertical=vertical_counts(),
+            by_vertical=vertical_counts,
             by_brand=brand_counts,
             todays_new=todays,
             upcoming_deadlines=[OpportunityOut.model_validate(o) for o in upcoming],

@@ -164,6 +164,19 @@ def test_only_sources_with_confirmed_non_opportunity_or_access_pages_are_held_ba
         "devex",                 # inaccessible paywall, no working feed
         "macarthur_foundation",  # historical grants/impact-investments search
         "hewlett_foundation",    # database of grants already awarded
+        # 2026-11-16, owner's decision after a browser check of each page:
+        "developmentaid",        # Cloudflare verification on EC2; manual runs only
+        "triple_funds",          # Cloudflare verification (403)
+        "national_institute_of_health_and_care_re",   # human-verification page
+        "eu_funding_portal_social",                   # "I am not a robot" check
+        "stavros_niarchos_foundation_snf",            # empty search-results page
+        "doen_foundation",       # standing how-to-apply page
+        "merck_family_foundation",                    # invitation only
+        "cjrf",                  # grants already made
+        "grantmakers_community_project",              # a search tool, not calls
+        "veddis_foundation",     # standing programme description
+        "gadfly_project",        # two 2023 in-kind grants
+        "ifad_moonshots",        # a 2024 event page
     }
 
 

@@ -81,6 +81,8 @@ class OpenSocietyScraper(BaseScraper):
         soup = BeautifulSoup(html, "lxml")
         items: list[RawOpportunity] = []
         seen: set[str] = set()
+        passed = 0
+        self.last_probe["all_notices_closed"] = False
         for a in soup.find_all("a", href=True):
             href = a["href"]
             if "/grants/" not in href or any(
@@ -97,6 +99,7 @@ class OpenSocietyScraper(BaseScraper):
             deadline = _MONTH_DATE.search(text)
             deadline_raw = deadline.group(1) if deadline else ""
             if deadline_raw.lower() == "passed":
+                passed += 1
                 continue        # site says it's over — don't even ingest
             title = text.split("DEADLINE")[0].strip()[:300]
             items.append(RawOpportunity(
@@ -110,6 +113,12 @@ class OpenSocietyScraper(BaseScraper):
                 category_hint=Category.GRANT,
                 dayfirst=False,
             ))
+        # Every call on the page is marked "DEADLINE: PASSED" (the state on
+        # 2026-11-16). That is the site saying it has nothing open, not a
+        # parser that found nothing, so the run is recorded as "no open calls"
+        # instead of a failure.
+        if not items and passed:
+            self.last_probe["all_notices_closed"] = True
         return items
 
 
@@ -126,34 +135,72 @@ class BlueActionFundScraper(BaseScraper):
     def next_page(self, html: str, page_url: str, page_number: int) -> None:
         return None
 
+    _NONE = re.compile(
+        r"[^.]*\bno\s+(upcoming|current|open)\s+calls?\b[^.]*\.?", re.IGNORECASE)
+    _DEADLINE = re.compile(
+        r"(deadline|closes?|due)[^\.]{0,40}?"
+        r"(\d{1,2}\s+\w{3,9},?\s+\d{4}|\w{3,9}\s+\d{1,2},?\s+\d{4})",
+        re.IGNORECASE)
+
     def parse_listing(self, html: str, page_url: str) -> list[RawOpportunity]:
+        """Read the "Current call for proposals" section and nothing else.
+
+        The page has three headings: "Calls for proposals", "Current call for
+        proposals" and "Prior calls for proposals". The old parser stored each
+        HEADING as an opportunity and would have listed every prior call (back
+        to 2018) as open. Only what sits between "Current call" and "Prior
+        calls" is a live call; when that section says there is none, that
+        sentence is recorded as proof the source is empty.
+        """
         soup = BeautifulSoup(html, "lxml")
         items: list[RawOpportunity] = []
-        # calls appear as headed sections; find headings mentioning call/proposal
-        for h in soup.find_all(["h2", "h3", "h4"]):
-            heading = h.get_text(" ", strip=True)
-            if not re.search(r"call|proposal", heading, re.IGNORECASE):
-                continue
-            if len(heading) < 15:      # section labels like 'Calls for Proposals'
-                continue
-            block = []
-            for sib in h.find_all_next(["p", "li", "div"], limit=10):
-                if sib.find(["h2", "h3"]):
+        self.last_probe["empty_proof"] = ""
+        current = next(
+            (h for h in soup.find_all(["h2", "h3", "h4", "h5"])
+             if re.search(r"current\s+calls?", h.get_text(" ", strip=True), re.I)),
+            None)
+        if current is None:
+            return items
+        texts: list[str] = []
+        links: list[tuple[str, str]] = []
+        for node in current.find_all_next(["h2", "h3", "h4", "h5", "p", "li", "a"]):
+            if node.name in ("h2", "h3", "h4", "h5"):
+                if re.search(r"prior|previous|past", node.get_text(" ", strip=True), re.I):
                     break
-                block.append(sib.get_text(" ", strip=True))
-            block_text = " ".join(block)
-            deadline = re.search(
-                r"(deadline|closes?|due)[^\.]{0,40}?(\d{1,2}\s+\w{3,9},?\s+\d{4}|\w{3,9}\s+\d{1,2},?\s+\d{4})",
-                block_text, re.IGNORECASE,
-            )
+                texts.append(node.get_text(" ", strip=True))
+            elif node.name == "a":
+                href = (node.get("href") or "").strip()
+                if href and not href.startswith(("#", "mailto:", "javascript:")):
+                    links.append((node.get_text(" ", strip=True), href))
+            else:
+                texts.append(node.get_text(" ", strip=True))
+        section = " ".join(t for t in texts if t)
+        none = self._NONE.search(section)
+        if none:
+            self.last_probe["empty_proof"] = (
+                f"the page's 'Current call for proposals' section says: "
+                f"\"{none.group(0).strip()}\"")
+            return items
+        deadline = self._DEADLINE.search(section)
+        calls = [(text, href) for text, href in links
+                 if re.search(r"call|proposal|\.pdf", text + href, re.I)
+                 and "funding-alert" not in href.lower()]
+        title = next((t for t in texts
+                      if 15 <= len(t) <= 200 and re.search(r"call|proposal", t, re.I)),
+                     "")
+        for text, href in calls[:5]:
+            url = href if href.startswith("http") else self.website + href
+            name = text if len(text) >= 15 else title.split(". ")[0]
+            if not name:
+                continue
             items.append(RawOpportunity(
-                title=heading[:300],
+                title=name[:300],
                 organization="Blue Action Fund",
                 deadline_raw=(deadline.group(2) if deadline else "")[:64],
-                summary=block_text[:800],
+                summary=section[:800],
                 vertical="Environment",
                 country="Global", region="Global",
-                opportunity_url=self.start_url,
+                opportunity_url=url,
                 website=self.website,
                 source_website=self.display_name,
                 category_hint=Category.GRANT,

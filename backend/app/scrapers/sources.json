@@ -462,10 +462,15 @@
     "url": "https://procurement-notices.undp.org/?lang=en",
     "website": "https://procurement-notices.undp.org",
     "stale_page_streak": 0,
+    "requires_js": false,
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published tender or procurement notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
     "require_funding_signal": false,
-    "_funding_signal_note": "OFF because this board is curated: every row is a published notice, so a row does not have to contain funding vocabulary to be one. With it on, 'Individual Consultant: Gender Mainstreaming Adviser' — a real UNDP consultancy notice — is discarded for saying nothing about money. is_furniture, the same-page test and the nav-href test still reject navigation, so this admits notices, not chrome."
+    "_funding_signal_note": "OFF because this board is curated: every row is a published notice, so a row does not have to contain funding vocabulary to be one. With it on, 'Individual Consultant: Gender Mainstreaming Adviser' — a real UNDP consultancy notice — is discarded for saying nothing about money. is_furniture, the same-page test and the nav-href test still reject navigation, so this admits notices, not chrome.",
+    "enrich_details": false,
+    "refresh_on_reseen": true,
+    "_refresh_note": "Each row on this board is the whole notice (title, closing date, office). Re-seen rows take the board's current title and summary, so rows stored by the old reader (six cells as the title, the first notice's text as every summary) are repaired on the next run.",
+    "_structure_note": "Read in a browser on 2026-11-17: 515 notices on one page, each one a link that wraps its own cells: <a class=\"vacanciesTable__row\" href=\"view_negotiation.cfm?nego_id=N\"> holding six .vacanciesTable__cell blocks (Title, Ref No, UNDP Office/Country, Process, Deadline, Posted). The generic reader took the whole table as each row's block, so every notice was stored with the FIRST notice's closing date and summary, and its title ran all six cells together. The generic reader now treats a link that wraps block elements as the row itself (title from its first cell, deadline from its 'Deadline' cell). enrich_details is off: the row already has everything, and 515 detail visits a night kept the source from finishing inside the 30-minute stall limit."
   },
   {
     "name": "wfp_innovation",
@@ -503,7 +508,14 @@
     "curated": true,
     "_curated_note": "A dedicated notice board: every row is a published call, RFP or tender notice, so rows are exempt from the funding-vocabulary test in opportunity_gate.py.",
     "_note": "NO PAGINATION: one to two calls at a time (on 2026-09-30, one — 'Keystone Symposia: Funding Opportunities for 2027 Conferences', linked via hubs.la). Overlaps bmgf_grand_challenges (gcgh.grandchallenges.org), which is Global Health only; the umbrella site carries calls the subdomain does not. Expect some rows in both; deduplication.py collapses them where the apply link matches.",
-    "_render_note": "requires_js was set false on 2026-09-30 because the page reads without JavaScript from an outside fetcher — and from EC2 plain HTTP then fetched NOTHING (outcome no_fetch). The browser default is back. Readable without JavaScript is not the same as readable without a browser."
+    "_render_note": "requires_js was set false on 2026-09-30 because the page reads without JavaScript from an outside fetcher — and from EC2 plain HTTP then fetched NOTHING (outcome no_fetch). The browser default is back. Readable without JavaScript is not the same as readable without a browser.",
+    "title_selector": "a[data-ref=\"button\"]",
+    "row_title_selector": "h3",
+    "allowed_link_hosts": [
+      "*"
+    ],
+    "deadline_regex": "Applications Open\\s+[A-Z][a-z]{2}\\s+\\d{1,2},\\s+\\d{4}\\s+to\\s+([A-Z][a-z]{2}\\s+\\d{1,2},\\s+\\d{4})",
+    "_structure_note": "Read in a browser on 2026-11-16 after EC2 reported 'page loaded, nothing found'. Each call is a card: <header><h3>title</h3></header>, an 'Applications Open <from> to <to>' line, a description, and one 'Learn More' button (a[data-ref=button]) that links off-site (hubs.la). The title bar was being removed as page chrome and the off-site button rejected. One call was open that day: Keystone Symposia, closing Jan 20, 2027."
   },
   {
     "name": "isti_institutional_grants",

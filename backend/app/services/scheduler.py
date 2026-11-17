@@ -29,6 +29,7 @@ _NIGHT_START_JOB_ID = "scrape-night-start"
 _HEALTH_JOB_ID = "scrape-health-check"
 _HARD_STOP_JOB_ID = "scrape-hard-stop"
 _MONTHLY_HEALTH_JOB_ID = "monthly-source-health-report"
+_WEEKLY_USAGE_JOB_ID = "weekly-lead-gen-usage-report"
 
 # APScheduler's defaults already give max_instances=1 and coalesce=True, but
 # they are spelled out on every job below because "the default happens to be
@@ -186,6 +187,7 @@ class ScrapeScheduler:
         self._install_deadline_audit()
         self._install_scrape_window()
         self._install_monthly_source_health_report()
+        self._install_weekly_usage_report()
         # Re-apply the persisted schedule so automatic runs resume after restart.
         if self.current.mode != "manual":
             try:
@@ -309,6 +311,32 @@ class ScrapeScheduler:
             "Scheduler: admin-only monthly source-health report on day %s at "
             "%02d:%02d %s", day, hm[0], hm[1],
             settings.source_health_report_timezone,
+        )
+
+    def _install_weekly_usage_report(self) -> None:
+        """Send Amit the adoption report each Monday evening."""
+        try:
+            self._scheduler.remove_job(_WEEKLY_USAGE_JOB_ID)
+        except Exception:
+            pass
+        hm = _hhmm(settings.weekly_usage_report_at)
+        recipient = settings.weekly_usage_report_recipient.strip()
+        if not settings.weekly_usage_report_enabled or hm is None or not recipient:
+            log.info("Scheduler: weekly lead-gen usage report off")
+            return
+        from app.services.weekly_usage_report import send_weekly_usage_report
+        self._scheduler.add_job(
+            send_weekly_usage_report,
+            CronTrigger(
+                day_of_week="mon", hour=hm[0], minute=hm[1],
+                timezone=settings.weekly_usage_report_timezone,
+            ),
+            id=_WEEKLY_USAGE_JOB_ID, replace_existing=True, **_JOB_GUARDS,
+        )
+        log.info(
+            "Scheduler: weekly lead-gen usage report to %s each Monday at "
+            "%02d:%02d %s",
+            recipient, hm[0], hm[1], settings.weekly_usage_report_timezone,
         )
 
     async def _window_health_check(self) -> None:

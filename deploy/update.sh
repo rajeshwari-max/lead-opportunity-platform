@@ -293,6 +293,14 @@ else
   echo "    audit report: $before_report"
 fi
 
+# ------------------------------------------- 8c. accuracy of what users see
+# Read-only. Wrong or shared closing dates, run-together titles, duplicates
+# and closed-but-active rows among the leads the dashboard shows. Never fatal.
+say "Checking the accuracy of the leads users can see"
+cd "$REPO/backend"
+"$PYTHON" scripts/lead_accuracy_audit.py --samples 3 \
+  || echo "    WARNING: the accuracy check could not run; nothing was changed by it."
+
 # One worker only. Two means two schedulers, which means every automatic email
 # goes out twice.
 workers=$(pgrep -fc gunicorn || true)

@@ -282,9 +282,10 @@ CONTRACTS: dict[str, VerificationContract] = {
         min_coverage_pct=90.0,
         max_runtime_s=1800.0,
         access_limitations=(
-            "Served by the GENERIC heuristic scraper, not a documented "
-            "endpoint. Whether that is reliable enough is an open question — "
-            "see the manifest note."),
+            "Public HTML notice table, not a documented API. The configured "
+            "UNDP selectors read only notice/negotiation links and the deadline "
+            "column; complete coverage must still be reconciled with the total "
+            "printed above the table."),
     ),
     "clean_air_fund": VerificationContract(
         key="clean_air_fund", display_name="Clean Air Fund",

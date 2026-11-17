@@ -40,6 +40,10 @@ _DETAIL_DEADLINE = re.compile(
 _PLAYWRIGHT_AVAILABLE: bool | None = None
 
 
+# Detail pages read between two signs of life (see _enrich_batch).
+_ENRICH_GROUP = 20
+
+
 def _playwright_available() -> bool:
     """Cached check — lets prefer_js scrapers auto-upgrade to browser fetching."""
     global _PLAYWRIGHT_AVAILABLE
@@ -234,7 +238,8 @@ class BaseScraper(ABC):
         return not (item.funding_amount and item.organization and item.deadline_raw)
 
     async def _enrich_batch(
-        self, items: list[RawOpportunity], client: httpx.AsyncClient, budget: list[int]
+        self, items: list[RawOpportunity], client: httpx.AsyncClient, budget: list[int],
+        progress: ProgressCallback | None = None,
     ) -> None:
         """Fill gaps in-place by visiting detail pages, within a request budget.
 
@@ -249,13 +254,30 @@ class BaseScraper(ABC):
         if not targets:
             return
         budget[0] -= len(targets)
-        results = await asyncio.gather(
-            *(self.parse_detail(i, client) for i in targets), return_exceptions=True
-        )
-        for original, result in zip(targets, results):
-            if isinstance(result, Exception):
-                log.debug("[%s] detail enrichment failed for %s: %s",
-                          self.name, original.opportunity_url, result)
+        # In groups, with a sign of life after each. UNDP prints 526 notices
+        # on ONE page and Bond about 500: visiting their detail pages takes
+        # longer than source_stall_minutes, and nothing was reported until
+        # the whole page was done, so both were ended as "stuck" at exactly
+        # 30 minutes, every night, while working normally. A group that never
+        # finishes still sends nothing, so a real hang is still caught.
+        for start in range(0, len(targets), _ENRICH_GROUP):
+            group = targets[start:start + _ENRICH_GROUP]
+            results = await asyncio.gather(
+                *(self.parse_detail(i, client) for i in group), return_exceptions=True
+            )
+            for original, result in zip(group, results):
+                if isinstance(result, Exception):
+                    log.debug("[%s] detail enrichment failed for %s: %s",
+                              self.name, original.opportunity_url, result)
+            if progress is not None:
+                try:
+                    await progress("heartbeat", {
+                        "source": self.name, "stage": "details",
+                        "detail": f"{min(start + _ENRICH_GROUP, len(targets))}"
+                                  f"/{len(targets)} detail pages read",
+                    })
+                except Exception:                           # noqa: BLE001
+                    pass
 
     # ------------------------------------------------------------------ engine
     async def crawl(
@@ -361,7 +383,7 @@ class BaseScraper(ABC):
                             "[%s] configured parser found nothing; recovered %s "
                             "row(s) via %s — the page structure has changed, "
                             "update this source's config", self.name, len(items), strategy)
-                        await self._enrich_batch(items, client, detail_budget)
+                        await self._enrich_batch(items, client, detail_budget, progress)
                         yield items
                         await progress("page_done", {"source": self.name,
                                                      "page": page_number, "found": len(items)})
@@ -400,7 +422,7 @@ class BaseScraper(ABC):
                     return
                 seen_content.add(content_sig)
 
-                await self._enrich_batch(items, client, detail_budget)
+                await self._enrich_batch(items, client, detail_budget, progress)
                 yield items
                 await progress("page_done", {"source": self.name, "page": page_number, "found": len(items)})
                 request = self.next_page(html, str(request.url), page_number)
@@ -498,6 +520,22 @@ class BaseScraper(ABC):
                         attempt, settings.max_retries, req.url, wait,
                     )
                     await asyncio.sleep(wait)
+        # No HTTP answer at all (a refused or reset connection, a TLS failure):
+        # the site did not say no, the plain client could not talk to it. The
+        # same page often loads in a real browser, so try that once before
+        # recording "no page". ISTI's four boards and Blue Action Fund failed
+        # this way from EC2 on 2026-11-15 while opening normally in a browser.
+        # A page that answers with an error status, or with a bot check, is
+        # NOT retried here: that is the site's answer.
+        if (req.method == "GET" and self.last_probe.get("last_http_status") is None
+                and _playwright_available()):
+            log.warning("[%s] no HTTP answer from %s — trying once in the browser",
+                        self.name, req.url)
+            self.last_probe["attempts"] = int(self.last_probe.get("attempts", 0)) + 1
+            html = await self._fetch_rendered(req)
+            if html is not None:
+                self.last_probe["fetch_mode"] = "browser"
+                return html
         log.error("[%s] giving up on %s after %s attempts", self.name, req.url, settings.max_retries)
         return None
 

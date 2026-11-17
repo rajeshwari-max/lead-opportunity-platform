@@ -18,7 +18,7 @@ from app.core.auth import COOKIE_NAME, make_session_token, hash_password, passwo
 from app.database.db import get_db
 from app.database.models import (ApplicationJourney, Base, Category,
     ExperienceEvent, Opportunity, OpportunityIntelligence, TeamMember, WorkspaceContact,
-    WorkspaceCredential)
+    WorkspaceCredential, UserActivityEvent)
 from app.services.actionable import application_today
 from app.services.company_intelligence import MODEL_VERSION as COMPANY_MODEL_VERSION
 
@@ -235,7 +235,7 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(items[0]['company_intelligence']['score'], 80)
         self.assertEqual(items[0]['company_intelligence']['historical_similarity'], 35)
         self.assertEqual(items[0]['company_intelligence']['ranking_points'], 16)
-        self.assertTrue(any('Company intelligence:' in reason for reason in items[0]['reasons']))
+        self.assertTrue(any('Platform intelligence:' in reason for reason in items[0]['reasons']))
 
     def test_workspace_does_not_rank_with_stale_company_snapshot(self):
         with self.sessions() as db:
@@ -249,7 +249,7 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         item = response.json()['items'][0]
         self.assertIsNone(item['company_intelligence'])
-        self.assertFalse(any('Company intelligence:' in reason for reason in item['reasons']))
+        self.assertFalse(any('Platform intelligence:' in reason for reason in item['reasons']))
 
     def test_disabled_member_and_admin_access(self):
         self.unlock('bob')
@@ -436,6 +436,17 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/my-leads/activity').json()['viewed'],0)
         bob=next(p for p in self.client.get('/api/my-leads/team/activity').json() if p['email']=='bob@example.org')
         self.assertEqual(bob['activity']['reviewed'],1)
+        self.assertEqual(bob['event_activity']['by_type']['opportunity_viewed'],2)
+        self.assertEqual(bob['event_activity']['by_type']['opportunity_source_opened'],1)
+        self.assertEqual(bob['event_activity']['by_type']['opportunity_reviewed'],2)
+        self.assertIn('Append-only server events', bob['event_activity']['tracking_note'])
+        with self.sessions() as db:
+            events=list(db.scalars(select(UserActivityEvent).where(
+                UserActivityEvent.actor=='bob@example.org',
+                UserActivityEvent.event_type.like('opportunity_%')
+            ).order_by(UserActivityEvent.id)))
+            self.assertEqual(len(events),5)
+            self.assertTrue(all(event.source=='server_api' for event in events))
         self.unlock('bob')
         self.assertEqual(self.client.get('/api/my-leads/activity').json()['reviewed'],1)
         with patch.object(w.settings,'read_only',True):

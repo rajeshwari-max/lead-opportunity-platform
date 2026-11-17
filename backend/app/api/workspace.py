@@ -383,7 +383,7 @@ def recommendations(q: str = "", owner: str = Depends(personal), db: Session = D
                 if reason != "No personal match yet; ordered by closing date"
             ]
             personal_rank["reasons"].append(
-                f"Company intelligence: {company.recommendation_score:.0f}/100 "
+                f"Platform intelligence: {company.recommendation_score:.0f}/100 "
                 f"({company.confidence.lower()} confidence); "
                 f"historical similarity {company.historical_similarity:.0f}%"
             )
@@ -398,4 +398,4 @@ def recommendations(q: str = "", owner: str = Depends(personal), db: Session = D
             personal_rank["company_intelligence"] = None
         results.append({**opportunity_data(opportunity), **personal_rank})
     results.sort(key=lambda r: -r["score"])
-    return {"items": results[:40], "considered": len(candidates), "method": "Personal preferences, contacts and decided applications are combined with the latest company intelligence score (up to 20 ranking points when available). Ranking scores are not win probabilities. Searches rank up to 1,000 nearest-deadline active opportunities."}
+    return {"items": results[:40], "considered": len(candidates), "method": "Personal preferences, contacts and decided applications are combined with the latest platform intelligence score (up to 20 ranking points when available). Ranking scores are not win probabilities. Searches rank up to 1,000 nearest-deadline active opportunities."}

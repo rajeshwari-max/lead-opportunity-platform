@@ -50,16 +50,21 @@ def test_partitioning_stays_inside_the_searchs_own_filters():
     assert by_label["donor"] == [1, 2, 3, 4, 5]      # unfiltered axis: all values
 
 
-def test_scheduled_run_includes_developmentaid(monkeypatch):
+def _start_labels(monkeypatch, requested):
+    """Which sources a start would take a lease for."""
     from app.services import run_lock
     from app.services import scraper_manager as mod
 
     sources = [SimpleNamespace(name="developmentaid", display_name="DevelopmentAid"),
                SimpleNamespace(name="adb", display_name="ADB")]
-    monkeypatch.setattr(mod, "get_scrapers", lambda names=None: list(sources))
-    monkeypatch.setattr(mod, "disabled_sources", lambda names: {})
+    monkeypatch.setattr(
+        mod, "get_scrapers",
+        lambda names=None: [s for s in sources if not names or s.name in names])
     monkeypatch.setattr(mod.ScraperManager, "_least_recent_first",
                         staticmethod(lambda scrapers: list(scrapers)))
+    # The website directory's pause list is not what is under test, and it
+    # needs a migrated database.
+    monkeypatch.setattr("app.services.directories.blocked_sources", lambda db: set())
     labels = []
 
     def refuse(label):
@@ -68,5 +73,15 @@ def test_scheduled_run_includes_developmentaid(monkeypatch):
 
     monkeypatch.setattr(mod.run_lock, "acquire", refuse)
     with pytest.raises(RuntimeError):
-        asyncio.run(mod.ScraperManager()._start(None, None))
-    assert labels == ["2 source(s)"]
+        asyncio.run(mod.ScraperManager()._start(requested, None))
+    return labels
+
+
+def test_scheduled_run_leaves_developmentaid_out(monkeypatch):
+    # Taken out of the nightly scrape on 2026-11-16 (Cloudflare verification
+    # on EC2): the all-source run takes only the other source.
+    assert _start_labels(monkeypatch, None) == ["1 source(s)"]
+
+
+def test_developmentaid_still_runs_when_named(monkeypatch):
+    assert _start_labels(monkeypatch, ["developmentaid"]) == ["1 source(s)"]

@@ -154,11 +154,9 @@ class ScraperManager:
         # Naming a source explicitly still runs it. An operator testing a fix
         # for the very defect that disabled it must not be blocked by the flag,
         # and `sources` is only ever non-empty because a person typed it.
-        # DevelopmentAid used to be removed here, so it only ever ran when an
-        # admin started it by hand. It now runs with every scheduled scrape:
-        # the EC2 browser profile is signed in, and if that session expires the
-        # scraper says so (failed source + alert email) without affecting the
-        # other sources in the batch.
+        # DevelopmentAid is held out of scheduled runs again (2026-11-16) by
+        # production_enabled=False in its manifest, the same switch every
+        # other paused source uses. An admin can still start it by name.
         if not sources:
             # Longest-since-completed first. A nightly run that is stopped at
             # the end of its window never reaches the sources at the end of the
@@ -522,6 +520,10 @@ class ScraperManager:
                 prog["found"] += len(batch)
                 ingest_counts = await asyncio.to_thread(
                     self._ingest, batch, scraper.curated, scraper.name)
+                # Storing a page is progress too. A 500-row page takes minutes
+                # to classify and store, and the stall watchdog only heard
+                # about a page once the crawl resumed after it.
+                self.last_activity = self.source_activity[scraper.name] = time.monotonic()
                 # Keep compatibility with source-policy tests and any local
                 # extension that stubs the historical five-count contract.
                 # The real ingest path returns the sixth, explicit live count.
@@ -732,6 +734,11 @@ class ScraperManager:
         # run reports "0 new saved" either way, and a fix that repairs 1,274
         # rows would look exactly like a fix that repaired none.
         dated_late = 0
+        from app.scrapers.registry import SCRAPER_REGISTRY
+        from app.services.review_queue import PROTECTED_CONFIDENCE
+        refresh_rows = bool(
+            (getattr(SCRAPER_REGISTRY.get(source_key or ""), "config", None) or {})
+            .get("refresh_on_reseen"))
         out_of_scope = 0
         expired_samples: list[str] = []
         from app.services.actionable import application_today
@@ -958,7 +965,9 @@ class ScraperManager:
 
                 existing = db.execute(
                     select(Opportunity.id, Opportunity.deadline, Opportunity.summary,
-                           Opportunity.eligibility, Opportunity.documents_json)
+                           Opportunity.eligibility, Opportunity.documents_json,
+                           Opportunity.deadline_raw, Opportunity.deadline_checked_at,
+                           Opportunity.deadline_confidence, Opportunity.title)
                     .where(Opportunity.unique_id == uid)
                 ).one_or_none()
                 exists = existing[0] if existing else None
@@ -1042,14 +1051,21 @@ class ScraperManager:
                         # duplicate. The dashboard would have looked identical
                         # after the fix.
                         #
-                        # ONLY fills a gap. It never overwrites a date already
-                        # stored, because the reverse — a source that stops
-                        # printing a date, or a page that renders it late —
-                        # would silently erase a good deadline, and a row whose
-                        # deadline disappears becomes immortal. Correcting an
-                        # existing date is a different decision with a different
-                        # risk, and it is not this one.
-                        if existing[1] is None and deadline is not None:
+                        # A missing date never erases a stored one. A newly
+                        # parsed, explicit source date does replace an older
+                        # date for the SAME stable notice identity. Funders
+                        # commonly extend or correct deadlines; refusing that
+                        # update left the dashboard showing an obsolete date.
+                        # Raw source text and check time make it auditable.
+                        # A date a person corrected by hand (review queue,
+                        # "human" confidence) is never replaced by a scrape.
+                        deadline_changed = (
+                            deadline is not None
+                            and bool((raw.deadline_raw or "").strip())
+                            and existing[1] != deadline
+                            and (existing[7] or "") not in PROTECTED_CONFIDENCE
+                        )
+                        if deadline_changed:
                             fields.update(
                                 deadline=deadline,
                                 deadline_state=d_state.value,
@@ -1073,19 +1089,25 @@ class ScraperManager:
                             # remain invisible — which is exactly the shape of
                             # the bug this whole repair exists to undo.
                             #
-                            # Safe because this branch only runs when the
-                            # stored deadline was NULL: there was no earlier
-                            # date, so the row cannot have been expired ON a
-                            # date. It was retired for having none. The rule
-                            # applied here is the audit's own — a future date
-                            # means live — so the two cannot disagree.
-                            # Set from the date in BOTH directions. Only
-                            # reactivating left the mirror case broken: a row
-                            # repaired with a date that has already passed
-                            # stayed ACTIVE, carrying a closed deadline, until
-                            # the next nightly audit corrected it.
+                            # Apply status from the current source date in both
+                            # directions. An extension reactivates a previously
+                            # closed row; a correction to an earlier/past date
+                            # expires it immediately rather than waiting for the
+                            # nightly audit.
                             fields["status"] = (Status.EXPIRED if is_expired
                                                 else Status.ACTIVE)
+                        if refresh_rows:
+                            # A board whose listing row is the whole record
+                            # (sources.json "refresh_on_reseen"): its own
+                            # title and summary replace what an older parser
+                            # stored. UNDP rows were stored with all six cells
+                            # run together as the title and the first notice's
+                            # text as every summary.
+                            fresh_title = (raw.title or "").strip()[:500]
+                            if fresh_title and fresh_title != existing[8]:
+                                fields["title"] = fresh_title
+                            if raw.summary and raw.summary != existing[2]:
+                                fields["summary"] = raw.summary
                         db.execute(
                             update(Opportunity)
                             .where(Opportunity.id == exists)
@@ -1212,14 +1234,12 @@ class ScraperManager:
                 f"as live and not archived."
             )
         if dated_late:
-            # The only place this is visible. A run that repairs rows reports
-            # "0 new saved" exactly like a run that repairs none, so without
-            # this line a fix that gave 1,274 stored notices their closing
-            # dates would leave no trace that anything had happened.
+            # The only place this is visible. A run that repairs or refreshes
+            # rows reports "0 new saved" exactly like a run that changes none,
+            # so log deadline corrections as well as newly filled dates.
             self._log(
-                f"  ↳ {dated_late} row(s) already stored WITHOUT a deadline "
-                f"gained one from this scrape — they were held out of every "
-                f"dashboard view until now"
+                f"  ↳ {dated_late} stored row deadline(s) added or corrected "
+                f"from an explicit source date"
             )
         if out_of_scope:
             # Counted separately from the prose gate. "the source says this is
@@ -1291,7 +1311,7 @@ class ScraperManager:
                     problems.append({
                         "source": p.get("display_name", name),
                         "status": p.get("status", "unknown"),
-                        "detail": p.get("error") or p.get("message") or "",
+                        "detail": self._problem_reason(p),
                     })
             else:
                 seen = self.source_activity.get(name, self.started_at or now)
@@ -1310,6 +1330,39 @@ class ScraperManager:
             "running": running,
             "problems": problems,
         }
+
+    _OUTCOME_WORDS = {
+        "blocked": "blocked by the site",
+        "no_fetch": "the page did not load",
+        "parse_zero": "the page loaded but nothing was found on it",
+        "structure_changed": "the page layout changed",
+        "auth_required": "sign-in needed",
+        "session_expired": "the saved sign-in expired",
+        "timed_out": "ran out of time",
+        "crashed": "error while scraping",
+        "cancelled": "stopped",
+    }
+
+    @classmethod
+    def _problem_reason(cls, p: dict) -> str:
+        """Why a source is not 'completed', in words, for the morning report.
+
+        The report used to read p["error"] / p["message"], which nothing
+        sets, so every line ended at "failed". The run's real outcome and
+        its evidence sentence are in outcome / outcome_message.
+        """
+        if p.get("stalled"):
+            head = (f"stuck: no page finished for "
+                    f"{settings.source_stall_minutes} min, so it was ended")
+        elif p.get("timed_out"):
+            head = "ran out of time (per-source limit)"
+        else:
+            outcome = str(p.get("outcome") or "")
+            head = cls._OUTCOME_WORDS.get(outcome, outcome.replace("_", " "))
+        message = " ".join(str(p.get("outcome_message") or "").split())
+        if len(message) > 220:
+            message = message[:217].rstrip() + "..."
+        return ". ".join(part for part in (head, message) if part)
 
     def _log(self, message: str) -> None:
         stamp = datetime.now(timezone.utc).strftime("%H:%M:%S")

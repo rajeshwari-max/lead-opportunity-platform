@@ -13,6 +13,7 @@ from app.database.db import get_db
 from app.database.models import (ApplicationJourney, TeamMember, DashboardPreferences,
     LeadActivity, Opportunity, Category, Status, LeadMetadata, DirectoryEntry,
     JourneyEvent, ExperienceEvent)
+from app.services.user_activity import record_user_event, user_event_summary
 
 router = APIRouter(prefix="/my-leads", dependencies=[Depends(storage.private_cache)])
 
@@ -158,6 +159,11 @@ def record_activity(body: ActivityInput, owner=Depends(storage.personal), db: Se
     values = {body.action + "_at": datetime.now(timezone.utc)}
     statement = insert(LeadActivity).values(owner=owner, opportunity_id=body.opportunity_id, **values)
     db.execute(statement.on_conflict_do_update(index_elements=["owner", "opportunity_id"], set_=values))
+    record_user_event(
+        db, owner, f"opportunity_{body.action}",
+        opportunity_id=body.opportunity_id,
+        details={"action": body.action},
+    )
     db.commit()
     return {"recorded": True}
 
@@ -200,6 +206,8 @@ def save(body: storage.Track, owner=Depends(storage.personal), db: Session=Depen
     result = storage.track(body, owner, db)
     row = storage.owned(db, owner, result["id"])
     row.saved = True
+    record_user_event(db, owner, "lead_saved", opportunity_id=row.opportunity_id,
+                      journey_id=row.id)
     db.commit()
     return result
 
@@ -207,12 +215,19 @@ def save(body: storage.Track, owner=Depends(storage.personal), db: Session=Depen
 def unsave(lead_id: int, owner=Depends(storage.personal), db: Session=Depends(get_db)):
     row = storage.owned(db, owner, lead_id)
     row.saved = False
+    record_user_event(db, owner, "lead_unsaved", opportunity_id=row.opportunity_id,
+                      journey_id=row.id)
     db.commit()
     return {"saved": False}
 
 @router.put("/{lead_id}")
 def update(lead_id: int, body: storage.JourneyInput, owner=Depends(storage.personal), db: Session=Depends(get_db)):
-    return storage.update_journey(lead_id, body, owner, db)
+    result = storage.update_journey(lead_id, body, owner, db)
+    record_user_event(db, owner, "journey_updated",
+                      opportunity_id=result["opportunity"]["id"], journey_id=lead_id,
+                      details={"stage": result["stage"]})
+    db.commit()
+    return result
 
 @router.get("/{lead_id}/history")
 def history(lead_id: int, owner=Depends(storage.personal), db: Session=Depends(get_db)):
@@ -227,6 +242,7 @@ def activity(db: Session=Depends(get_db)):
         grouped.setdefault(row.owner, []).append(storage.journey_data(row, db))
     return [{"email": m.email, "name": m.name, "active": m.active,
              "activity": activity_summary(m.email.lower(), db),
+             "event_activity": user_event_summary(db, m.email.lower()),
              "leads": grouped.get(m.email.lower(), [])}
             for m in db.scalars(select(TeamMember).order_by(TeamMember.name))]
 

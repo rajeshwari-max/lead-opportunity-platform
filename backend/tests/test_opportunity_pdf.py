@@ -204,7 +204,7 @@ def test_email_links_the_pdf_shows_real_archetype_and_intelligence(monkeypatch):
     assert "open the original listing" in html
     assert "<b>Archetype:</b> Devsol" in html
     assert "Work / Archetype" not in html and ">Type</th>" in html
-    assert "Company intelligence:" in html and "72% · High priority" in html
+    assert "Platform intelligence:" in html and "72% · High priority" in html
     assert "Sector match: livelihood" in html and "Geography: Unknown" in html
 
 
@@ -216,7 +216,7 @@ def test_email_without_a_source_pdf_reports_unavailable(monkeypatch):
     assert "/api/brief/" in html
     assert "Platform summary PDF (official document not found)" in html
     assert "<b>Archetype:</b> Not classified" in html
-    assert "Company intelligence:" not in html
+    assert "Platform intelligence:" not in html
 
 
 # ------------------------------------------------------------------ discovery job

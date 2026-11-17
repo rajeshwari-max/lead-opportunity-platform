@@ -14,6 +14,7 @@ from app.core.auth import COOKIE_NAME, current_user, validate_origin
 from app.core.config import settings
 from app.database.db import get_db
 from app.database.models import ExperienceEvent, HumanFeedback, Opportunity
+from app.services.user_activity import record_user_event
 from app.services.actionable import strict_actionable_clause
 from app.services.company_intelligence import (
     ARCHETYPES, BRANDS, DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS, DEVSOL_VERTICALS,
@@ -21,13 +22,13 @@ from app.services.company_intelligence import (
     learning_summary, profile_dict, update_profile,
 )
 
-router = APIRouter(prefix="/intelligence", tags=["Company intelligence"])
+router = APIRouter(prefix="/intelligence", tags=["Platform intelligence"])
 
 
 def user(request: Request, db: Session = Depends(get_db)) -> dict:
     identity = current_user(request.cookies.get(COOKIE_NAME), db)
     if not identity.get("authenticated"):
-        raise HTTPException(401, "Sign in to view company intelligence")
+        raise HTTPException(401, "Sign in to view platform intelligence")
     return identity
 
 
@@ -40,7 +41,7 @@ def admin(identity: dict = Depends(user)) -> dict:
 def writable(request: Request) -> None:
     validate_origin(request)
     if settings.read_only:
-        raise HTTPException(403, "Company intelligence is read-only on this server")
+        raise HTTPException(403, "Platform intelligence is read-only on this server")
 
 
 class StrictModel(BaseModel):
@@ -205,6 +206,11 @@ def feedback(opportunity_id: int, body: FeedbackInput, request: Request,
         reviewer_decision=body.decision, reason=body.reason.strip(),
         payload=json.dumps(body.model_dump(), ensure_ascii=False),
     ))
+    record_user_event(
+        db, identity.get("email") or "local-admin", "feedback_submitted",
+        opportunity_id=opportunity_id,
+        details={"decision": body.decision},
+    )
     db.commit()
     return {"id": row.id, "decision": row.decision, "stored": True,
             "human_labels_protected": body.decision == "correct"}

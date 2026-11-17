@@ -358,7 +358,7 @@ def _render_digest(
 def _intelligence_for(opportunities: list[Opportunity]) -> dict[int, dict]:
     """Company-intelligence summary per opportunity, keyed by id.
 
-    The same calculation as the dashboard's Company intelligence panel, run
+    The same calculation as the dashboard's Platform intelligence panel, run
     without saving. One historical index is built for the whole email. Any
     failure returns what it has so far: intelligence must never stop an email.
     """
@@ -385,7 +385,7 @@ def _intelligence_for(opportunities: list[Opportunity]) -> dict[int, dict]:
                     "risks": list(r.get("risks") or [])[:2],
                 }
     except Exception:                                           # noqa: BLE001
-        log.exception("company intelligence for the email failed; sending without it")
+        log.exception("platform intelligence for the email failed; sending without it")
     return out
 
 
@@ -401,7 +401,7 @@ def _intelligence_block(info: dict | None, compact: bool) -> str:
              f'{round(float(info["score"] or 0))}% · {_text(info["priority"].title())} priority</span> '
              f'<span style="color:#6b7280;">{_text(info["confidence"].lower())} confidence</span>')
     lines = [f'<div style="color:#4b5563;font-size:12px;margin-top:7px;line-height:1.5;">'
-             f'<b>Company intelligence:</b> {badge}</div>']
+             f'<b>Platform intelligence:</b> {badge}</div>']
     reasons = info["reasons"][:1] if compact else info["reasons"]
     risks = [] if compact else info["risks"]
     if reasons:

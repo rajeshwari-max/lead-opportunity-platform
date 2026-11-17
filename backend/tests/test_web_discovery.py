@@ -310,3 +310,60 @@ def test_javascript_shell_can_be_recovered_by_bounded_renderer(monkeypatch):
     assert item.deadline_raw == "31 December 2099"
     assert counters["js_render_attempted"] == 1
     assert counters["js_render_recovered"] == 1
+
+
+# ---- Brave 422 (every nightly run crashed on its first search, 2026-11-15)
+
+def test_every_built_in_search_fits_braves_limits():
+    from app.scrapers.web_discovery import _fit_query
+
+    for query in build_queries(date(2026, 11, 16)):
+        fitted = _fit_query(query)
+        assert len(fitted) <= 400 and len(fitted.split()) <= 50, query
+        # only trailing exclusions are given up; the search terms stay
+        assert fitted.split(" -")[0] == query.split(" -")[0]
+
+
+def test_a_422_is_retried_once_with_required_parameters_only(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.scrapers.web_discovery.settings.log_dir", tmp_path / "logs")
+    monkeypatch.setattr("app.scrapers.web_discovery.settings.brave_search_api_key", "test-key")
+    sent = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(dict(request.url.params))
+        if "extra_snippets" in request.url.params:
+            return httpx.Response(422, json={"error": {
+                "detail": "Unable to validate request parameter(s)",
+                "meta": {"errors": [{"loc": ["query", "extra_snippets"]}]}}})
+        return httpx.Response(200, json={"web": {"results": [{"url": "https://a.org/call"}]},
+                                         "query": {"more_results_available": False}})
+
+    scraper = WebDiscoveryScraper()
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            first = await scraper._search(client, "open grant India")
+            second = await scraper._search(client, "RFP Nepal")
+            return first, second
+
+    (results, more), (again, _) = asyncio.run(run())
+    assert [r["url"] for r in results] == ["https://a.org/call"] and not more
+    assert len(again) == 1
+    # one refused request, then plain ones for the rest of the run
+    assert ["extra_snippets" in p for p in sent] == [True, False, False]
+    assert all(p["q"] and p["count"] for p in sent)
+
+
+def test_a_query_brave_still_refuses_is_skipped_not_fatal(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.scrapers.web_discovery.settings.log_dir", tmp_path / "logs")
+    monkeypatch.setattr("app.scrapers.web_discovery.settings.brave_search_api_key", "test-key")
+    scraper = WebDiscoveryScraper()
+
+    async def run():
+        transport = httpx.MockTransport(lambda request: httpx.Response(
+            422, json={"error": {"detail": "q is too long"}}))
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await scraper._search(client, "open grant India")
+
+    assert asyncio.run(run()) == ([], False)
+    assert scraper.last_probe["rejected_queries"] == 1

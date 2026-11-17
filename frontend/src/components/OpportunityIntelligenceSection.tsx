@@ -113,8 +113,8 @@ export function OpportunityIntelligenceSection({ opportunity, readOnly = false }
     item.status !== "NOT_APPLICABLE" && item.criterion !== "Catalyst brand / vertical") ?? [];
   const matchedCriteria = statedCriteria.filter(item => item.status === "MATCH").length;
 
-  return <section className="ud-intelligence" aria-label="Company intelligence">
-    <div className="ud-intelligence-heading"><h3><Sparkles size={14} />Company intelligence</h3>
+  return <section className="ud-intelligence" aria-label="Platform intelligence">
+    <div className="ud-intelligence-heading"><h3><Sparkles size={14} />Platform intelligence</h3>
       {data && <span className={`ud-priority ud-priority-${data.priority.toLowerCase()}`}>{data.priority} priority</span>}
     </div>
     {loading && <p className="ud-sub"><Loader2 className="ud-spin" size={14} /> Calculating fit from company history…</p>}

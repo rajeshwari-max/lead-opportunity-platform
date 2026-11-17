@@ -58,7 +58,7 @@ export function CompanyIntelligencePanel({ readOnly = false }: { readOnly?: bool
       setLearning(nextLearning);
       setMessage("");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Company intelligence could not be loaded");
+      setMessage(error instanceof Error ? error.message : "Platform intelligence could not be loaded");
     }
   }, []);
 
@@ -98,7 +98,7 @@ export function CompanyIntelligencePanel({ readOnly = false }: { readOnly?: bool
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
-          <Building2 className="h-4 w-4" /> Company intelligence
+          <Building2 className="h-4 w-4" /> Platform intelligence
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 text-xs">

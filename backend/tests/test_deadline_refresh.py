@@ -18,12 +18,10 @@ was meant to surface would have stayed invisible.
 
 The asymmetry is the point
 --------------------------
-Filling an empty deadline is safe. Overwriting a stored one is not: a source
-that stops printing a date, or a page that renders it late, would silently
-erase a good deadline — and a row whose deadline disappears stops being
-expirable, which is the immortality bug this system has fixed twice already.
-So this only ever fills a gap, and `test_it_never_overwrites_a_deadline_that_is_already_there`
-is the test that matters most in this file.
+A missing source date never erases a stored one. A new explicit, parseable date
+on the same stable notice identity does replace the old date, because funders
+extend and correct deadlines. Both the raw source value and check time are
+retained for audit.
 """
 from __future__ import annotations
 
@@ -104,7 +102,7 @@ def test_it_is_still_counted_as_a_duplicate_not_as_a_new_row(db_mod):
     assert dupes == 1
 
 
-# ------------------------------------------------------- and NOT overwriting
+# ------------------------------------ missing evidence never erases good data
 
 def test_it_never_overwrites_a_deadline_that_is_already_there(db_mod):
     """The load-bearing test.
@@ -125,15 +123,17 @@ def test_it_never_overwrites_a_deadline_that_is_already_there(db_mod):
         "a missing date must never erase a stored one"
 
 
-def test_a_different_date_does_not_replace_the_stored_one_either(db_mod):
-    """Correcting an existing date is a different decision with a different
-    risk. This change deliberately does not make it."""
+def test_a_new_explicit_date_replaces_the_old_source_date(db_mod):
+    """A deadline is an attribute, not identity; extensions must update it."""
     url = "https://procurement-notices.undp.org/view_notice.cfm?notice_id=5"
     ingest(db_mod, [raw("Request for Proposals: Baseline Survey", url,
                         deadline_raw="21-Feb-27")])
     ingest(db_mod, [raw("Request for Proposals: Baseline Survey", url,
                         deadline_raw="30-Jun-27")])
-    assert stored(db_mod, "notice_id=5").deadline == date(2027, 2, 21)
+    row = stored(db_mod, "notice_id=5")
+    assert row.deadline == date(2027, 6, 30)
+    assert row.deadline_raw == "30-Jun-27"
+    assert row.deadline_checked_at is not None
 
 
 def test_last_seen_is_still_bumped_on_every_duplicate(db_mod):
@@ -231,3 +231,30 @@ def test_classification_does_not_hold_write_lock_and_previous_row_is_committed(d
     result = ingest(db_mod, rows)
     assert result[0] == 2
     assert counts == [0, 1]
+
+
+def test_a_corrected_date_that_has_passed_archives_the_row(db_mod):
+    url = "https://procurement-notices.undp.org/view_notice.cfm?notice_id=7"
+    ingest(db_mod, [raw("Request for Proposals: Mid-term Review", url,
+                        deadline_raw="30-Jun-27")])
+    ingest(db_mod, [raw("Request for Proposals: Mid-term Review", url,
+                        deadline_raw="01-Jan-20")])
+    row = stored(db_mod, "notice_id=7")
+    assert row.deadline == date(2020, 1, 1)
+    assert row.status.value == "Expired"
+
+
+def test_a_date_a_person_corrected_is_never_replaced(db_mod):
+    from sqlalchemy import update
+
+    from app.database.models import Opportunity
+    url = "https://procurement-notices.undp.org/view_notice.cfm?notice_id=8"
+    ingest(db_mod, [raw("Request for Proposals: Endline Survey", url,
+                        deadline_raw="21-Feb-27")])
+    with db_mod.session_scope() as db:
+        db.execute(update(Opportunity)
+                   .where(Opportunity.opportunity_url.like("%notice_id=8"))
+                   .values(deadline=date(2027, 3, 15), deadline_confidence="human"))
+    ingest(db_mod, [raw("Request for Proposals: Endline Survey", url,
+                        deadline_raw="30-Jun-27")])
+    assert stored(db_mod, "notice_id=8").deadline == date(2027, 3, 15)

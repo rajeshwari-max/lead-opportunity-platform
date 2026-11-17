@@ -167,6 +167,28 @@ async def _require_password(request, call_next):
     return await call_next(request)
 
 
+# ------------------------------------------------------- slow-request log
+# "The platform is slow" had nothing behind it to look at. Every API request
+# slower than LOP_SLOW_REQUEST_SECONDS is written to logs/performance.log with
+# its method, path (no query string, so no search text or tokens) and time, and
+# whether a scrape was running at that moment. Registered last, so it is the
+# outermost layer and times the whole request.
+@app.middleware("http")
+async def _log_slow_requests(request, call_next):
+    import logging
+    import time
+
+    started = time.monotonic()
+    response = await call_next(request)
+    took = time.monotonic() - started
+    if took >= settings.slow_request_seconds and \
+            request.url.path.startswith(settings.api_prefix):
+        logging.getLogger("performance").warning(
+            "slow request %.1fs %s %s -> %s (scrape %s)", took, request.method,
+            request.url.path, response.status_code, manager.state)
+    return response
+
+
 from app.api.accounts import router as accounts_router
 app.include_router(accounts_router, prefix=settings.api_prefix)
 from app.api.remote_login import router as remote_login_router

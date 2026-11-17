@@ -5,6 +5,149 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-17 — Wrong dates fixed at the source, failing sources repaired, weekly usage report, slow-request log
+
+Session record (16–17 Nov 2026), continued. Status: saved to the project,
+**not yet deployed**. Codex worked on some of the same items on the laptop at
+the same time; its versions were kept where they overlapped (noted below).
+
+**Wrong closing dates: the cause, fixed.** The generic reader took the text
+around each link from "the nearest article/li/div/tr above it". On a board whose
+rows sit directly inside one big container, that container is the WHOLE list,
+so every row was read with the first row's closing date and summary. UNDP's
+board (515 notices, each one a link wrapping its own cells) was stored this
+way: every notice with the date of the notice at the top of the page, and a
+title made of all six cells run together. Now (`generic_listing.py`):
+
+- a link that wraps its own cells is the row itself (title from its first
+  cell, date from its own "Deadline" cell);
+- in a shared container a row is only its own wrapper up to the next row's
+  link — a missing date is safer than a neighbour's.
+
+This applies to every config-driven source, not only UNDP. Verified on the
+live UNDP markup (`tests/fixtures/undp_procurement_notices.html`): each notice
+now carries its own date. Codex's UNDP selectors (`td:last-child`) matched the
+old table layout, which the site no longer serves, so they were not kept.
+
+**Stored dates are corrected, not just new ones.** A different date the source
+now prints replaces the stored one, and the lead is archived or reactivated to
+match (Codex made the same change; kept, plus: a date a person corrected by
+hand is never replaced). UNDP is marked `refresh_on_reseen`, so rows stored by
+the old reader get their real title and summary on the next run.
+
+**Expired leads.** The dashboard already hides any lead whose stored date has
+passed, at query time. Expired calls were showing because their stored date was
+wrong (above). New read-only check `scripts/lead_accuracy_audit.py`, also run
+by `deploy/update.sh`: shared dates per source, dates that disagree with the
+source text, dates over 3 years out, run-together titles, duplicate titles,
+closed-but-active rows. Duplicates are still removed by the guarded
+deploy-time step (backup first).
+
+**Failing sources, from the EC2 run history:**
+
+- UNDP and Bond were ended at exactly 30 minutes as "stuck" while working:
+  detail pages are now read in groups of 20 with a progress signal after each,
+  storing a page counts as progress, and UNDP no longer visits 515 detail
+  pages (the row already has everything).
+- Whole Web Discovery crashed on Brave's 422: six built-in searches were over
+  Brave's 50-word limit. Searches are trimmed to 400 characters / 50 words,
+  and a 422 retries once with the required parameters only.
+- Grand Challenges: the card title (in a `<header>`) was removed as page
+  chrome and the off-site "Learn More" link rejected. Config fixed; reads
+  "Keystone Symposia..." closing Jan 20, 2027.
+- ISTI x4, Blue Action Fund: no HTTP answer from EC2. The page is now tried
+  once in the browser before "no page" is recorded (an error status or a bot
+  check is the site's answer and is not retried).
+- Blocked by Cloudflare from EC2 (not worked around): GrantWatch, Gulbenkian.
+
+**UNDP coverage (Osama).** `scripts/undp_coverage.py` compares the live board
+with the database by notice id: on the dashboard / stored but hidden (and why)
+/ not English / missing. About 30% of UNDP notices are French or Spanish with
+no English edition; English-only intake drops them by design.
+
+**Renamed** "Company intelligence" to "Platform intelligence" in the
+dashboard, the workspace tab, emails and API messages.
+
+**Weekly usage report to Amit** (Codex's implementation kept:
+`services/weekly_usage_report.py`, Mondays 18:00 IST). The recipient is no
+longer written in the code or `.env.example` (public repository): set
+`LOP_WEEKLY_USAGE_REPORT_RECIPIENT` in `backend/.env` on EC2; blank = off.
+Sign-ins, saved leads, feedback and journey updates are recorded in the new
+`user_activity_events` table (Codex).
+
+**Slowdown.** API requests slower than `LOP_SLOW_REQUEST_SECONDS` (2 s) are
+logged to `logs/performance.log` with path, status and whether a scrape was
+running. Load removed this session: DevelopmentAid's all-night browser, 515
+UNDP detail visits a night.
+
+Tests: full suite 1489 passed.
+
+---
+
+## 2026-11-16 — DevelopmentAid out of the nightly scrape; failing sources reviewed; morning report says why
+
+Session record (16 Nov 2026). Status: saved to the project, **not yet deployed**.
+
+**DevelopmentAid no longer runs in the scheduled scrape** (owner's request).
+On EC2 the site answers with a Cloudflare verification page, so the run sat on
+page 0 with nothing saved until the 08:00 hard stop. It is held out with
+`production_enabled=False` in `services/source_manifest.py`; an admin can
+still start it by name. Its stored leads are untouched.
+
+**The 06:00 report now says why each source failed.** It read two fields that
+nothing sets, so every line ended at "failed". It now prints the run's real
+outcome in words plus its evidence sentence, e.g. "UNDP Procurement: failed —
+stuck: no page finished for 30 min" or "blocked by the site. ..."
+(`ScraperManager._problem_reason`).
+
+**11 sources paused** (owner's decision; each page opened in a browser that
+day). Held out of scheduled runs only, nothing deleted, reason recorded per
+source in the manifest:
+
+| Source | What the page is |
+|---|---|
+| Triple Funds | Cloudflare verification (HTTP 403) |
+| NIHR | Human-verification page (HTTP 405) |
+| EU Funding Portal — Social Entrepreneurship | "I am not a robot" check (HTTP 403) |
+| Stavros Niarchos Foundation | Search page that renders no results |
+| Doen Foundation | Standing how-to-apply page, no dated calls |
+| Merck Family Foundation | Invitation only since 1 Jan 2023 |
+| CJRF | Grants already made |
+| Grantmakers Community Project | Search tool over US foundation filings |
+| Veddis Foundation | Standing programme description |
+| Gadfly Project | Two 2023 in-kind grants |
+| IFAD Moonshots | Page about a 9 May 2024 event |
+
+Bot checks are not worked around.
+
+**Two parsers corrected** (`scrapers/funders_misc.py`):
+
+- Open Society: every call on the page reads "DEADLINE: PASSED". That is now
+  recorded as "no open calls" instead of a failure.
+- Blue Action Fund: the parser stored the section HEADINGS ("Current call for
+  proposals", "Prior calls for proposals") as opportunities. It now reads only
+  the "Current call" section, never prior calls, and records the page's own
+  "There are no upcoming calls for proposals" as proof of empty.
+
+**English-edition lookups are bounded per source**
+(`LOP_ENGLISH_LOOKUP_MISSES_PER_SOURCE`, default 3). UNDP prints 526 notices on
+one page, about 40% in French or Spanish, with no English editions; each cost
+a request inside one page's ingest. After three misses in a row a source is
+not asked again that run.
+
+**Checked in a browser, working there, reason still needed from EC2:** UNDP
+Procurement (526 notices), Bond UK, Gulbenkian (18 cards), GrantWatch (67
+grants), Grand Challenges (1 open call), ISTI x4 (19 records on the
+institutional page), Whole Web Discovery. Gates portal and Invest India load
+but list nothing today. The corrected 06:00 report will name the reason for
+each from the next run.
+
+Tests: `tests/test_source_review_2026_11_16.py`, additions to
+`tests/test_english_only.py`; `test_devaid_brand_searches.py` and
+`test_production_gate.py` updated for the paused set. Full suite: 1469 passed.
+
+---
+
 ## 2026-11-07 — Deploy test no longer fails on an operator's .env override
 
 `tests/test_web_discovery.py::test_default_coverage_uses_the_complete_query_matrix`

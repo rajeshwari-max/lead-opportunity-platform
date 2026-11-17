@@ -118,3 +118,26 @@ def test_switch_can_be_turned_off(monkeypatch):
     from app.core.config import settings
     monkeypatch.setattr(settings, "english_only", False)
     assert eo.ensure_english(_raw("Appel à projets pour les associations locales")).keep
+
+
+def test_a_source_with_no_english_editions_is_not_asked_again(monkeypatch):
+    """UNDP: 526 notices on one page, about 40% French or Spanish, none with
+    an English edition. Three misses in a row end the lookups for that source."""
+    eo._cache.clear(); eo.reset_run_budget()
+    calls = []
+    monkeypatch.setattr(eo, "_stored_english", lambda *a: None)
+    monkeypatch.setattr(eo, "_fetch_english", lambda url, t: calls.append(url))
+    for i in range(40):
+        v = eo.ensure_english(_raw("Appel à projets pour les associations locales",
+                                   url=f"https://example.org/view.cfm?id={i}"))
+        assert not v.keep
+    assert len(calls) == 3
+    # another source still gets its own lookups, and a new run starts afresh
+    other = RawOpportunity(title="Appel à projets pour les associations locales",
+                           opportunity_url="https://other.org/a", source_website="Other")
+    eo.ensure_english(other)
+    assert len(calls) == 4
+    eo.reset_run_budget()
+    eo.ensure_english(_raw("Appel à projets pour les associations locales",
+                           url="https://example.org/view.cfm?id=99"))
+    assert len(calls) == 5
