@@ -258,3 +258,23 @@ def test_a_date_a_person_corrected_is_never_replaced(db_mod):
     ingest(db_mod, [raw("Request for Proposals: Endline Survey", url,
                         deadline_raw="30-Jun-27")])
     assert stored(db_mod, "notice_id=8").deadline == date(2027, 3, 15)
+
+
+def test_a_copy_folded_into_another_lead_does_not_come_back(db_mod):
+    """scripts/lead_accuracy_audit.py --apply hides a duplicate copy as
+    "merged:<identity>"; the next scrape of that copy must skip it."""
+    from sqlalchemy import func, select, update
+
+    from app.database.models import Opportunity
+    url = "https://procurement-notices.undp.org/view_notice.cfm?notice_id=9"
+    ingest(db_mod, [raw("Request for Proposals: Water Audit", url, deadline_raw="21-Feb-27")])
+    with db_mod.session_scope() as db:
+        row = db.execute(select(Opportunity).where(
+            Opportunity.opportunity_url.like("%notice_id=9"))).scalar_one()
+        db.execute(update(Opportunity).where(Opportunity.id == row.id)
+                   .values(unique_id="merged:" + row.unique_id))
+    ingest(db_mod, [raw("Request for Proposals: Water Audit", url, deadline_raw="21-Feb-27")])
+    with db_mod.session_scope() as db:
+        n = db.execute(select(func.count(Opportunity.id)).where(
+            Opportunity.opportunity_url.like("%notice_id=9"))).scalar_one()
+    assert n == 1

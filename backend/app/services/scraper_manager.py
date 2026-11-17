@@ -971,6 +971,16 @@ class ScraperManager:
                     .where(Opportunity.unique_id == uid)
                 ).one_or_none()
                 exists = existing[0] if existing else None
+                if exists is None and uid not in batch_uids and db.execute(
+                        select(Opportunity.id)
+                        .where(Opportunity.unique_id == f"merged:{uid}")
+                ).first() is not None:
+                    # This copy was folded into another lead as a duplicate
+                    # (scripts/lead_accuracy_audit.py keeps its identity as
+                    # "merged:<identity>"). Seeing it again must not bring it
+                    # back as a new row.
+                    dupes += 1
+                    continue
                 if exists is None and uid not in batch_uids:
                     from app.services.cross_source_duplicates import already_present
                     if already_present(db, dict(title=raw.title, organization=organization,

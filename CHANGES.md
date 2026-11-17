@@ -5,6 +5,31 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-17 — The accuracy check now repairs, not only reports
+
+The first deploy run reported 933 run-together UNDP titles and 47 duplicate
+titles but changed nothing. `scripts/lead_accuracy_audit.py --apply --backup
+<file>` now repairs, and `deploy/update.sh` runs it that way after a database
+backup (`REPAIR_ACCURACY=0` = report only). Nothing is deleted:
+
+- run-together titles are cut back to the title (before "Ref No");
+- a date that disagrees with the source's own date text is re-read with the
+  row's convention, and the lead archived if that date has passed (never a
+  date a person corrected);
+- copies with the same title, funder and closing date are folded into one.
+  The copy a person saved, reviewed, gave feedback on or sent to Wrike is the
+  one kept; the others are hidden as `merged:<identity>`, and the scraper now
+  skips such a copy when it sees it again instead of re-adding it. Same title
+  with a different date is a different call and stays;
+- junk titles (almost no words, e.g. the phone number "971503529923" stored 8
+  times from DevelopmentAid) are archived, and new ones are rejected at intake
+  (`spam.py`).
+
+Shared dates per source and far-future dates are still reported for a person.
+Tests: `tests/test_lead_accuracy_audit.py`, `tests/test_deadline_refresh.py`.
+
+---
+
 ## 2026-11-17 — Wrong dates fixed at the source, failing sources repaired, weekly usage report, slow-request log
 
 Session record (16–17 Nov 2026), continued. Status: saved to the project,

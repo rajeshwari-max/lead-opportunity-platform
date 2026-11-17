@@ -111,6 +111,10 @@ def is_spam(title: str, summary: str = "") -> bool:
     # deliberate trade of recall for a clean working list, not a spam judgement.
     if _has_phone(t) or is_furniture(t) or _mostly_non_latin(t):
         return True
+    # A title with almost no words is not a lead: DevelopmentAid stored the
+    # phone number "971503529923" as the title of eight separate rows.
+    if sum(ch.isalpha() for ch in t) < 4:
+        return True
     return bool(_SPAM_TERMS.search(t) or _SPAM_TERMS.search((summary or "")[:500]))
 
 

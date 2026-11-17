@@ -294,12 +294,22 @@ else
 fi
 
 # ------------------------------------------- 8c. accuracy of what users see
-# Read-only. Wrong or shared closing dates, run-together titles, duplicates
-# and closed-but-active rows among the leads the dashboard shows. Never fatal.
-say "Checking the accuracy of the leads users can see"
+# Repairs, after a backup, what can be repaired among the leads the dashboard
+# shows: run-together titles, dates that disagree with the source's own text,
+# same-title/same-funder/same-date copies (hidden, never deleted; a person's
+# lead is always the one kept) and junk titles (archived). Then reports what is
+# left. Never fatal. REPAIR_ACCURACY=0 makes it report only.
+REPAIR_ACCURACY=${REPAIR_ACCURACY:-1}
+say "Checking and repairing the accuracy of the leads users can see"
 cd "$REPO/backend"
-"$PYTHON" scripts/lead_accuracy_audit.py --samples 3 \
-  || echo "    WARNING: the accuracy check could not run; nothing was changed by it."
+if [ "$REPAIR_ACCURACY" = "1" ]; then
+  accuracy_backup="$REPO/backend/data/backups/pre-accuracy-repair-$(date +%Y%m%d-%H%M%S).db"
+  "$PYTHON" scripts/lead_accuracy_audit.py --samples 3 --apply --backup "$accuracy_backup" \
+    || echo "    WARNING: the accuracy repair did not finish; the backup is $accuracy_backup"
+else
+  "$PYTHON" scripts/lead_accuracy_audit.py --samples 3 \
+    || echo "    WARNING: the accuracy check could not run; nothing was changed by it."
+fi
 
 # One worker only. Two means two schedulers, which means every automatic email
 # goes out twice.
