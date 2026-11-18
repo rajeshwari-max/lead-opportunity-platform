@@ -94,17 +94,12 @@ function amountsIn(text: string): number[] {
 export function formatFundingAmount(text: string | null | undefined): string {
   const raw = (text || "").trim();
   if (!raw) return "";
-
-  const suffix = /\s*\(currency not listed\)\s*$/i;
-  const candidate = raw.replace(suffix, "").trim();
-  if (!/^\d[\d,\s]*(?:\.\d+)?$/.test(candidate)) return raw;
-
-  const compact = candidate.replace(/[,\s]/g, "");
-  if (!/^\d+(?:\.\d+)?$/.test(compact)) return raw;
-  const value = Number(compact);
-  if (!Number.isFinite(value) || value <= 0) return raw;
-
-  return `${value.toLocaleString("en-US", { maximumFractionDigits: 20 })} (currency not listed)`;
+  if (/currency not listed/i.test(raw) || /^[\[{]/.test(raw)) return "";
+  // Display a value only when the source supplied an identifiable currency.
+  // This deliberately supports more currencies than the INR converter: an
+  // amount can be valid to display even when we have no conversion rate.
+  const hasCurrency = /(?:\b(?:USD|EUR|GBP|INR|CHF|AUD|CAD|NZD|ZAR|SEK|NOK|DKK|JPY|CNY|KES|NGN|PHP|SGD|THB|IDR|BRL|MXN)\b|US\$|A\$|C\$|NZ\$|R\$|Rs\.?|[€£$₹¥])/i.test(raw);
+  return hasCurrency ? raw : "";
 }
 
 /** Indian grouping: ₹1.2 Cr, ₹45 L, ₹8,500. */

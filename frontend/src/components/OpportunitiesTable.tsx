@@ -605,7 +605,7 @@ export function OpportunitiesTable({ data, loading, filters, onChange, facets, r
                             {o.location && <span><b className="font-semibold text-foreground">Location:</b> {o.location}</span>}
                             {o.country && <span><b className="font-semibold text-foreground">Country:</b> {o.country}</span>}
                             {o.region && <span><b className="font-semibold text-foreground">Region:</b> {o.region}</span>}
-                            {o.funding_amount && (
+                            {formatFundingAmount(o.funding_amount) && (
                               <span>
                                 <b className="font-semibold text-foreground">Amount:</b> {formatFundingAmount(o.funding_amount)}
                                 {toInr(o.funding_amount) && (

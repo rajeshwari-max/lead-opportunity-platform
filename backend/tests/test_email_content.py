@@ -117,3 +117,11 @@ def test_scraped_text_is_escaped_in_html_mail():
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
     assert "A &amp; B" in html
+
+
+def test_currencyless_or_structured_amount_is_omitted_from_email():
+    for value in ("150,000 (currency not listed)",
+                  '{"budgetYearsColumns":["2026"],"maxContribution":15000000}'):
+        html = _digest_html(_member(), [_opportunity(funding_amount=value)])
+        assert "Opportunity size:" not in html
+        assert value not in html

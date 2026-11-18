@@ -73,6 +73,7 @@ def audit(db, today=None) -> dict[str, list[tuple]]:
     rows = db.execute(
         select(Opportunity.id, Opportunity.source_website, Opportunity.title,
                Opportunity.organization, Opportunity.deadline,
+               Opportunity.country, Opportunity.category,
                Opportunity.deadline_raw, Opportunity.deadline_convention,
                Opportunity.deadline_confidence)
         .where(strict_actionable_clause(today))
@@ -110,10 +111,13 @@ def audit(db, today=None) -> dict[str, list[tuple]]:
 
     groups = defaultdict(list)
     for r in rows:
-        key = (_norm(r.title), _norm(r.organization))
+        key = (
+            _norm(r.title), _norm(r.organization), r.deadline,
+            _norm(r.country), _norm(r.category),
+        )
         if key[0]:
             groups[key].append(r)
-    for (title, _), items in groups.items():
+    for (title, *_), items in groups.items():
         if len(items) > 1:
             found["duplicate_title"].append(
                 (len(items), ", ".join(sorted({i.source_website for i in items}))[:80],
@@ -171,7 +175,14 @@ def repair(db, today=None) -> dict[str, int]:
     live = [o for o in rows if o.status == Status.ACTIVE]
     groups = defaultdict(list)
     for o in live:
-        key = (_norm(o.title), _norm(o.organization), o.deadline)
+        # The same programme title may be published separately for multiple
+        # countries or procurement types.  Only fold rows whose complete
+        # public identity agrees; otherwise accuracy repair would itself hide
+        # a valid opportunity.
+        key = (
+            _norm(o.title), _norm(o.organization), o.deadline,
+            _norm(o.country), _norm(o.category),
+        )
         if key[0]:
             groups[key].append(o)
     clusters = [g for g in groups.values() if len(g) > 1]

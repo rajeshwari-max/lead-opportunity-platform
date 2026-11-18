@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database.db import get_db
 from app.database.models import Opportunity
+from app.services.amounts import clean_amount
 from app.services.opportunity_pdf import brief_signature_ok
 
 router = APIRouter(tags=["documents"])
@@ -54,7 +55,7 @@ def opportunity_brief_pdf(opportunity_id: int, sig: str = Query(""),
         ("Organisation", opportunity.organization),
         ("Location", opportunity.location or opportunity.country),
         ("Deadline", opportunity.deadline.isoformat() if opportunity.deadline else "Not listed"),
-        ("Amount", opportunity.funding_amount),
+        ("Amount", clean_amount(opportunity.funding_amount)),
         ("Category", getattr(opportunity.category, "value", opportunity.category)),
     )
     for label, value in facts:

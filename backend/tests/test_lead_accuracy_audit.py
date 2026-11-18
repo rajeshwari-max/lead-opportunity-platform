@@ -16,9 +16,11 @@ import lead_accuracy_audit as audit_mod  # noqa: E402
 TODAY = date(2026, 11, 17)
 
 
-def _row(i, source, title, deadline, raw="", org="Funder", status=Status.ACTIVE):
+def _row(i, source, title, deadline, raw="", org="Funder", status=Status.ACTIVE,
+         country="India"):
     return Opportunity(id=i + 1, unique_id=f"u{i}", title=title, organization=org,
                        source_website=source, category=Category.TENDER,
+                       country=country,
                        deadline=deadline, deadline_raw=raw, deadline_state="dated",
                        deadline_convention="dayfirst", status=status,
                        opportunity_url=f"https://x.org/{i}")
@@ -67,13 +69,15 @@ def test_apply_repairs_titles_dates_duplicates_and_junk_without_deleting():
             _row(5, "DevelopmentAid", "Provision of architectural designs", date(2026, 12, 8)),
             _row(6, "DevelopmentAid", "Provision of architectural designs", date(2027, 6, 1)),
             _row(7, "DevelopmentAid", "971503529923", date(2027, 1, 1)),
+            _row(8, "DevelopmentAid", "Provision of architectural designs", date(2026, 12, 8),
+                 country="Kenya"),
         ])
         db.add(LeadActivity(owner="asha@example.org", opportunity_id=6))   # row 5 (id 6)
         db.commit()
         fixed = audit_mod.repair(db, TODAY)
         db.commit()
         rows = {o.id: o for o in db.execute(select(Opportunity)).scalars()}
-        assert db.execute(select(func.count(Opportunity.id))).scalar_one() == 7   # none deleted
+        assert db.execute(select(func.count(Opportunity.id))).scalar_one() == 8   # none deleted
     assert rows[2].title == "National Consultant - Payment for Ecosystem Services"
     assert rows[3].deadline == date(2027, 3, 1)
     assert rows[4].deadline == date(2026, 3, 1) and rows[4].status == Status.EXPIRED
@@ -81,5 +85,6 @@ def test_apply_repairs_titles_dates_duplicates_and_junk_without_deleting():
     assert rows[6].unique_id == "u5" and rows[5].unique_id == "merged:u4"
     assert rows[7].unique_id == "u6"                 # same title, different date: kept
     assert rows[8].status == Status.EXPIRED          # junk title archived
+    assert rows[9].unique_id == "u8"                 # different country: distinct call
     assert fixed == {"run_together_title": 1, "date_disagrees_raw": 2,
                      "duplicate_title": 1, "junk_title": 1}

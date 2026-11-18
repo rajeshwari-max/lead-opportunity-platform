@@ -7,6 +7,7 @@ import io
 from openpyxl import Workbook
 
 from app.database.models import Opportunity
+from app.services.amounts import clean_amount
 from app.services.links import resolve_link
 
 _COLUMNS = [
@@ -28,7 +29,7 @@ def _row(o: Opportunity) -> list[str]:
         o.website, o.opportunity_url,
         resolve_link(o.opportunity_url, o.website, o.source_website, o.title)[0],
         o.summary, o.location, o.eligibility,
-        o.funding_amount, o.status.value, o.source_website,
+        clean_amount(o.funding_amount), o.status.value, o.source_website,
         o.date_scraped.isoformat(sep=" ", timespec="seconds"),
     ]
 

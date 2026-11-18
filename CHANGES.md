@@ -5,6 +5,17 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-17 — Invalid and currencyless amounts are hidden
+
+Structured API payloads (including the European Commission `budgetOverview`
+object) can no longer be stored or rendered as an amount. Bare figures and
+values labelled "currency not listed" are also omitted instead of guessing a
+currency. The same rule is applied to the dashboard, opportunity brief,
+emails, PDFs and exports; the startup amount backfill clears affected stored
+values after deployment.
+
+---
+
 ## 2026-11-17 — The accuracy check now repairs, not only reports
 
 The first deploy run reported 933 run-together UNDP titles and 47 duplicate
@@ -17,6 +28,8 @@ backup (`REPAIR_ACCURACY=0` = report only). Nothing is deleted:
   row's convention, and the lead archived if that date has passed (never a
   date a person corrected);
 - copies with the same title, funder and closing date are folded into one.
+  Country and category must also agree, so similarly named country rounds or
+  different procurement types are never collapsed together.
   The copy a person saved, reviewed, gave feedback on or sent to Wrike is the
   one kept; the others are hidden as `merged:<identity>`, and the scraper now
   skips such a copy when it sees it again instead of re-adding it. Same title

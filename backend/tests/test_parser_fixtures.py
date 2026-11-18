@@ -331,7 +331,7 @@ def test_developmentaid_carries_the_source_location_into_country():
 
 
 def test_developmentaid_does_not_present_a_numeric_budget_as_an_identifier():
-    assert _devaid_items()[0].funding_amount == "250,000 (currency not listed)"
+    assert _devaid_items()[0].funding_amount == ""
 
 
 def test_developmentaid_combines_a_separate_currency_code_with_the_budget():

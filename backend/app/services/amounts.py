@@ -79,23 +79,16 @@ def _group_plain_number(value: str) -> str:
     return formatted
 
 
-def _currency_unknown_amount(value: str) -> str:
-    """Make a source-provided number readable without inventing a currency.
-
-    DevelopmentAid sometimes returns its budget as a JSON number while omitting
-    the currency.  Showing ``7651177`` verbatim looks like a database id; adding
-    separators and an explicit qualification preserves the useful magnitude and
-    makes the missing source data clear.
-    """
-    formatted = _group_plain_number(value)
-    return f"{formatted} (currency not listed)" if formatted else ""
-
-
 def clean_amount(value: str, currency: str = "") -> str:
     """Normalise an amount a source provided. Returns '' when it says nothing."""
     v = re.sub(r"\s+", " ", value or "").strip()
     v = _FURNITURE.sub("", v).strip(" ,;:-")
     if v.lower().strip(" .") in _JUNK_VALUES:
+        return ""
+    # Never expose an API object as an amount.  EU budgetOverview and similar
+    # fields are structured payloads, not display text; the old fall-through
+    # returned the first 256 characters verbatim into the dashboard.
+    if v.startswith(("{", "[")) or "currency not listed" in v.casefold():
         return ""
     if not re.search(r"\d", v):
         return ""            # "other", "varies" — no figure, no value
@@ -112,9 +105,10 @@ def clean_amount(value: str, currency: str = "") -> str:
     if matches:
         v = v[: matches[-1].end()].strip(" ,;:-")
     else:
-        unknown = _currency_unknown_amount(v)
-        if unknown:
-            return unknown[:256]
+        # A number without a currency is ambiguous (budget, identifier, year,
+        # contribution ceiling, etc.).  Product requirement: do not display it
+        # and do not guess a currency.
+        return ""
     return _tidy_number(v)[:256]
 
 

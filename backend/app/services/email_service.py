@@ -435,6 +435,8 @@ def _digest_rows(
         summary = _short(o.summary, limit) or "No summary provided by the source."
         eligibility = _short(o.eligibility, 120 if compact else 280) or \
             "Not specified by the source."
+        from app.services.amounts import clean_amount
+        amount = clean_amount(o.funding_amount or "")
         # Only the opportunity's own URL is offered as the title link. Falling
         # back to o.website here is what made "the link opens the homepage" a
         # recurring complaint: the title looked like a link to the call and
@@ -468,7 +470,7 @@ def _digest_rows(
             <div style="color:#6b7280;font-size:12px;margin-top:3px;">{_text(' · '.join(meta))}</div>
             <div style="color:#4b5563;font-size:12px;margin-top:7px;line-height:1.45;"><b>Summary:</b> {summary}</div>
             <div style="color:#4b5563;font-size:12px;margin-top:5px;line-height:1.45;"><b>Source:</b> {_text(o.source_website or 'Not specified')}</div>
-            <div style="color:#4b5563;font-size:12px;margin-top:5px;line-height:1.45;"><b>Opportunity size:</b> {_text(o.funding_amount or 'Not specified')}</div>
+            {f'<div style="color:#4b5563;font-size:12px;margin-top:5px;line-height:1.45;"><b>Opportunity size:</b> {_text(amount)}</div>' if amount else ''}
             <div style="color:#4b5563;font-size:12px;margin-top:5px;line-height:1.45;"><b>Eligibility:</b> {eligibility}</div>
             <div style="color:#4b5563;font-size:12px;margin-top:5px;line-height:1.45;"><b>Brand:</b> {_labels(o.brands)}</div>
             <div style="color:#4b5563;font-size:12px;margin-top:3px;line-height:1.45;"><b>Vertical:</b> {_labels(o.verticals)}</div>
