@@ -352,7 +352,7 @@ MANIFESTS: dict[str, SourceContract] = {
             "follows the board's own Next/numbered links until the list ends."
         ),
         known_defect=(
-            "The original generic extraction was not reliable enough. The "
+            "RESOLVED by app/scrapers/undp.py. The original generic extraction was not reliable enough. The "
             "2026-08-30 verification run took 568 rows off a single page and "
             "0.4% of them carried a deadline string — two rows out of 568, of "
             "which one parsed. This is a procurement notice board: essentially "
@@ -363,7 +363,9 @@ MANIFESTS: dict[str, SourceContract] = {
             "the UNKNOWN state, which never expires on its own. 1,274 rows are "
             "already stored under this source. The source now restricts links to "
             "UNDP notice/negotiation records and reads the deadline column directly; "
-            "the verification contract still requires measured page coverage."
+            "the verification contract still requires measured page coverage. "
+            "The dedicated reader also stores UNDP's own Process value so RFP, "
+            "RFQ, ITB, EOI and consultancy rows are classified by source evidence."
         ),
     ),
     "devex": _c(

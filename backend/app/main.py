@@ -64,8 +64,6 @@ async def lifespan(_app: FastAPI):
     from app.services.data_integrity import maintain_database
     await asyncio.to_thread(maintain_database)
 
-    scheduler.start()  # restores any persisted daily/weekly/monthly/yearly schedule
-
     # ------------------------------------------------- background maintenance
     # These maintenance passes each scan or rewrite the opportunities table.
     # They used to be launched as concurrent tasks, so every boot put several
@@ -117,6 +115,13 @@ async def lifespan(_app: FastAPI):
                 slog.exception("[startup] %s failed", name)
 
     maintenance_task = asyncio.create_task(asyncio.to_thread(_startup_maintenance))
+    manager.startup_maintenance_task = maintenance_task
+
+    # Register automatic work only after the maintenance gate exists. A
+    # catch-up job can fire immediately when APScheduler starts; previously it
+    # could race the full-table startup repairs before the API even finished
+    # booting and fail with ``database is locked``.
+    scheduler.start()  # restores any persisted daily/weekly/monthly/yearly schedule
 
     yield
 

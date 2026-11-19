@@ -1,10 +1,12 @@
 """Engine/session management + SQLite FTS5 full-text index."""
 import logging
 import os
+import time
 from collections.abc import Generator
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, event, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
@@ -530,6 +532,68 @@ def get_db() -> Generator[Session, None, None]:
 def session_scope() -> Generator[Session, None, None]:
     """Transactional scope for background jobs (scraper, scheduler)."""
     db = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _is_database_locked(exc: BaseException) -> bool:
+    """True only for SQLite's transient writer-contention error."""
+    return "database is locked" in str(exc).casefold()
+
+
+@contextmanager
+def immediate_session_scope(
+    *, wait_seconds: float | None = None, retry_seconds: float = 2.0,
+) -> Generator[Session, None, None]:
+    """Acquire SQLite's write reservation, retrying transient contention.
+
+    A scrape can spend minutes fetching and classifying a page. Losing the
+    whole page because startup maintenance held SQLite's one writer slot for
+    another few seconds is both wasteful and misleading ("found 113, stored
+    0"). ``busy_timeout`` still handles short collisions; this bounded outer
+    retry handles maintenance passes that legitimately exceed that timeout.
+
+    Only lock errors from ``BEGIN IMMEDIATE`` are retried. Schema, disk and
+    integrity errors still fail immediately.
+    """
+    if wait_seconds is None:
+        try:
+            wait_seconds = max(
+                0.0, float(os.environ.get("LOP_SCRAPER_DB_LOCK_WAIT_S", "600"))
+            )
+        except ValueError:
+            wait_seconds = 600.0
+    deadline = time.monotonic() + wait_seconds
+    warned = False
+
+    while True:
+        db = SessionLocal()
+        try:
+            db.execute(text("BEGIN IMMEDIATE"))
+            break
+        except OperationalError as exc:
+            db.rollback()
+            db.close()
+            if not _is_database_locked(exc) or time.monotonic() >= deadline:
+                raise
+            if not warned:
+                log.warning(
+                    "SQLite writer is busy; waiting up to %.0fs instead of "
+                    "dropping the scraped page", wait_seconds,
+                )
+                warned = True
+            time.sleep(max(0.05, retry_seconds))
+        except Exception:
+            db.rollback()
+            db.close()
+            raise
+
     try:
         yield db
         db.commit()

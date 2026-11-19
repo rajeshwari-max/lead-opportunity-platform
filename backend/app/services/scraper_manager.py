@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import select, update, text
 
 from app.core.config import settings
-from app.database.db import session_scope
+from app.database.db import immediate_session_scope, session_scope
 from app.database.models import Opportunity, ScrapeRun, Status
 from app.services import run_lock
 from app.services.scrape_outcome import Evidence, Outcome, classify
@@ -49,6 +49,7 @@ from app.services.site_chrome import is_site_chrome_document
 from app.services.spam import is_spam
 from app.services import english_only
 from app.services.organization import extract_organization, tidy_organization
+from app.services.verticals import HUMAN as HUMAN_VERTICALS_SOURCE
 from app.services.verticals import VERTICALS as ALL_VERTICALS
 from app.services.verticals import VERTICAL_SOCIAL_BUSINESS, verticals_to_str
 from app.services.study_type import classify_study_type
@@ -100,6 +101,10 @@ class ScraperManager:
         self.last_activity: float | None = None
         self.source_activity: dict[str, float] = {}
         self._watch_interval_s: float = 30.0     # how often sources are checked
+        # Filled by app.main while idempotent startup repairs are running.
+        # A dashboard scrape is accepted immediately, but its source work waits
+        # for this task rather than racing the same SQLite writer.
+        self.startup_maintenance_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------- lifecycle
     async def start(
@@ -216,7 +221,32 @@ class ScraperManager:
         self._log(f"Starting scrape: {', '.join(s.display_name for s in scrapers)}")
         if self.vertical_filter:
             self._log(f"Vertical-aware mode: keeping only {', '.join(sorted(self.vertical_filter))}")
-        self._task = asyncio.create_task(self._run(scrapers))
+        self._task = asyncio.create_task(self._run_after_startup_maintenance(scrapers))
+
+    async def _run_after_startup_maintenance(self, scrapers: list) -> None:
+        maintenance = self.startup_maintenance_task
+        if maintenance is not None and not maintenance.done():
+            self._log(
+                "Waiting for startup database maintenance to finish before "
+                "saving scraped opportunities"
+            )
+            waiting_heartbeat = asyncio.create_task(self._heartbeat_loop())
+            try:
+                await maintenance
+            except Exception:                                   # noqa: BLE001
+                # Each maintenance pass already records its own failure. A
+                # failed optional repair must not permanently block scraping.
+                log.exception("startup maintenance ended with an error")
+            finally:
+                # `_run` starts the normal heartbeat below. Keep the lease
+                # alive during this pre-run wait as well; startup repairs on a
+                # production database can exceed the lease TTL.
+                waiting_heartbeat.cancel()
+                try:
+                    await waiting_heartbeat
+                except asyncio.CancelledError:
+                    pass
+        await self._run(scrapers)
 
     def pause(self) -> None:
         if self.state == "running":
@@ -959,15 +989,15 @@ class ScraperManager:
             # Classification and parsing run before taking SQLite's write lock.
             # Keep identity checks and insertion atomic, but commit each row so
             # other sources, the lease heartbeat and account writes can proceed.
-            with session_scope() as db:
-                db.execute(text('BEGIN IMMEDIATE'))
+            with immediate_session_scope() as db:
                 uid = make_unique_id(raw.title, organization, deadline, raw.opportunity_url, raw.source_website)
 
                 existing = db.execute(
                     select(Opportunity.id, Opportunity.deadline, Opportunity.summary,
                            Opportunity.eligibility, Opportunity.documents_json,
                            Opportunity.deadline_raw, Opportunity.deadline_checked_at,
-                           Opportunity.deadline_confidence, Opportunity.title)
+                           Opportunity.deadline_confidence, Opportunity.title,
+                           Opportunity.verticals_source)
                     .where(Opportunity.unique_id == uid)
                 ).one_or_none()
                 exists = existing[0] if existing else None
@@ -1118,6 +1148,36 @@ class ScraperManager:
                                 fields["title"] = fresh_title
                             if raw.summary and raw.summary != existing[2]:
                                 fields["summary"] = raw.summary
+                            # UNDP's labelled Process field is stronger evidence
+                            # than the old generic Grant hint. Refresh all
+                            # automatic hierarchy fields so a re-scrape repairs
+                            # existing RFP/RFQ/ITB rows as well as new ones.
+                            # Human-reviewed routing remains protected.
+                            if existing[9] != HUMAN_VERTICALS_SOURCE:
+                                fields.update(
+                                    category=category,
+                                    verticals=verticals_to_str(vertical_tags),
+                                    archetypes=", ".join(hierarchy.archetypes),
+                                    brands=brands_to_str(non_cms_brands),
+                                    brand_scores=hierarchy.scores_json("brands"),
+                                    brand_evidence=hierarchy.evidence_json(),
+                                    brand_classification_version=hierarchy.version,
+                                    verticals_source="auto",
+                                    classification_status=hierarchy.status,
+                                    classification_source=hierarchy.source,
+                                    classification_version=hierarchy.version,
+                                    vertical_scores=hierarchy.scores_json("verticals"),
+                                    classification_evidence=hierarchy.evidence_json(),
+                                    classified_at=datetime.now(timezone.utc),
+                                    work_type=classify_work_type(raw.title, vertical_body),
+                                    study_type=classify_study_type(raw.title, vertical_body),
+                                )
+                            if clean_country:
+                                fields.update(
+                                    country=clean_country,
+                                    region=clean_region,
+                                    location=(raw.location or clean_country),
+                                )
                         db.execute(
                             update(Opportunity)
                             .where(Opportunity.id == exists)

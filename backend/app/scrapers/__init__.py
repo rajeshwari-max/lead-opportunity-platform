@@ -22,6 +22,7 @@ from app.scrapers.kbs_frb import KingBaudouinScraper
 from app.scrapers.ngobox import NGOBoxScraper
 from app.scrapers.nih import NIHOpportunitiesScraper
 from app.scrapers.phf import PHFScraper
+from app.scrapers.undp import UNDPProcurementScraper
 from app.scrapers.unpp import UNPartnerPortalScraper
 from app.scrapers.worldbank import WorldBankScraper
 # Optional public-web discovery source. The class can always be imported for
@@ -45,6 +46,7 @@ __all__ = [
     "FundsForNGOsScraper", "BondScraper", "DevelopmentAidScraper", "GrantWatchScraper",
     "IndevJobsScraper", "PHFScraper", "PackardScraper", "OpenSocietyScraper",
     "BlueActionFundScraper", "UNPartnerPortalScraper", "WorldBankScraper",
+    "UNDPProcurementScraper",
     "NIHOpportunitiesScraper", "EuropeanUnionScraper",
     "WebDiscoveryScraper",
     "generic_listing",

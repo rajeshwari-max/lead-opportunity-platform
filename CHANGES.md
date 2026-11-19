@@ -4699,3 +4699,29 @@ nothing in them looks structurally wrong the way the config entries above do.
 They need a live run to judge, which is what `check_scraper.py` is for.
 
 ---
+# 2026-11-18 — Scraped pages survive SQLite maintenance contention
+
+- Manual and scheduled scrapes now wait for startup database maintenance
+  instead of racing its full-table writes.
+- Scraper writes retry a transient SQLite writer lock for a bounded period
+  (`LOP_SCRAPER_DB_LOCK_WAIT_S`, default 600 seconds) rather than failing a
+  fetched page with `found N, stored 0`.
+- Only the expected `database is locked` condition is retried; all other
+  database errors still fail immediately.
+
+# 2026-11-18 — Dedicated UNDP Procurement coverage
+
+- Replaced the generic UNDP configuration at runtime with a source-specific
+  parser for the board's labelled notice cards.
+- Title, reference, office/country, process, deadline and posted date are read
+  from their own fields. RFP, RFQ, ITB, EOI and consultancy types now use
+  UNDP's Process value rather than a generic Grant hint.
+- Live pagination probing found one long page: 463 notices, 463 deep links and
+  463 parseable deadlines. Common page/offset parameters repeat page one and
+  are therefore not treated as pagination. Genuine Next/numbered links will
+  still be followed if UNDP introduces them.
+- A malformed labelled row now fails visibly instead of silently publishing
+  partial coverage.
+- Re-seen UNDP notices refresh automatic category/hierarchy and geography, so
+  one post-deployment source run repairs previously stored generic Grant labels;
+  human-reviewed classifications remain protected.

@@ -470,7 +470,7 @@
     "enrich_details": false,
     "refresh_on_reseen": true,
     "_refresh_note": "Each row on this board is the whole notice (title, closing date, office). Re-seen rows take the board's current title and summary, so rows stored by the old reader (six cells as the title, the first notice's text as every summary) are repaired on the next run.",
-    "_structure_note": "Read in a browser on 2026-11-17: 515 notices on one page, each one a link that wraps its own cells: <a class=\"vacanciesTable__row\" href=\"view_negotiation.cfm?nego_id=N\"> holding six .vacanciesTable__cell blocks (Title, Ref No, UNDP Office/Country, Process, Deadline, Posted). The generic reader took the whole table as each row's block, so every notice was stored with the FIRST notice's closing date and summary, and its title ran all six cells together. The generic reader now treats a link that wraps block elements as the row itself (title from its first cell, deadline from its 'Deadline' cell). enrich_details is off: the row already has everything, and 515 detail visits a night kept the source from finishing inside the 30-minute stall limit."
+    "_structure_note": "A dedicated scraper now owns this registry name; this entry remains as documentation and is ignored by generic_listing._build(). Live verification on 2026-11-18 found 463 public open notices on one long page, with 100% deep links and 100% parseable deadlines. Fake page/offset parameters repeat page one, so they are not pagination. The dedicated parser reads Title, Ref No, UNDP Office/Country, Process, Deadline and Posted directly and preserves real Next/numbered-link detection if UNDP introduces pagination later."
   },
   {
     "name": "wfp_innovation",
