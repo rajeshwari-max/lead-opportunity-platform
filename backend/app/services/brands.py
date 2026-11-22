@@ -24,6 +24,31 @@ from app.services.brand_keywords import BRAND_KEYWORDS, BRANDS
 MODEL_VERSION = "brand-rules-2026.10.01"
 ASSIGNMENT_THRESHOLD = 3.0
 
+# Brand <- CMS vertical, from "Big Bets of the Catalysts" and the brand forms
+# (2026-11-22): each of these brands does the same work as the CMS vertical,
+# so a lead routed to that vertical is that brand's lead too. Before this a
+# health lead counted for CMS but reached Swasti only if its text also carried
+# one of Swasti's specific phrases, which is why CMS showed ~3,000 leads and
+# each brand under 130. Setu (social protection) and Community Action Collab
+# (collaboration, resilience) have no single matching vertical and keep
+# keyword-only routing. Not limited by country: a match anywhere counts.
+BRAND_FROM_VERTICAL: dict[str, tuple[str, ...]] = {
+    "Health": ("Swasti",),
+    "Livelihood": ("Vrutti",),
+    "Climate/Sustainability(ESG)": ("Green Foundation",),
+    "Worker Wellbeing": ("Upfront",),
+}
+
+
+def brands_from_verticals(verticals) -> list[str]:
+    """Brands implied by CMS verticals (see BRAND_FROM_VERTICAL)."""
+    out: list[str] = []
+    for vertical in verticals or ():
+        for brand in BRAND_FROM_VERTICAL.get(str(vertical).strip(), ()):
+            if brand not in out:
+                out.append(brand)
+    return out
+
 # Valid search aids that are unsafe as standalone brand decisions.  They remain
 # in the inventory and can corroborate another hit; they simply cannot turn a
 # generic notice into a brand match on their own.

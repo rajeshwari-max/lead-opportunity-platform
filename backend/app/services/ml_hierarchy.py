@@ -10,7 +10,7 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.database.models import Category
-from app.services.brands import classify_brands
+from app.services.brands import brands_from_verticals, classify_brands
 from app.services.classification import KeywordClassifier
 from app.services.classification_model import classify as classify_vertical_rules
 from app.services import semantic_classifier
@@ -129,6 +129,11 @@ def _enforce_hierarchy(selected: dict[str, list[str]]) -> None:
         selected["verticals"] = []
     elif "Devsol" not in selected["archetypes"]:
         selected["verticals"] = []
+    # A vertical's brand comes with it (services/brands.BRAND_FROM_VERTICAL).
+    if "CMS" in selected["brands"]:
+        for brand in brands_from_verticals(selected["verticals"]):
+            if brand not in selected["brands"]:
+                selected["brands"].append(brand)
 
 
 def _routed(selected: dict[str, list[str]]) -> bool:
@@ -228,6 +233,7 @@ def _fallback(title: str, body: str, category_hint: Category | None) -> Hierarch
     social = VERTICAL_SOCIAL_BUSINESS in vertical_result.labels
     devsol_verticals = [label for label in vertical_result.labels if label != VERTICAL_SOCIAL_BUSINESS]
     brands = (["CMS"] if vertical_result.labels else []) + brand_result.labels
+    brands += [b for b in brands_from_verticals(devsol_verticals) if b not in brands]
     archetypes = (["Devsol"] if devsol_verticals else []) + (["Social Business"] if social else [])
     scores = {
         "verticals": {key: float(value) for key, value in vertical_result.scores.items() if key != VERTICAL_SOCIAL_BUSINESS},

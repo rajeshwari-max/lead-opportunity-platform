@@ -5,6 +5,37 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-22 — Brands get the leads of their matching CMS vertical
+
+Why CMS showed ~3,080 live leads and each brand 10–125: a lead counts for CMS
+when it fits ANY CMS vertical, but a brand was assigned only when the text also
+held one of that brand's own specific phrases, with a high bar (score 3, and
+broad words such as "health", "livelihood", "agriculture" or "worker" could not
+count on their own). So a health lead was CMS but almost never Swasti. Brands
+were never limited to India (the word "India" is ignored when matching); the
+rule was simply too narrow.
+
+Now (`services/brands.BRAND_FROM_VERTICAL`, from Big Bets and the brand forms):
+
+| CMS vertical | Brand |
+|---|---|
+| Health | Swasti |
+| Livelihood | Vrutti |
+| Climate/Sustainability(ESG) | Green Foundation |
+| Worker Wellbeing | Upfront |
+
+A lead routed to the vertical gets the brand too, anywhere in the world
+(`ml_hierarchy._enforce_hierarchy` and the rule fallback). Setu (social
+protection) and Community Action Collab (collaboration, resilience) have no
+single matching vertical and keep keyword routing. Stored leads:
+`scripts/apply_brand_mapping.py --apply`, run by `deploy/update.sh`; it only
+adds a brand, never removes one, and skips labels a person set; it prints
+per-brand counts before and after.
+
+Tests: `tests/test_brand_vertical_mapping.py`. Full suite: 1495 passed.
+
+---
+
 ## 2026-11-17 — Invalid and currencyless amounts are hidden
 
 Structured API payloads (including the European Commission `budgetOverview`

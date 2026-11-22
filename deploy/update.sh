@@ -293,6 +293,15 @@ else
   echo "    audit report: $before_report"
 fi
 
+# --------------------------------------- 8b2. brands from CMS verticals
+# Health -> Swasti, Livelihood -> Vrutti, Climate/ESG -> Green Foundation,
+# Worker Wellbeing -> Upfront (Big Bets). Adds a brand only; never removes one
+# and never touches labels a person set. Prints per-brand counts before/after.
+say "Giving stored leads the brand their CMS vertical implies"
+cd "$REPO/backend"
+"$PYTHON" scripts/apply_brand_mapping.py --apply \
+  || echo "    WARNING: brand mapping did not finish; classification is otherwise unchanged."
+
 # ------------------------------------------- 8c. accuracy of what users see
 # Repairs, after a backup, what can be repaired among the leads the dashboard
 # shows: run-together titles, dates that disagree with the source's own text,
