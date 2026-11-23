@@ -314,7 +314,8 @@ class ScrapeScheduler:
         )
 
     def _install_weekly_usage_report(self) -> None:
-        """Send Amit the adoption report each Monday evening."""
+        """Weekly adoption report each Monday evening: to the reviewer for
+        approval first, then (after approval) to the recipient."""
         try:
             self._scheduler.remove_job(_WEEKLY_USAGE_JOB_ID)
         except Exception:
@@ -334,9 +335,11 @@ class ScrapeScheduler:
             id=_WEEKLY_USAGE_JOB_ID, replace_existing=True, **_JOB_GUARDS,
         )
         log.info(
-            "Scheduler: weekly lead-gen usage report to %s each Monday at "
-            "%02d:%02d %s",
-            recipient, hm[0], hm[1], settings.weekly_usage_report_timezone,
+            "Scheduler: weekly lead-gen usage report each Monday at %02d:%02d %s; "
+            "%s", hm[0], hm[1], settings.weekly_usage_report_timezone,
+            (f"goes to {settings.weekly_usage_report_reviewer.strip() or '(no reviewer set: nothing will be sent)'} "
+             f"for approval before {recipient}")
+            if settings.weekly_usage_report_require_approval else f"sent to {recipient}",
         )
 
     async def _window_health_check(self) -> None:

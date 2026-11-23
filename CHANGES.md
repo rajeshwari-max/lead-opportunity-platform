@@ -5,6 +5,50 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-23 — Weekly usage report: approved by the admin before it is sent
+
+- The report is now an Excel sheet (attached to both emails): one row per
+  person with platform access — Name, Email, Leads viewed (last 7 days),
+  Status, Last lead viewed — with Active/Inactive counts at the top.
+  **Active = viewed at least one lead in the last 7 days**, otherwise
+  Inactive. "Viewed" = opened the lead's brief (the `opportunity_viewed`
+  event, or `LeadActivity.viewed_at` for older records); a lead counts once
+  per person however often it was opened. Logging in alone does not count.
+  Members whose access is switched off are not listed (a note says how many).
+  The email body has the same summary as a short table. Built by
+  `lead_views_snapshot` / `render_xlsx` in `services/weekly_usage_report.py`;
+  the review page also offers the sheet for download
+  (`/api/usage-report/review/<token>/excel`, sends nothing).
+- The Monday usage report (who is and is not using the platform) no longer
+  goes straight to its recipient. It is emailed first to the reviewer
+  (`LOP_WEEKLY_USAGE_REPORT_REVIEWER`, the admin) with the full report and a
+  "Review and approve" button: "Is it good to send to <recipient>?".
+- The button opens `/api/usage-report/review/<token>`: the exact report and a
+  "Yes, send it to <recipient>" button. Only that button (a POST) sends it to
+  `LOP_WEEKLY_USAGE_REPORT_RECIPIENT`. Opening the link sends nothing, so mail
+  scanners that pre-fetch links cannot approve it. It is sent once; a second
+  click says "Already sent". Doing nothing sends nothing.
+- The report is frozen when the review mail goes out
+  (`backend/data/usage_reports/<id>.json`, not in git), so the recipient gets
+  exactly what was reviewed. The link is HMAC-signed with its own key derived
+  from the approval secret (it cannot be reused as an opportunity-approval
+  link) and works for `LOP_WEEKLY_USAGE_REPORT_REVIEW_DAYS` (7) days. It
+  passes the login gate the same way as the digest approval links.
+- With approval required (default) and no reviewer set, nothing is sent.
+  `LOP_WEEKLY_USAGE_REPORT_REQUIRE_APPROVAL=false` restores direct sending.
+- Addresses live only in `backend/.env` on the server (public repository).
+- New: `app/api/usage_report.py`, `scripts/send_usage_report.py`
+  (`--preview` prints the summary and saves the Excel sheet under
+  `backend/data/usage_reports/`; without it, emails the reviewer now),
+  `tests/test_usage_report_approval.py`. `send_alert` takes an optional HTML
+  part.
+- Why: requested so the admin checks each report before it reaches the
+  lead-generation owner.
+- Verify: `pytest tests/test_usage_report_approval.py`; on the server
+  `.venv/bin/python scripts/send_usage_report.py`, then open the email.
+
+---
+
 ## 2026-11-23 — Animated guided tour ("Take a tour")
 
 - Replaces the step-by-step modal added earlier the same day with an animated

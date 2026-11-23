@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     # Set LOP_WEEKLY_USAGE_REPORT_RECIPIENT in backend/.env on the server.
     # No address is kept in the code: the repository is public. Blank = off.
     weekly_usage_report_recipient: str = ""
+    # The report goes to this reviewer first (LOP_WEEKLY_USAGE_REPORT_REVIEWER,
+    # the admin), with a link to check it and approve it. Only after approval
+    # is it sent to the recipient above. With approval required and no
+    # reviewer set, nothing is sent at all: it never goes straight out.
+    weekly_usage_report_reviewer: str = ""
+    weekly_usage_report_require_approval: bool = True
+    weekly_usage_report_review_days: int = 7      # how long the approve link works
     weekly_usage_report_at: str = "18:00"
     weekly_usage_report_timezone: str = "Asia/Kolkata"
 

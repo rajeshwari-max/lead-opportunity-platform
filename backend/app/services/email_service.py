@@ -528,7 +528,8 @@ def send_reminder(member: TeamMember, opportunities: list[Opportunity],
              days_before, member.name, member.email, n)
 
 
-def send_alert(subject: str, body: str, to: str | None = None) -> None:
+def send_alert(subject: str, body: str, to: str | None = None, html: str | None = None,
+               attachments: list[tuple[str, bytes, str]] | None = None) -> None:
     """Blocking SMTP send for a plain-text operational alert (e.g. a scraper's
     saved login session has expired). Separate from send_digest because it
     isn't tied to a TeamMember or a list of Opportunity rows.
@@ -540,11 +541,26 @@ def send_alert(subject: str, body: str, to: str | None = None) -> None:
         log.warning("[alert] SMTP not configured — skipping alert: %s", subject)
         return
     recipient = to or settings.smtp_user
-    msg = MIMEMultipart("alternative")
+    text = MIMEMultipart("alternative")
+    text.attach(MIMEText(body, "plain", "utf-8"))
+    if html:
+        # Optional HTML version (last part = preferred by mail clients).
+        text.attach(MIMEText(html, "html", "utf-8"))
+    if attachments:
+        # Files (filename, bytes, "type/subtype") go beside the text in a
+        # multipart/mixed message.
+        from email.mime.application import MIMEApplication
+        msg = MIMEMultipart("mixed")
+        msg.attach(text)
+        for filename, data, mimetype in attachments:
+            part = MIMEApplication(data, _subtype=mimetype.split("/", 1)[-1])
+            part.add_header("Content-Disposition", "attachment", filename=filename)
+            msg.attach(part)
+    else:
+        msg = text
     msg["Subject"] = subject
     msg["From"] = f"{settings.smtp_from_name} <{settings.smtp_user}>"
     msg["To"] = recipient
-    msg.attach(MIMEText(body, "plain", "utf-8"))
 
     with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as server:
         server.starttls()
