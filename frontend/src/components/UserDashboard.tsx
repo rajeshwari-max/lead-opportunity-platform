@@ -4,6 +4,7 @@ import { OpportunityDocument } from "./OpportunityDocument";
 import { BrandLabel, BrandBars } from "./BrandLabel";
 import { SaveLeadButton, ReviewLeadButton, recordLeadActivity } from "./DashboardLeads";
 import { WrikeTaskAction } from "./WrikeTaskAction";
+import { ProductTourLink } from "./ProductTour";
 import { OpportunityIntelligenceSection } from "./OpportunityIntelligenceSection";
 import { useEffect, useRef, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
@@ -168,7 +169,7 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
         <a className="ud-control" href={api.exportUrl("csv", filters)} download><Download size={14} /> CSV</a><a className="ud-control" href={api.exportUrl("xlsx", filters)} download>Excel</a>
         <button className="ud-control" onClick={resetView} aria-label="Clear filters and refresh"><RefreshCw size={16} /></button><button className="ud-control" onClick={() => setDark(!dark)} aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}>{dark ? <Sun size={16} /> : <Moon size={16} />}</button></div>
     </header>
-    <main className="ud-main"><div className="ud-heading"><div><h1>Your opportunity dashboard</h1><p>Explore funding. Track deadlines. Find your next opportunity.</p></div>{stats?.last_scraped && <span className="ud-updated">Updated {new Date(/Z$|[+-]\d{2}:\d{2}$/.test(stats.last_scraped) ? stats.last_scraped : stats.last_scraped + "Z").toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}</div>
+    <main className="ud-main"><div className="ud-heading"><div><h1>Your opportunity dashboard</h1><p>Explore funding. Track deadlines. Find your next opportunity.</p><ProductTourLink lead={selected} /></div>{stats?.last_scraped && <span className="ud-updated">Updated {new Date(/Z$|[+-]\d{2}:\d{2}$/.test(stats.last_scraped) ? stats.last_scraped : stats.last_scraped + "Z").toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}</div>
       <div className="ud-stats" aria-busy={statsLoading}>{statCards.map(card => <button key={card.label} className={`ud-stat ud-${card.tone}`} aria-pressed={card.active} onClick={card.action}><span>{card.label}</span><strong>{statsLoading || card.value == null ? "…" : count(card.value)}</strong><small>{card.note}</small></button>)}</div>
       <div className="ud-charts" aria-busy={statsLoading}>
         <section className="ud-panel ud-chart"><h2>By category</h2><p className="ud-sub">Distribution in your current view</p><div className="ud-chart-content ud-category-content"><div className="ud-donut">

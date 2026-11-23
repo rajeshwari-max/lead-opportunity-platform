@@ -5,6 +5,34 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-23 — Product tour ("How to use this platform · Take a tour")
+
+- New `frontend/src/components/ProductTour.tsx` (+ `product-tour.css`): a
+  7-step guided tour in the same style as the CSR dashboard's guide (Step N of
+  M, progress bars, Back / Next / Done, Esc or click outside to close, arrow
+  keys to move). Linked under the heading of the user dashboard and above the
+  stat cards on the admin dashboard. A `#tour` link (for example
+  https://leads.catalysts.org/#tour) opens it straight away, for new users.
+- Dynamic: it walks through ONE real lead, the one open in the brief (or the
+  first in the list), showing its title, source, closing date, amount and
+  brands/verticals.
+- Steps: find leads, open a lead, read the brief, save and track, where to
+  push it to Wrike (Wrike task button in the row, or the Wrike task section
+  in the brief), assignee optional, daily emails and reminders.
+- The Wrike step is a practice copy of the real panel and sends nothing: its
+  "Yes, create task" button is always disabled and the component has no
+  create call. The only request it makes is the read-only member list
+  (`GET /api/wrike/assignees`), to show how many people are registered on the
+  platform and how many can be assigned (their platform email matches exactly
+  one active Wrike account). Assigning stays optional.
+- Why: requested so new users can learn the flow end to end without creating
+  real Wrike tasks.
+- Verify: `node frontend/tests/product-tour.mjs` (checks there is no create
+  call and the button is disabled); `npm run build`; open the dashboard,
+  click Take a tour, go to step 5 and try the practice panel.
+
+---
+
 ## 2026-11-23 — New source: UNGM (UN Global Marketplace)
 
 - `scrapers/ungm.py`: every open procurement notice on the public list at

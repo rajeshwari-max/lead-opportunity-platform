@@ -1,0 +1,84 @@
+/* Product tour ("How to use this platform"). Scoped to .lt-tour* so it looks
+   the same on the user dashboard and the admin dashboard. Colours follow the
+   user dashboard (user-dashboard.css); the app switches theme with .dark. */
+.lt-tour-overlay, .lt-tour-link {
+  --lt-paper: #fff; --lt-ink: #193052; --lt-muted: #61718a; --lt-line: #dce4f1;
+  --lt-soft: #edf3ff; --lt-blue: #2458d9; --lt-on-blue: #fff; --lt-amber: #9a5b00;
+}
+.dark .lt-tour-overlay, .dark .lt-tour-link {
+  --lt-paper: #1b2940; --lt-ink: #e4ecfa; --lt-muted: #adbbd0; --lt-line: #33435b;
+  --lt-soft: #263b5d; --lt-blue: #91b7ff; --lt-on-blue: #0c1d38; --lt-amber: #f2c06b;
+}
+
+.lt-tour-link { border: 0; background: none; padding: 0; margin-top: 6px; font: inherit; font-size: 12.5px; color: var(--lt-muted); cursor: pointer; }
+.lt-tour-link span { color: var(--lt-blue); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+
+.lt-tour-overlay { position: fixed; inset: 0; z-index: 1100; display: flex; align-items: center; justify-content: center; padding: 16px; background: #0c1d38a8; }
+.lt-tour { width: min(100%, 540px); max-height: calc(100dvh - 32px); overflow-y: auto; background: var(--lt-paper); color: var(--lt-ink); border-radius: 14px; padding: 22px 24px; box-shadow: 0 20px 70px #0005; font-size: 14px; line-height: 1.55; }
+.lt-tour:focus { outline: none; }
+.lt-tour h2, .lt-tour h3, .lt-tour p { margin: 0; }
+
+.lt-tour-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+.lt-tour-head h2 { font-size: 16px; font-weight: 700; text-wrap: balance; }
+.lt-tour-head p { font-size: 12.5px; color: var(--lt-muted); }
+.lt-tour-close { flex: none; width: 32px; height: 32px; border: 0; border-radius: 7px; background: var(--lt-soft); color: var(--lt-ink); font-size: 22px; line-height: 1; cursor: pointer; }
+
+.lt-tour-count { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--lt-muted); margin-bottom: 4px !important; }
+.lt-tour-step-title { font-size: 17px; font-weight: 650; margin-bottom: 6px !important; }
+.lt-tour-text { font-size: 13.5px; color: var(--lt-muted); min-height: 44px; }
+.lt-tour-body { margin-top: 14px; }
+.lt-tour-muted { font-size: 12.5px; color: var(--lt-muted); }
+.lt-tour-note { font-size: 12.5px; color: var(--lt-amber); }
+
+.lt-tour-progress { display: flex; gap: 6px; margin: 18px 0 16px; }
+.lt-tour-progress button { flex: 1; height: 6px; padding: 0; border: 0; border-radius: 999px; background: var(--lt-line); cursor: pointer; }
+.lt-tour-progress button.is-done { background: var(--lt-blue); }
+
+.lt-tour-nav { display: flex; justify-content: space-between; gap: 10px; }
+.lt-tour-btn { border: 1px solid var(--lt-line); background: var(--lt-paper); color: var(--lt-ink); border-radius: 8px; padding: 7px 16px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.lt-tour-btn:disabled { opacity: .45; cursor: not-allowed; }
+.lt-tour-btn-primary { background: var(--lt-blue); border-color: var(--lt-blue); color: var(--lt-on-blue); }
+.lt-tour-btn-small { padding: 5px 12px; font-size: 12.5px; margin-top: 8px; }
+.lt-tour-btn-block { display: block; width: 100%; margin-top: 10px; }
+
+.lt-tour-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.lt-tour-chips span { border: 1px solid var(--lt-line); background: var(--lt-soft); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+.lt-tour-chips-buttons span { border-radius: 7px; padding: 5px 12px; font-weight: 600; }
+
+.lt-tour-lead { border: 1px solid var(--lt-line); border-radius: 10px; padding: 13px 14px; display: grid; gap: 6px; background: var(--lt-paper); }
+.lt-tour-lead strong { font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+.lt-tour-lead p { font-size: 12.5px; color: var(--lt-muted); overflow-wrap: anywhere; }
+.lt-tour-lead-foot { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.lt-tour-tag { justify-self: start; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--lt-blue); }
+.lt-tour-urgent { color: var(--lt-amber); font-weight: 600; }
+
+.lt-tour-facts { display: grid; gap: 6px; margin: 0; border: 1px solid var(--lt-line); border-radius: 10px; padding: 12px 14px; }
+.lt-tour-facts div { display: grid; grid-template-columns: 70px 1fr; gap: 10px; font-size: 13px; }
+.lt-tour-facts dt { color: var(--lt-muted); }
+.lt-tour-facts dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.lt-tour-facts a { color: var(--lt-blue); }
+
+.lt-tour-wrike { border: 1px dashed var(--lt-blue); border-radius: 10px; padding: 13px 14px; background: var(--lt-soft); display: grid; gap: 6px; }
+.lt-tour-wrike-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lt-tour-demo { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 9px; background: var(--lt-paper); color: var(--lt-amber); border: 1px solid var(--lt-line); }
+.lt-tour-members { border: 1px solid var(--lt-line); border-radius: 8px; padding: 8px 10px; margin: 6px 0 0; display: grid; gap: 6px; max-height: 180px; overflow-y: auto; background: var(--lt-paper); }
+.lt-tour-members legend { font-size: 12px; font-weight: 600; padding: 0 4px; }
+.lt-tour-members label { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+.lt-tour-members label.is-off { opacity: .6; }
+.lt-tour-members small { display: block; font-size: 11.5px; color: var(--lt-muted); }
+.lt-tour-confirm { display: grid; gap: 4px; }
+.lt-tour-confirm-actions { display: flex; gap: 8px; margin-top: 8px; }
+.lt-tour-confirm-actions > * { flex: 1; }
+
+.lt-tour-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.lt-tour-stats div { border: 1px solid var(--lt-line); border-radius: 10px; padding: 10px; display: grid; gap: 2px; }
+.lt-tour-stats strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+.lt-tour-stats span { font-size: 12px; color: var(--lt-muted); line-height: 1.35; }
+
+@media (max-width: 480px) {
+  .lt-tour { padding: 18px 16px; }
+  .lt-tour-stats { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lt-tour-progress button { transition: background-color .2s; }
+}
