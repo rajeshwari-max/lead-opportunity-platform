@@ -4,7 +4,7 @@ import { OpportunityDocument } from "./OpportunityDocument";
 import { BrandLabel, BrandBars } from "./BrandLabel";
 import { SaveLeadButton, ReviewLeadButton, recordLeadActivity } from "./DashboardLeads";
 import { WrikeTaskAction } from "./WrikeTaskAction";
-import { ProductTourLink } from "./ProductTour";
+import { GuidedTour, TourButton, TourLink } from "./ProductTour";
 import { OpportunityIntelligenceSection } from "./OpportunityIntelligenceSection";
 import { useEffect, useRef, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
@@ -165,11 +165,11 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
   ];
   return <div className="user-dashboard">
     <header className="ud-header"><div className="ud-brand"><span className="ud-logo" aria-hidden="true">TC</span><div><strong>The Catalysts</strong><p>Funding &amp; opportunity intelligence</p></div></div>
-      <div className="ud-actions"><LeadTools isAdmin={!!adminViewUrl} name={user.name} readOnly={readOnly} />{adminViewUrl && <a className="ud-control" href={adminViewUrl}>Admin panel</a>}{workspaceViewUrl && <a className="ud-control" href={workspaceViewUrl}>My workspace</a>}<UserMenu {...user} isAdmin={!!adminViewUrl} authRequired={user.authRequired} />
+      <div className="ud-actions"><TourButton className="ud-control gt-launch" /><LeadTools isAdmin={!!adminViewUrl} name={user.name} readOnly={readOnly} />{adminViewUrl && <a className="ud-control" href={adminViewUrl}>Admin panel</a>}{workspaceViewUrl && <a className="ud-control" href={workspaceViewUrl}>My workspace</a>}<UserMenu {...user} isAdmin={!!adminViewUrl} authRequired={user.authRequired} />
         <a className="ud-control" href={api.exportUrl("csv", filters)} download><Download size={14} /> CSV</a><a className="ud-control" href={api.exportUrl("xlsx", filters)} download>Excel</a>
         <button className="ud-control" onClick={resetView} aria-label="Clear filters and refresh"><RefreshCw size={16} /></button><button className="ud-control" onClick={() => setDark(!dark)} aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}>{dark ? <Sun size={16} /> : <Moon size={16} />}</button></div>
     </header>
-    <main className="ud-main"><div className="ud-heading"><div><h1>Your opportunity dashboard</h1><p>Explore funding. Track deadlines. Find your next opportunity.</p><ProductTourLink lead={selected} /></div>{stats?.last_scraped && <span className="ud-updated">Updated {new Date(/Z$|[+-]\d{2}:\d{2}$/.test(stats.last_scraped) ? stats.last_scraped : stats.last_scraped + "Z").toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}</div>
+    <main className="ud-main"><div className="ud-heading"><div><h1>Your opportunity dashboard</h1><p>Explore funding. Track deadlines. Find your next opportunity.</p><TourLink /></div>{stats?.last_scraped && <span className="ud-updated">Updated {new Date(/Z$|[+-]\d{2}:\d{2}$/.test(stats.last_scraped) ? stats.last_scraped : stats.last_scraped + "Z").toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}</div>
       <div className="ud-stats" aria-busy={statsLoading}>{statCards.map(card => <button key={card.label} className={`ud-stat ud-${card.tone}`} aria-pressed={card.active} onClick={card.action}><span>{card.label}</span><strong>{statsLoading || card.value == null ? "…" : count(card.value)}</strong><small>{card.note}</small></button>)}</div>
       <div className="ud-charts" aria-busy={statsLoading}>
         <section className="ud-panel ud-chart"><h2>By category</h2><p className="ud-sub">Distribution in your current view</p><div className="ud-chart-content ud-category-content"><div className="ud-donut">
@@ -207,6 +207,7 @@ export function UserDashboard({ filters, onChange, onRefresh, onDataRefresh, dat
           <p role="status" className="ud-status">{message}</p></> : <p className="ud-sub">Select an opportunity to see its brief.</p>}</div></section><div className="ud-experts"><ExpertsCard readOnly={readOnly} isAdmin={false} /></div><section className="ud-signal"><h2>From discovery<br />to a decision.</h2><p>Select an opportunity to review its funding, eligibility and source details.</p><span>Discover → Review → Act</span></section></aside>
       </div>
     </main>
+    <GuidedTour />
     {wrikeDialog && <div className="ud-wrike-overlay">
       <div className="ud-wrike-dialog" role="dialog" aria-modal="true" aria-labelledby="ud-wrike-dialog-title">
         <div className="ud-wrike-dialog-head"><h2 id="ud-wrike-dialog-title">Add opportunity to Wrike</h2><button type="button" aria-label="Close Wrike dialog" onClick={() => setWrikeDialog(null)}>×</button></div>

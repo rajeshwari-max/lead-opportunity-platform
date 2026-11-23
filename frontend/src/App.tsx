@@ -10,7 +10,7 @@ import { LoginScreen } from "@/components/LoginScreen";
 import { UserMenu } from "@/components/UserMenu";
 import { UserDashboard } from "@/components/UserDashboard";
 import { PersonalWorkspace } from "@/components/PersonalWorkspace";
-import { ProductTourLink } from "@/components/ProductTour";
+import { TourLink } from "@/components/ProductTour";
 import { OpportunitiesTable } from "@/components/OpportunitiesTable";
 import { ReviewQueueCard } from "@/components/ReviewQueueCard";
 import { ScraperHealthCard } from "@/components/ScraperHealthCard";
@@ -170,7 +170,7 @@ export default function App() {
 
       <main className="mx-auto flex max-w-[1600px] flex-col gap-6 p-4 sm:p-6">
         <p role="status">{preferencesError}</p>
-        <div className="-mb-3"><ProductTourLink lead={data?.items[0]} /></div>
+        <div className="-mb-3"><TourLink href={`${viewUrl("user")}#tour`} /></div>
         <StatCards stats={stats} loading={statsLoading} filters={filters} onChange={setFilters} />
         <ChartsRow stats={stats} loading={statsLoading} filters={filters} onChange={setFilters} />
 

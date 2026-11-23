@@ -1,252 +1,340 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { api } from "@/lib/api";
-import { formatFundingAmount } from "@/lib/money";
-import { formatDate } from "@/lib/utils";
-import { emptyFilters, type Opportunity, type WrikeAssignee } from "@/lib/types";
+import { ArrowLeft, ArrowRight, Compass, MousePointerClick, Send, Sparkles, X } from "lucide-react";
+import { TOUR_CHAPTERS, TOUR_STEPS, closeWrikeDialog, type TourStep } from "./tourSteps";
 import "./product-tour.css";
 
 /**
- * "How to use this platform": a short product tour, built like the CSR
- * dashboard's guide (Step N of M, progress bars, Back / Next / Done, Esc).
+ * Animated guided tour of the user dashboard, built like the CSR dashboard's
+ * tour: a chooser, then a moving pointer that glides to each control, clicks
+ * where needed, and a spotlight + explanation card on the real page.
  *
- * It is a live demo on ONE real lead — the one open in the brief, or else the
- * first lead in the current list — so people see their own data, not a
- * made-up example.
+ * Mount <GuidedTour /> once (the user dashboard does). Anything can start it
+ * with <TourButton /> or <TourLink />, or with a #tour link, for example
+ * https://leads.catalysts.org/#tour. The admin dashboard links to
+ * ?view=user#tour.
  *
- * The Wrike step is a practice copy of the real Wrike panel. It never calls
- * the create-task endpoint: the final button is disabled and says so. The
- * only Wrike request it makes is the same read-only member list the real
- * panel loads (GET /wrike/assignees), and only when that step is reached.
- *
- * Open it from the link, or with a #tour link (e.g. https://leads.catalysts.org/#tour)
- * to send to someone new.
+ * Safety: while the tour runs a transparent shield stops the visitor's own
+ * clicks, and the script (tourSteps.ts) never clicks "Yes, create task",
+ * Save lead or Mark reviewed, so nothing is sent to Wrike or saved.
  */
 
-type Assignees = { state: "idle" | "loading" | "ready" | "error"; items: WrikeAssignee[] };
+const OPEN_EVENT = "lop:open-tour";
+const SEEN_KEY = "lop.tour.seen.v1";
+const PAD = 8;
+const CARD_W = 370;
 
-const split = (value: string | undefined) => (value || "").split(",").map(v => v.trim()).filter(Boolean);
+type Mode = "full" | "wrike";
+interface Box { top: number; left: number; width: number; height: number }
 
-function daysLeftLabel(value: string | null) {
-  if (!value) return "No fixed closing date";
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const days = Math.round((new Date(value.slice(0, 10) + "T00:00:00").getTime() - today.getTime()) / 86400000);
-  return days < 0 ? "Closed" : days === 0 ? "Closes today" : days === 1 ? "Closes tomorrow" : `${days} days left`;
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+function resolveTarget(target: TourStep["target"]): Element | null {
+  if (!target) return null;
+  try { return typeof target === "function" ? target() : document.querySelector(target); } catch { return null; }
 }
 
-export function ProductTourLink({ lead, className, label }: { lead?: Opportunity | null; className?: string; label?: string }) {
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (window.location.hash !== "#tour") return;
-    history.replaceState({}, "", `${window.location.pathname}${window.location.search}`);
-    setOpen(true);
-  }, []);
-  return <>
-    <button type="button" className={className ?? "lt-tour-link"} onClick={() => setOpen(true)}>
-      {label ?? <>How to use this platform · <span>Take a tour</span></>}
-    </button>
-    {/* Portal: the admin header uses backdrop-filter, which would otherwise
-        trap a position:fixed overlay inside the header bar. */}
-    {open && createPortal(<ProductTour lead={lead ?? null} onClose={() => setOpen(false)} />, document.body)}
-  </>;
+/** Wait until smooth scrolling has stopped moving the element. */
+async function waitStill(element: Element, timeout = 1500) {
+  let last = element.getBoundingClientRect();
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    await sleep(90);
+    const now = element.getBoundingClientRect();
+    if (Math.abs(now.top - last.top) < 1 && Math.abs(now.left - last.left) < 1) return;
+    last = now;
+  }
 }
 
-export function ProductTour({ lead: given, onClose }: { lead: Opportunity | null; onClose: () => void }) {
-  const [step, setStep] = useState(0);
-  const [lead, setLead] = useState<Opportunity | null>(given);
-  const [assignees, setAssignees] = useState<Assignees>({ state: "idle", items: [] });
-  const panel = useRef<HTMLDivElement>(null);
+async function waitFor(find: () => Element | null, timeout = 5000): Promise<Element | null> {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    const element = find();
+    if (element) {
+      const r = element.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return element;
+    }
+    await sleep(120);
+  }
+  return null;
+}
 
-  // No lead on screen (e.g. still loading): fetch the first live one.
+export function openTour() { window.dispatchEvent(new Event(OPEN_EVENT)); }
+
+export function TourButton({ className }: { className?: string }) {
+  return <button type="button" className={className ?? "gt-launch"} onClick={openTour}>
+    <Compass size={14} aria-hidden="true" /> Take a tour
+  </button>;
+}
+
+/** "How to use this platform · Take a tour". With href it is a plain link. */
+export function TourLink({ href }: { href?: string }) {
+  const inner = <>How to use this platform · <span>Take a tour</span></>;
+  return href
+    ? <a className="gt-link" href={href}>{inner}</a>
+    : <button type="button" className="gt-link" onClick={openTour}>{inner}</button>;
+}
+
+export function GuidedTour() {
+  const [chooserOpen, setChooserOpen] = useState(false);
+  const [steps, setSteps] = useState<TourStep[] | null>(null);
+  const [index, setIndex] = useState(0);
+  const [box, setBox] = useState<Box | null>(null);
+  const [found, setFound] = useState(true);
+  const [cursor, setCursor] = useState({ x: -80, y: -80, visible: false, clicking: false });
+  const [ready, setReady] = useState(false);
+  const [cardH, setCardH] = useState(220);
+  const runId = useRef(0);
+  const targetRef = useRef<Element | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Open from the buttons, from a #tour link, and once on a first visit.
   useEffect(() => {
-    if (given) { setLead(given); return; }
-    let cancelled = false;
-    api.opportunities({ ...emptyFilters, page_size: 1 })
-      .then(page => { if (!cancelled) setLead(page.items[0] ?? null); })
-      .catch(() => { /* the tour still works with generic wording */ });
-    return () => { cancelled = true; };
-  }, [given]);
-
-  const asked = useRef(false);
-  const loadAssignees = useCallback(() => {
-    if (asked.current) return;
-    asked.current = true;
-    setAssignees({ state: "loading", items: [] });
-    api.wrikeAssignees()
-      .then(items => setAssignees({ state: "ready", items }))
-      .catch(() => setAssignees({ state: "error", items: [] }));
+    const open = () => setChooserOpen(true);
+    window.addEventListener(OPEN_EVENT, open);
+    let timer = 0;
+    if (window.location.hash === "#tour") {
+      history.replaceState({}, "", `${window.location.pathname}${window.location.search}`);
+      timer = window.setTimeout(open, 600);
+    } else {
+      try {
+        if (!window.localStorage.getItem(SEEN_KEY)) {
+          window.localStorage.setItem(SEEN_KEY, "1");
+          timer = window.setTimeout(open, 1500);
+        }
+      } catch { /* storage blocked: no automatic offer */ }
+    }
+    return () => { window.removeEventListener(OPEN_EVENT, open); clearTimeout(timer); };
   }, []);
 
-  const steps = buildSteps(lead, assignees);
-  const last = step === steps.length - 1;
-  const go = useCallback((to: number) => setStep(Math.max(0, Math.min(steps.length - 1, to))), [steps.length]);
+  const startTour = useCallback((mode: Mode) => {
+    const list = mode === "wrike"
+      ? TOUR_STEPS.filter(s => s.chapter === "wrike" || s.chapter === "finish" || s.id === "open-lead")
+      : TOUR_STEPS;
+    setChooserOpen(false);
+    setReady(false);
+    setIndex(0);
+    setSteps(list);
+  }, []);
 
-  useEffect(() => { if (steps[step].needsAssignees) loadAssignees(); }, [step, steps, loadAssignees]);
-  useEffect(() => { panel.current?.focus(); }, []);
+  const endTour = useCallback(() => {
+    runId.current += 1;
+    setSteps(null);
+    setBox(null);
+    setReady(false);
+    setCursor(c => ({ ...c, visible: false }));
+    closeWrikeDialog();
+  }, []);
+
+  const measure = useCallback(() => {
+    const element = targetRef.current;
+    if (!element || !element.isConnected) { setBox(null); return; }
+    const r = element.getBoundingClientRect();
+    const next = { top: r.top - PAD, left: r.left - PAD, width: r.width + PAD * 2, height: r.height + PAD * 2 };
+    setBox(prev => prev && Math.abs(prev.top - next.top) < 0.5 && Math.abs(prev.left - next.left) < 0.5
+      && Math.abs(prev.width - next.width) < 0.5 && Math.abs(prev.height - next.height) < 0.5 ? prev : next);
+  }, []);
+
+  // Run the current step: prepare, find, scroll, glide the pointer, click.
   useEffect(() => {
+    if (!steps) return;
+    const step = steps[index];
+    if (!step) return;
+    const id = ++runId.current;
+    const alive = () => runId.current === id;
+    setReady(false);
+    (async () => {
+      if (step.before) {
+        try { await step.before(); } catch { /* show the step without the prep */ }
+        await sleep(220);
+        if (!alive()) return;
+      }
+      const element = step.target ? await waitFor(() => resolveTarget(step.target), 3500) : null;
+      if (!alive()) return;
+      targetRef.current = element;
+      setFound(!step.target || !!element);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: step.block ?? "center", inline: "nearest" });
+        await sleep(200);
+        await waitStill(element);
+        if (!alive()) return;
+        measure();
+      } else setBox(null);
+
+      const clickEl = step.click ? await waitFor(() => resolveTarget(step.click), 2500) : element;
+      if (!alive()) return;
+      if (clickEl) {
+        if (clickEl !== element) {
+          clickEl.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+          await waitStill(clickEl);
+          if (!alive()) return;
+        }
+        const r = clickEl.getBoundingClientRect();
+        const x = r.width > 320 ? r.left + 48 : r.left + r.width / 2;
+        const y = r.height > 160 ? r.top + 40 : r.top + r.height / 2;
+        setCursor({ x, y, visible: true, clicking: false });
+        await sleep(820);
+        if (!alive()) return;
+        if (step.click) {
+          setCursor(c => ({ ...c, clicking: true }));
+          await sleep(180);
+          if (step.action) step.action(); else (clickEl as HTMLElement).click();
+          await sleep(260);
+          setCursor(c => ({ ...c, clicking: false }));
+          await sleep(step.settle ?? 500);
+          if (!alive()) return;
+          const after = step.afterClick ?? step.target;
+          if (after) {
+            const again = await waitFor(() => resolveTarget(after), 2500);
+            if (!alive()) return;
+            targetRef.current = again;
+            setFound(!!again);
+            measure();
+          }
+        }
+      } else setCursor(c => ({ ...c, visible: false }));
+      setReady(true);
+    })();
+  }, [steps, index, measure]);
+
+  // Keep the spotlight glued to its element while the page moves.
+  useEffect(() => {
+    if (!steps) return;
+    let timer = 0;
+    const loop = () => { measure(); timer = window.setTimeout(loop, 120); };
+    loop();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [steps, measure]);
+
+  useEffect(() => {
+    const node = cardRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      const h = node.getBoundingClientRect().height;
+      setCardH(prev => (Math.abs(prev - h) > 1 ? h : prev));
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [steps]);
+
+  const next = useCallback(() => {
+    if (!steps) return;
+    // ready goes false in the same render as the index, so Next cannot be
+    // pressed again before the new step has finished its demo.
+    if (index >= steps.length - 1) endTour(); else { setReady(false); setIndex(i => i + 1); }
+  }, [steps, index, endTour]);
+  const back = useCallback(() => { setReady(false); setIndex(i => Math.max(0, i - 1)); }, []);
+
+  useEffect(() => {
+    if (!steps && !chooserOpen) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-      const typing = event.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);
-      if (typing) return;
-      if (event.key === "ArrowRight") go(step + 1);
-      if (event.key === "ArrowLeft") go(step - 1);
+      if (event.key === "Escape") { if (steps) endTour(); else setChooserOpen(false); }
+      else if (steps && (event.key === "ArrowRight" || event.key === "Enter")) { event.preventDefault(); next(); }
+      else if (steps && event.key === "ArrowLeft") { event.preventDefault(); back(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, go, step]);
+  }, [steps, chooserOpen, next, back, endTour]);
 
-  const current = steps[step];
-  return <div className="lt-tour-overlay" onClick={onClose}>
-    <div className="lt-tour" ref={panel} tabIndex={-1} role="dialog" aria-modal="true"
-         aria-labelledby="lt-tour-title" onClick={event => event.stopPropagation()}>
-      <div className="lt-tour-head">
-        <div>
-          <h2 id="lt-tour-title">Welcome to the Lead Scanning Platform</h2>
-          <p>Product tour · one real lead, from finding it to pushing it to Wrike.</p>
+  const step = steps?.[index];
+  const cardPos = useMemo(() => {
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const w = Math.min(CARD_W, vw - 24), h = cardH;
+    if (!box || !step?.target) return { left: (vw - w) / 2, top: Math.max(24, (vh - h) / 2), w };
+    const gap = 16;
+    const fits = {
+      bottom: box.top + box.height + gap + h < vh - 12,
+      top: box.top - gap - h > 12,
+      right: box.left + box.width + gap + w < vw - 12,
+      left: box.left - gap - w > 12,
+    };
+    const order = step.placement && step.placement !== "auto"
+      ? [step.placement, "bottom", "top", "right", "left"] : ["bottom", "top", "right", "left"];
+    const side = order.find(s => fits[s as keyof typeof fits]) ?? "corner";
+    let left: number, top: number;
+    if (side === "bottom" || side === "top") {
+      left = box.left + box.width / 2 - w / 2;
+      top = side === "bottom" ? box.top + box.height + gap : box.top - gap - h;
+    } else if (side === "right" || side === "left") {
+      top = box.top + box.height / 2 - h / 2;
+      left = side === "right" ? box.left + box.width + gap : box.left - gap - w;
+    } else { left = vw - w - 20; top = vh - h - 20; }
+    return { left: Math.max(12, Math.min(left, vw - w - 12)), top: Math.max(12, Math.min(top, vh - h - 12)), w };
+  }, [box, step, cardH]);
+
+  if (!steps && !chooserOpen) return null;
+  const chapterSteps = steps && step ? steps.filter(s => s.chapter === step.chapter) : [];
+  const chapterPos = step ? chapterSteps.indexOf(step) + 1 : 0;
+  const body = step ? (!found && step.fallback ? step.fallback : typeof step.body === "function" ? step.body() : step.body) : "";
+  const last = !!steps && index >= steps.length - 1;
+
+  return createPortal(<div className="gt-root" role="dialog" aria-modal="true" aria-label="Guided tour">
+    {chooserOpen && !steps && <Chooser onClose={() => setChooserOpen(false)} onStart={startTour} />}
+    {steps && step && <>
+      {/* Click shield: the tour drives the page, the visitor reads. */}
+      <div className="gt-shield" />
+      {box && step.target ? <div className="gt-spotlight" style={{ top: box.top, left: box.left, width: box.width, height: box.height }} />
+        : <div className="gt-dim" />}
+      <div className={`gt-cursor${cursor.visible ? " show" : ""}${cursor.clicking ? " clicking" : ""}`}
+           style={{ transform: `translate(${cursor.x}px, ${cursor.y}px)` }} aria-hidden="true">
+        <svg width="26" height="30" viewBox="0 0 26 30">
+          <path d="M2 2 L2 24 L8 18.5 L12.5 28 L16.5 26.2 L12 17 L20.5 17 Z" fill="var(--gt-accent)" stroke="#fff" strokeWidth="2" strokeLinejoin="round" />
+        </svg>
+        <span className="gt-ripple" />
+      </div>
+      <div ref={cardRef} className={`gt-card${ready ? " ready" : ""}`} style={{ left: cardPos.left, top: cardPos.top, width: cardPos.w }} aria-live="polite">
+        <div className="gt-card-top">
+          <span className="gt-chapter">{TOUR_CHAPTERS[step.chapter].label}{chapterSteps.length > 1 ? ` · ${chapterPos} of ${chapterSteps.length}` : ""}</span>
+          <button type="button" className="gt-x" onClick={endTour} aria-label="Close tour"><X size={15} /></button>
         </div>
-        <button type="button" className="lt-tour-close" onClick={onClose} aria-label="Close tour">×</button>
+        <div className="gt-title">{step.title}</div>
+        <div className="gt-body">{body}</div>
+        {step.watch && found && <div className="gt-watch"><span className="gt-pulse" />{step.watch}</div>}
+        <div className="gt-progress"><span style={{ width: `${((index + 1) / steps.length) * 100}%` }} /></div>
+        <div className="gt-actions">
+          <button type="button" className="gt-skip" onClick={endTour}>{last ? "Close" : "Skip tour"}</button>
+          <span className="gt-count">{index + 1} / {steps.length}</span>
+          <button type="button" className="gt-btn ghost" onClick={back} disabled={index === 0} aria-label="Back"><ArrowLeft size={14} /></button>
+          <button type="button" className="gt-btn" onClick={next} disabled={!ready && !last}>
+            {last ? "Finish" : "Next"}{!last && <ArrowRight size={14} />}
+          </button>
+        </div>
       </div>
-      <p className="lt-tour-count">Step {step + 1} of {steps.length}</p>
-      <h3 className="lt-tour-step-title">{current.title}</h3>
-      <p className="lt-tour-text">{current.text}</p>
-      {current.body && <div className="lt-tour-body">{current.body}</div>}
-      <div className="lt-tour-progress">
-        {steps.map((item, index) => <button key={item.title} type="button"
-          aria-label={`Step ${index + 1}: ${item.title}`} aria-current={index === step ? "step" : undefined}
-          className={index <= step ? "is-done" : ""} onClick={() => go(index)} />)}
-      </div>
-      <div className="lt-tour-nav">
-        <button type="button" className="lt-tour-btn" onClick={() => go(step - 1)} disabled={step === 0}>Back</button>
-        <button type="button" className="lt-tour-btn lt-tour-btn-primary" onClick={() => (last ? onClose() : go(step + 1))}>
-          {last ? "Done" : "Next"}
-        </button>
-      </div>
-    </div>
-  </div>;
+    </>}
+  </div>, document.body);
 }
 
-type Step = { title: string; text: string; body?: React.ReactNode; needsAssignees?: boolean };
-
-function buildSteps(lead: Opportunity | null, assignees: Assignees): Step[] {
-  const title = lead?.title ?? "the lead";
-  const brands = split(lead?.brands);
-  const brand = brands.find(b => b !== "CMS") ?? brands[0];
-  return [
-    {
-      title: "Find leads",
-      text: "Search by keyword, click a stat card (Grants, RFPs, Tenders, New today) or use the filters on the left: brand, CMS vertical, region, country and category. Every lead in the list is open and its closing date has not passed.",
-      body: lead && <div className="lt-tour-chips" aria-label="Example filters">
-        <span>Category: {lead.category}</span>
-        {brand && <span>Brand: {brand}</span>}
-        {lead.country && <span>Country: {lead.country}</span>}
-      </div>,
-    },
-    {
-      title: "Open a lead",
-      text: "Click a lead's title or View. Its brief opens on the right. This tour uses the lead below.",
-      body: <LeadCard lead={lead} />,
-    },
-    {
-      title: "Read the brief",
-      text: "The brief shows the closing date, amount, brands and verticals, and Platform intelligence (how well it fits us and who could work on it). Open original source takes you to the funder's own page to check the details.",
-      body: lead && <dl className="lt-tour-facts">
-        <div><dt>Closes</dt><dd>{lead.deadline ? formatDate(lead.deadline) : "Ongoing"} · {daysLeftLabel(lead.deadline)}</dd></div>
-        <div><dt>Source</dt><dd>{lead.source_website || "—"}</dd></div>
-        <div><dt>Amount</dt><dd>{formatFundingAmount(lead.funding_amount) || "Not stated"}</dd></div>
-        <div><dt>Labels</dt><dd>{[...split(lead.brands), ...split(lead.verticals)].join(" · ") || "—"}</dd></div>
-        {(lead.link || lead.opportunity_url) && <div><dt>Link</dt><dd><a href={lead.link || lead.opportunity_url} target="_blank" rel="noreferrer">Open original source ↗</a></dd></div>}
-      </dl>,
-    },
-    {
-      title: "Save and track it",
-      text: "In the brief: Save lead keeps it in My leads, Mark reviewed records that you have looked at it, and Track in my workspace follows it through your stages: Saved, Preparing, Applied, Shortlisted, then Accepted or Unsuccessful.",
-      body: <div className="lt-tour-chips lt-tour-chips-buttons" aria-hidden="true"><span>Save lead</span><span>Mark reviewed</span><span>Track in my workspace</span></div>,
-    },
-    {
-      title: "Where to push it to Wrike",
-      text: "On the user dashboard there are two ways in, and both open the same Wrike panel: the Wrike task button in the lead's row of the table, or the Wrike task section in the lead's brief. Try the practice panel below. Nothing in this tour is sent to Wrike.",
-      body: <WrikePractice title={title} assignees={assignees} />,
-      needsAssignees: true,
-    },
-    {
-      title: "Assignee: add one or leave it empty",
-      text: "Assigning is optional. Choose Add to folder without assignee and the task goes into the team's Wrike folder unassigned; anyone can assign it later in Wrike. Or tick members first. Only people registered on this platform appear in the list, and a person can be ticked only when their platform email matches exactly one active Wrike account. To make someone assignable, an admin adds them under Team using the email they use in Wrike.",
-      body: <AssigneeSummary assignees={assignees} />,
-      needsAssignees: true,
-    },
-    {
-      title: "Daily emails and reminders",
-      text: "Each morning, new leads that match what the admin set for you (brands, verticals, regions, countries) arrive by email, and reminders follow before closing dates. The Add to Wrike button in an email opens the same Wrike panel here, which still asks before creating anything.",
-    },
+function Chooser({ onClose, onStart }: { onClose: () => void; onStart: (mode: Mode) => void }) {
+  const wrikeCount = TOUR_STEPS.filter(s => s.chapter === "wrike" || s.chapter === "finish" || s.id === "open-lead").length;
+  const options: { mode: Mode; icon: ReactNode; title: string; text: string; meta: string }[] = [
+    { mode: "full", icon: <Compass size={20} />, title: "Full tour",
+      text: "Search, filters, one real lead from start to finish, and pushing it to Wrike.",
+      meta: `${TOUR_STEPS.length} steps · about 3 minutes` },
+    { mode: "wrike", icon: <Send size={20} />, title: "How to push a lead to Wrike",
+      text: "Where the Wrike panel is, adding an assignee or leaving it empty, and the final check.",
+      meta: `${wrikeCount} steps · about 1 minute` },
   ];
-}
-
-function LeadCard({ lead }: { lead: Opportunity | null }) {
-  if (!lead) return <p className="lt-tour-muted">Loading a lead from the platform…</p>;
-  const labels = [...split(lead.brands), ...split(lead.verticals)].slice(0, 4);
-  return <article className="lt-tour-lead">
-    <span className="lt-tour-tag">{lead.category}</span>
-    <strong>{lead.title}</strong>
-    <p>{[lead.organization, lead.source_website, lead.country].filter(Boolean).join(" · ")}</p>
-    <div className="lt-tour-lead-foot">
-      <span>{lead.deadline ? `Closes ${formatDate(lead.deadline)}` : "Ongoing"}</span>
-      <span className="lt-tour-urgent">{daysLeftLabel(lead.deadline)}</span>
-    </div>
-    {labels.length > 0 && <div className="lt-tour-chips">{labels.map(l => <span key={l}>{l}</span>)}</div>}
-  </article>;
-}
-
-/** A practice copy of WrikeTaskAction. It has no create call at all. */
-function WrikePractice({ title, assignees }: { title: string; assignees: Assignees }) {
-  const [showMembers, setShowMembers] = useState(false);
-  const [picked, setPicked] = useState<number[]>([]);
-  const [reviewing, setReviewing] = useState(false);
-  const toggle = (id: number) => setPicked(p => p.includes(id) ? p.filter(v => v !== id) : [...p, id]);
-  const names = assignees.items.filter(m => picked.includes(m.id)).map(m => m.name);
-
-  return <section className="lt-tour-wrike" aria-label="Practice Wrike panel">
-    <div className="lt-tour-wrike-head"><strong>Wrike task</strong><span className="lt-tour-demo">Practice · nothing is sent</span></div>
-    {!reviewing ? <>
-      <p className="lt-tour-muted">Destination: the team's Wrike folder (set by the admin)</p>
-      {!picked.length && <p className="lt-tour-note">No assignee will be added. You can assign the task later in Wrike.</p>}
-      <button type="button" className="lt-tour-btn lt-tour-btn-small" aria-expanded={showMembers}
-              onClick={() => { setShowMembers(s => !s); if (showMembers) setPicked([]); }}>
-        {showMembers ? "Continue without assigning" : "Assign members (optional)"}
-      </button>
-      {showMembers && <fieldset className="lt-tour-members">
-        <legend>Choose members</legend>
-        {assignees.state === "loading" && <p className="lt-tour-muted">Loading members registered on the platform…</p>}
-        {assignees.state === "error" && <p className="lt-tour-muted">The member list could not be loaded here. The real panel shows it when you open Wrike task on a lead.</p>}
-        {assignees.state === "ready" && !assignees.items.length && <p className="lt-tour-muted">No active team members are registered on the platform yet.</p>}
-        {assignees.items.map(m => <label key={m.id} className={m.available ? "" : "is-off"}>
-          <input type="checkbox" disabled={!m.available} checked={picked.includes(m.id)} onChange={() => toggle(m.id)} />
-          <span>{m.name}<small>{m.available ? "Can be assigned" : "No matching Wrike account"}</small></span>
-        </label>)}
-      </fieldset>}
-      <button type="button" className="lt-tour-btn lt-tour-btn-primary lt-tour-btn-block" onClick={() => setReviewing(true)}>
-        {picked.length ? "Review assigned task" : "Add to folder without assignee"}
-      </button>
-    </> : <div className="lt-tour-confirm">
-      <p><strong>Create this Wrike task?</strong></p>
-      <p className="lt-tour-muted">Opportunity: {title}</p>
-      <p className="lt-tour-muted">Assignees: {names.length ? names.join(", ") : "None — add to folder unassigned"}</p>
-      <p className="lt-tour-note">In the real panel, choosing Yes creates one shared task for this lead. Here the button is switched off.</p>
-      <div className="lt-tour-confirm-actions">
-        <button type="button" className="lt-tour-btn" onClick={() => setReviewing(false)}>Go back</button>
-        <button type="button" className="lt-tour-btn lt-tour-btn-primary" disabled title="Tour only: nothing is sent to Wrike">Yes, create task</button>
+  return <div className="gt-chooser-wrap" onClick={onClose}>
+    <div className="gt-chooser" onClick={event => event.stopPropagation()}>
+      <button type="button" className="gt-x gt-chooser-x" onClick={onClose} aria-label="Close"><X size={16} /></button>
+      <div className="gt-badge"><Sparkles size={14} /> Guided tour</div>
+      <h2 className="gt-chooser-title">Welcome to the Lead Scanning Platform</h2>
+      <p className="gt-chooser-text">A moving pointer shows you where to click and opens things for you on one real lead.
+        Nothing is saved, sent or pushed to Wrike during the tour.</p>
+      <div className="gt-options">
+        {options.map(o => <button key={o.mode} type="button" className="gt-option" onClick={() => onStart(o.mode)}>
+          <span className="gt-option-icon">{o.icon}</span>
+          <span className="gt-option-text"><strong>{o.title}</strong><span>{o.text}</span><em>{o.meta}</em></span>
+          <ArrowRight size={16} className="gt-option-go" />
+        </button>)}
       </div>
-    </div>}
-  </section>;
-}
-
-function AssigneeSummary({ assignees }: { assignees: Assignees }) {
-  if (assignees.state === "loading" || assignees.state === "idle") return <p className="lt-tour-muted">Counting members registered on the platform…</p>;
-  if (assignees.state === "error") return <p className="lt-tour-muted">The member count could not be loaded here. You can still add tasks without an assignee.</p>;
-  const ready = assignees.items.filter(m => m.available).length;
-  return <div className="lt-tour-stats">
-    <div><strong>{assignees.items.length}</strong><span>registered on the platform</span></div>
-    <div><strong>{ready}</strong><span>can be assigned in Wrike now</span></div>
-    <div><strong>{assignees.items.length - ready}</strong><span>need a matching Wrike email</span></div>
+      <div className="gt-keys"><MousePointerClick size={13} /> Use <kbd>→</kbd> / <kbd>←</kbd> to move, <kbd>Esc</kbd> to stop at any time</div>
+    </div>
   </div>;
 }

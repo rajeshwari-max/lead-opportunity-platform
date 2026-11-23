@@ -5,31 +5,38 @@ what was changed, **why**, and how to verify it.
 
 ---
 
-## 2026-11-23 — Product tour ("How to use this platform · Take a tour")
+## 2026-11-23 — Animated guided tour ("Take a tour")
 
-- New `frontend/src/components/ProductTour.tsx` (+ `product-tour.css`): a
-  7-step guided tour in the same style as the CSR dashboard's guide (Step N of
-  M, progress bars, Back / Next / Done, Esc or click outside to close, arrow
-  keys to move). Linked under the heading of the user dashboard and above the
-  stat cards on the admin dashboard. A `#tour` link (for example
-  https://leads.catalysts.org/#tour) opens it straight away, for new users.
-- Dynamic: it walks through ONE real lead, the one open in the brief (or the
-  first in the list), showing its title, source, closing date, amount and
-  brands/verticals.
-- Steps: find leads, open a lead, read the brief, save and track, where to
-  push it to Wrike (Wrike task button in the row, or the Wrike task section
-  in the brief), assignee optional, daily emails and reminders.
-- The Wrike step is a practice copy of the real panel and sends nothing: its
-  "Yes, create task" button is always disabled and the component has no
-  create call. The only request it makes is the read-only member list
-  (`GET /api/wrike/assignees`), to show how many people are registered on the
-  platform and how many can be assigned (their platform email matches exactly
-  one active Wrike account). Assigning stays optional.
-- Why: requested so new users can learn the flow end to end without creating
-  real Wrike tasks.
-- Verify: `node frontend/tests/product-tour.mjs` (checks there is no create
-  call and the button is disabled); `npm run build`; open the dashboard,
-  click Take a tour, go to step 5 and try the practice panel.
+- Replaces the step-by-step modal added earlier the same day with an animated
+  guided tour like the CSR dashboard's: a moving pointer glides to each
+  control on the real page, clicks where needed, and a spotlight plus an
+  explanation card say what to do. Files: `frontend/src/components/ProductTour.tsx`
+  (engine, chooser, launchers), `tourSteps.ts` (the script),
+  `product-tour.css`.
+- Chooser: "Full tour" (18 steps: numbers, search, filters, the list, one real
+  lead from brief to Save / workspace, then Wrike) or "How to push a lead to
+  Wrike" (9 steps). Arrow keys move, Esc stops. Offered once on a first visit;
+  any time from "Take a tour" in the user dashboard header, the "How to use
+  this platform" link under the heading, the same link on the admin dashboard
+  (opens the user dashboard with the tour), or a `#tour` link such as
+  https://leads.catalysts.org/#tour.
+- Dynamic: it follows ONE real lead, the one open in the brief, and quotes its
+  title. In the Wrike chapter the pointer opens that lead's real Wrike panel
+  (both ways in: the Wrike task section in the brief and the Wrike task button
+  in the row), opens "Assign members (optional)" to show the platform's
+  registered members (greyed out = no Wrike account with the same email),
+  shows "Add to folder without assignee", opens the final check, and points at
+  "Yes, create task" without clicking it.
+- Safety: the tour never clicks "Yes, create task", Save lead or Mark
+  reviewed and makes no API calls of its own; a transparent shield blocks the
+  visitor's clicks while it runs; the Wrike panel it opened is closed at the
+  end. If Wrike is not connected, the Wrike steps still show, centred, with a
+  short explanation.
+- Why: requested so new users see where to go and what to click, end to end,
+  without creating real Wrike tasks.
+- Verify: `node frontend/tests/product-tour.mjs` (no API calls, the push step
+  has no click, nothing that writes is clicked); `npm run build`; open the
+  dashboard, click Take a tour, choose "How to push a lead to Wrike".
 
 ---
 
