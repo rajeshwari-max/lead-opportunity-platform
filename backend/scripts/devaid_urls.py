@@ -51,6 +51,18 @@ EXPECTED_BRAND = [
     "&sectors=100,3,5,9,8,29,30,85,87,43,22&statuses=3",
     "https://www.developmentaid.org/grants/search?languages=92"
     "&sectors=100,7,3,95,5,6,11,54,8,78,80,30,44,87,85,22,34,48,27&statuses=3",
+    # The same four brand searches WITHOUT their location filter
+    # (2026-11-22, owner: brands are matched worldwide, not only India).
+    # The location-filtered copies above stay, so the India results are
+    # still walked to full depth if a worldwide search is capped.
+    "https://www.developmentaid.org/grants/search?applicantTypes=1&languages=92"
+    "&sectors=9,22,5,3,104,7,11,80,30,48,27&statuses=3",
+    "https://www.developmentaid.org/grants/search?applicantTypes=1&languages=92"
+    "&sectors=100,7,5,80,30,44,87,22,85&statuses=3",
+    "https://www.developmentaid.org/grants/search?applicantTypes=1&languages=92"
+    "&sectors=11,7,5,8,9,30,22,48,27&statuses=3",
+    "https://www.developmentaid.org/grants/search?applicantTypes=1"
+    "&sectors=100,3,5,9,8,29,30,85,87,43,22&statuses=3",
     # Setu, Community Action Collab, Upfront — keyword searches (2026-11-02).
     'https://www.developmentaid.org/grants/search?sort=relevance.desc&searc'
     'hedText=social%20protection%20%7C%20social%20security%20%7C%20welfare%'

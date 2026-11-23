@@ -24,6 +24,7 @@ from app.scrapers.nih import NIHOpportunitiesScraper
 from app.scrapers.phf import PHFScraper
 from app.scrapers.undp import UNDPProcurementScraper
 from app.scrapers.unpp import UNPartnerPortalScraper
+from app.scrapers.ungm import UNGMScraper
 from app.scrapers.worldbank import WorldBankScraper
 # Optional public-web discovery source. The class can always be imported for
 # tests, but its module registers it only when the feature switch and API key
@@ -47,7 +48,7 @@ __all__ = [
     "IndevJobsScraper", "PHFScraper", "PackardScraper", "OpenSocietyScraper",
     "BlueActionFundScraper", "UNPartnerPortalScraper", "WorldBankScraper",
     "UNDPProcurementScraper",
-    "NIHOpportunitiesScraper", "EuropeanUnionScraper",
+    "NIHOpportunitiesScraper", "EuropeanUnionScraper", "UNGMScraper",
     "WebDiscoveryScraper",
     "generic_listing",
 ]

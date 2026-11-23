@@ -5,6 +5,42 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-23 — New source: UNGM (UN Global Marketplace)
+
+- `scrapers/ungm.py`: every open procurement notice on the public list at
+  https://www.ungm.org/Public/Notice (UNDP, UNICEF, UNOPS, WHO, FAO, ILO, IOM,
+  UNHCR, UN Women, UNESCO and other UN agencies): RFP, RFQ, ITB, EOI,
+  individual consultants and calls for proposals. No login: notices are
+  public and robots.txt allows /Public/Notice. Documents are not downloaded;
+  the notice link is stored.
+- The list loads 15 notices at a time as a visitor scrolls. The scraper opens
+  it in a browser and scrolls until nothing more loads (cap
+  `LOP_UNGM_MAX_NOTICES`, 3000), then reads title, deadline, agency, notice
+  type, reference and country from each row. No detail pages are visited.
+- UNDP notices are also on UNDP's own board; the cross-source check skips the
+  copy. Runs in the nightly scrape like any other source. Contract in
+  `source_manifest.py`; tests `tests/test_ungm.py` with
+  `tests/fixtures/ungm_notices.html` (live markup, 2026-11-23).
+
+---
+
+## 2026-11-22 — Brand coverage per source; DevelopmentAid brand searches worldwide
+
+- `scripts/brand_source_report.py` (read-only): one row per source website
+  with its live leads, CMS leads and leads for each brand (Swasti, Vrutti,
+  Green Foundation, Upfront, Setu, CAC); `--all` for every stored lead,
+  `--csv <file>` to save it. Lists the sources that give leads but none for
+  any brand.
+- Four of the DevelopmentAid brand searches carried a location filter
+  (`locations=5`, `locations=147`). Worldwide copies of the same four are now
+  walked as well (owner: brands are matched worldwide, not only India); the
+  filtered copies stay so their results are still covered in depth. 11 brand
+  searches in all (`devaid_brand_search_urls`, `scripts/devaid_urls.py`).
+- DevelopmentAid is still manual-only (not in the nightly scrape): run it with
+  the virtual-desktop steps.
+
+---
+
 ## 2026-11-22 — Brands get the leads of their matching CMS vertical
 
 Why CMS showed ~3,080 live leads and each brand 10–125: a lead counts for CMS

@@ -368,6 +368,22 @@ MANIFESTS: dict[str, SourceContract] = {
             "RFQ, ITB, EOI and consultancy rows are classified by source evidence."
         ),
     ),
+    "ungm": _c(
+        key="ungm", display_name="UNGM (UN Global Marketplace)",
+        listing_url="https://www.ungm.org/Public/Notice",
+        expected_types=(RecordType.RFP, RecordType.RFQ, RecordType.ITB,
+                        RecordType.EOI, RecordType.CONSULTANCY,
+                        RecordType.CALL_FOR_PROPOSALS, RecordType.TENDER),
+        excluded_types=(RecordType.CONTRACT_AWARD, RecordType.PROJECT, RecordType.JOB),
+        deadline_format="dayfirst",
+        curated=True,
+        scope_status=ScopeStatus.CONFIRMED,
+        owner_note=(
+            "Open procurement notices of the UN agencies on the public UNGM "
+            "list (added 2026-11-23). No login: notices are public; documents "
+            "are not downloaded, only the notice link is stored."
+        ),
+    ),
     "devex": _c(
         key="devex", display_name="Devex",
         expected_types=(RecordType.GRANT, RecordType.TENDER, RecordType.RFP),

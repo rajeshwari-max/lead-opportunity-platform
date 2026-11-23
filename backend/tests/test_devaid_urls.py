@@ -32,7 +32,7 @@ def test_audit_passes_for_the_current_runtime():
     passed, rows = audit()
     assert passed
     assert {row["section"] for row in rows} == {
-        "grants", "tenders", *(f"brand-{i}" for i in range(1, 9))}
+        "grants", "tenders", *(f"brand-{i}" for i in range(1, 13))}
 
 
 
