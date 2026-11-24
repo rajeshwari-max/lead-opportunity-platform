@@ -10,7 +10,7 @@ const titles: Record<Tool, string> = {
 };
 const descriptions: Record<Tool, string> = {
   "my-leads": "Saved opportunities, follow-ups and application progress.",
-  directories: "Review keywords, websites and organisations.",
+  directories: "Review keywords and source websites.",
   "add-lead": "Save an opportunity you found and plan your next action.",
 };
 

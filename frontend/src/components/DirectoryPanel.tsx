@@ -10,8 +10,11 @@ export async function leadRequest(path: string, method = "GET", body?: unknown) 
   return data;
 }
 
-type Kind = "keyword" | "website" | "organisation";
-export type DirectoryEntry = { id: number; kind: Kind; name: string; scope: string; url: string;
+// Directories show Keywords and Websites. Organisation entries (still stored,
+// still offered as resource organisations in the Add lead form) are no longer
+// managed here: the Organisations tab was removed on request (2026-11-24).
+type Kind = "keyword" | "website";
+export type DirectoryEntry = { id: number; kind: Kind | "organisation"; name: string; scope: string; url: string;
   institution: string; location: string; role: string; status: string; notes: string;
   review_date: string | null; review_due?: boolean; reviewed_at?: string | null;
   performance?: { runs: number; found: number; saved: number; last_attempt: string | null } };
@@ -55,7 +58,7 @@ export function DirectoryPanel({ isAdmin, readOnly, initiallyOpen = false }: { i
     setEdit({ name, scope, url, institution, location, role, status, notes, review_date }); setNote(""); setEvents([]);
     setEvents(await leadRequest(`/directories/${kind}/${row.id}/events`));
   }
-  const filtered = rows.filter(r => `${r.name} ${r.scope} ${r.institution} ${r.location}`.toLowerCase().includes(query.toLowerCase()));
+  const filtered = rows.filter(r => `${r.name} ${r.scope} ${r.url}`.toLowerCase().includes(query.toLowerCase()));
   const current = rows.find(row => row.id === id);
   const nameChanged = !current || normalName(current.name) !== normalName(edit.name);
   const urlChanged = !current || normalUrl(current.url) !== normalUrl(edit.url);
@@ -63,21 +66,19 @@ export function DirectoryPanel({ isAdmin, readOnly, initiallyOpen = false }: { i
     (nameChanged && normalName(row.name) === normalName(edit.name)) ||
     (kind === "website" && urlChanged && !!normalUrl(edit.url) && normalUrl(row.url) === normalUrl(edit.url))
   ));
-  const singular = kind === "keyword" ? "keyword" : kind === "website" ? "source website" : "organisation";
+  const singular = kind === "keyword" ? "keyword" : "source website";
   return <section className="dl-panel" id="directories">
-    <button className="dl-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>Directories <span>Keywords, websites and organisations</span></button>
+    <button className="dl-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>Directories <span>Keywords and source websites</span></button>
     {open && <div className="p-4 space-y-4">
-      <div className="flex flex-wrap gap-3">{(["keyword", "website", "organisation"] as Kind[]).map(k => <button type="button" className="ud-control" aria-pressed={kind === k} disabled={busy} key={k} onClick={() => switchKind(k)}>{k === "keyword" ? "Keywords" : k === "website" ? "Websites" : "Organisations"}</button>)}</div>
+      <div className="flex flex-wrap gap-3">{(["keyword", "website"] as Kind[]).map(k => <button type="button" className="ud-control" aria-pressed={kind === k} disabled={busy} key={k} onClick={() => switchKind(k)}>{k === "keyword" ? "Keywords" : "Websites"}</button>)}</div>
       {kind === "keyword" && <p>Active terms feed the keyword classifier. Core classification rules also apply. Reviewed labels stay protected; changes do not retrain the ML model.</p>}
       {kind === "website" && <p>Track source performance and follow-ups. Paused or dropped websites are excluded from new scrape runs. Candidate websites need a scraper before they can run.</p>}
-      {kind === "organisation" && <p>Keep preferred organisations and resource organisations with institution and location. This directory is separate from the company profile’s excluded organisations.</p>}
-      <p>{rows.length} saved {kind === "website" ? "websites" : kind === "keyword" ? "keywords" : "organisations"}{rows.filter(r => r.review_due).length ? ` · ${rows.filter(r => r.review_due).length} reviews due` : ""}</p>
+      <p>{rows.length} saved {kind === "website" ? "websites" : "keywords"}{rows.filter(r => r.review_due).length ? ` · ${rows.filter(r => r.review_due).length} reviews due` : ""}</p>
       {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
       <label className="block">Search directory<input className="ud-input" value={query} onChange={e => setQuery(e.target.value)} /></label>
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="max-h-[480px] overflow-y-auto space-y-2">{!busy && !filtered.length && <p>No matching entries.</p>}{filtered.map(row => <button type="button" disabled={busy} className="dl-lead w-full text-left" key={row.id} onClick={() => void run(() => selectEntry(row))}><strong>{row.name}</strong><span>{row.status} · {row.scope || row.role || "Candidate"}{row.review_due ? " · Review due" : ""}</span>
-          {kind === "website" && <small>{row.performance?.runs || 0} runs · {row.performance?.found || 0} found · {row.performance?.saved || 0} saved · Last attempt: {row.performance?.last_attempt?.slice(0, 10) || "None recorded"}</small>}
-          {kind === "organisation" && <small>{row.institution} · {row.location}</small>}</button>)}</div>
+          {kind === "website" && <small>{row.performance?.runs || 0} runs · {row.performance?.found || 0} found · {row.performance?.saved || 0} saved · Last attempt: {row.performance?.last_attempt?.slice(0, 10) || "None recorded"}</small>}</button>)}</div>
         <div>
           {writable && <button type="button" className="ud-primary-button" disabled={busy} onClick={() => { setId(null); setEdit(blank()); setEvents([]); setNote(""); setError(""); setNotice(""); }}>+ Add {singular}</button>}
           {(writable || id !== null) && <form className="space-y-3 dl-entry-form" onSubmit={e => { e.preventDefault(); if (duplicate) return; void run(async () => {
@@ -85,16 +86,14 @@ export function DirectoryPanel({ isAdmin, readOnly, initiallyOpen = false }: { i
             setId(saved.id); await load(); setEvents(await leadRequest(`/directories/${kind}/${saved.id}/events`)); setNotice(`${singular[0].toUpperCase() + singular.slice(1)} saved successfully`);
           }); }}><fieldset disabled={busy || !writable} className="space-y-3">
             <h3>{id === null ? `Add a ${singular}` : `Edit ${singular}`}</h3>
-            <p className="ud-sub">{kind === "keyword" ? "Enter the search term and choose where it belongs." : kind === "website" ? "Enter the source name and its website address." : "Enter the organisation name and how your team uses it."}</p>
-            <label className="block">{kind === "keyword" ? "Keyword" : kind === "website" ? "Source name" : "Organisation name"}<input className="ud-input" required maxLength={256} value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} placeholder={kind === "keyword" ? "e.g. climate resilience" : kind === "website" ? "e.g. Example Foundation grants" : "e.g. Example Foundation"} /></label>
+            <p className="ud-sub">{kind === "keyword" ? "Enter the search term and choose where it belongs." : "Enter the source name and its website address."}</p>
+            <label className="block">{kind === "keyword" ? "Keyword" : "Source name"}<input className="ud-input" required maxLength={256} value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} placeholder={kind === "keyword" ? "e.g. climate resilience" : "e.g. Example Foundation grants"} /></label>
             {kind === "keyword" && <label className="block">Vertical<select className="ud-input" required value={edit.scope} onChange={e => setEdit({ ...edit, scope: e.target.value })}><option value="">Choose a vertical</option>{VERTICALS.map(v => <option key={v}>{v}</option>)}</select></label>}
             {kind === "website" && <label className="block">Website URL<input className="ud-input" required type="url" maxLength={2048} value={edit.url} onChange={e => setEdit({ ...edit, url: e.target.value })} placeholder="https://example.org/opportunities" /></label>}
-            {kind === "organisation" && <label className="block">How will this organisation be used?<select className="ud-input" required value={edit.role} onChange={e => setEdit({ ...edit, role: e.target.value })}><option value="">Choose one</option><option value="whitelist">Preferred organisation</option><option value="resource">Resource / delivery partner</option></select></label>}
             {duplicate && <div role="alert" className="dl-duplicate"><strong>Already added:</strong> {duplicate.name}{duplicate.scope ? ` · ${duplicate.scope}` : duplicate.role ? ` · ${duplicate.role}` : ""}. <button type="button" onClick={() => void run(() => selectEntry(duplicate))}>Open existing entry</button></div>}
             <details className="dl-advanced">
               <summary>Optional details</summary>
               {kind === "website" && <label className="block">Installed scraper key<input className="ud-input" value={edit.scope} onChange={e => setEdit({ ...edit, scope: e.target.value })} placeholder="Leave blank for a new candidate source" /><small>Only use this when a technical scraper has already been installed.</small></label>}
-              {kind === "organisation" && <><label className="block">Institution<input className="ud-input" maxLength={256} value={edit.institution} onChange={e => setEdit({ ...edit, institution: e.target.value })} /></label><label className="block">Location<input className="ud-input" maxLength={256} value={edit.location} onChange={e => setEdit({ ...edit, location: e.target.value })} /></label></>}
               <label className="block">Status<select className="ud-input" value={edit.status} onChange={e => setEdit({ ...edit, status: e.target.value })}>{["active", "review", "paused", "dropped"].map(s => <option key={s}>{s}</option>)}</select></label>
               <label className="block">Next review date<input className="ud-input" type="date" value={edit.review_date || ""} onChange={e => setEdit({ ...edit, review_date: e.target.value || null })} /></label>
               <label className="block">Notes<textarea className="ud-input" required={edit.status === "dropped"} maxLength={10000} value={edit.notes} onChange={e => setEdit({ ...edit, notes: e.target.value })} /></label>

@@ -117,7 +117,7 @@ export function OpportunityIntelligenceSection({ opportunity, readOnly = false }
     <div className="ud-intelligence-heading"><h3><Sparkles size={14} />Platform intelligence</h3>
       {data && <span className={`ud-priority ud-priority-${data.priority.toLowerCase()}`}>{data.priority} priority</span>}
     </div>
-    {loading && <p className="ud-sub"><Loader2 className="ud-spin" size={14} /> Calculating fit from company history…</p>}
+    {loading && <p className="ud-sub"><Loader2 className="ud-spin" size={14} /> Calculating Platform intelligence…</p>}
     {error && <p role="alert" className="ud-intelligence-error">{error}</p>}
     {data && <>
       <div className="ud-intelligence-metrics">

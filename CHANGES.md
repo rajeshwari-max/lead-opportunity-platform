@@ -5,6 +5,24 @@ what was changed, **why**, and how to verify it.
 
 ---
 
+## 2026-11-24 — Directories: Organisations tab removed; last "Company" wording renamed
+
+- Directories now shows two tabs, Keywords and Websites. The Organisations tab
+  is removed from the screen (`DirectoryPanel.tsx`; header text in
+  `LeadTools.tsx`). Nothing is deleted: organisation entries stay in the
+  database, the API is unchanged, and resource organisations already saved
+  are still offered in the Add lead form. New ones can no longer be added
+  from the dashboard.
+- Remaining "Company" wording for the intelligence feature renamed to
+  Platform intelligence: "Company match" in My workspace recommendations,
+  the "Calculating…" line in the brief, the profile-saved message and the
+  pointer to the profile. Section headings already said Platform
+  intelligence. "Company fit" stays: it is the name of one factor.
+- Why: requested for the platform demo.
+- Verify: `npm run build`; open Directories (two tabs); open a lead's brief.
+
+---
+
 ## 2026-11-23 — Weekly usage report: approved by the admin before it is sent
 
 - The report is now an Excel sheet (attached to both emails): one row per

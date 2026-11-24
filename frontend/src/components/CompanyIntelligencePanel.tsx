@@ -71,7 +71,7 @@ export function CompanyIntelligencePanel({ readOnly = false }: { readOnly?: bool
       const { id, version, updated_by, updated_at, ...body } = profile;
       void id; void version; void updated_by; void updated_at;
       setProfile(await api.updateIntelligenceProfile(body));
-      setMessage("Company profile saved. Recalculate to apply it to current opportunities.");
+      setMessage("Platform intelligence profile saved. Recalculate to apply it to current opportunities.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Profile could not be saved");
     } finally {
